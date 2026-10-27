@@ -6,7 +6,8 @@
 >   engine runs Bloodmoon's script functions, the werewolf's stats included.
 > - **Online play:** the title's **Online** button signs in to an [openmw-web](https://github.com/FractumSeraph/openmw-web)
 >   multiplayer server (morrowind.fractumseraph.net by default), to play beside people in the browser. You see each
->   other move, dress and chat, and can join friends' worlds.
+>   other move, dress and chat, and can join friends' worlds; the server's world is shared too: its people and
+>   creatures, fights, what is taken, opened and unlocked, chests, quests and the time of day.
 >
 > Everything also builds without MSYS2 in a Linux image: `sh tools/build/docker/run.sh python3 tools/build/make.py`.
 

@@ -61,10 +61,19 @@ one. The server keeps the online character.
 
 ### What is shared, and what is not yet
 
-| Shared now | Not yet |
+| What | How |
 |---|---|
-| Moves (15 a second), cell changes, looks, equipment, health / magicka / fatigue, attributes, skills, level, pack, spells, chat, friends, invites, party worlds | The world's people and creatures: the 3DS runs its own, and the server's simulation runs the shared ones |
-| Character creation done (ChargenComplete), the stored character put back on | Fights between players, hits on the server's creatures, things dropped or taken in the world, quest progress made by others |
+| The players | Moves (15 a second), cell changes, looks, equipment, health / magicka / fatigue, attributes, skills, level, pack, spells, chat, friends, invites, party worlds. Character creation done (ChargenComplete), the stored character put back on |
+| The world's people and creatures | On a server with a sim peer (openmw-web's platform), the peer simulates them and streams them; the 3DS draws them where it says: standing, walking, running, weapon out, their blows, their health, deaths and revivals. They have no mind of their own on the 3DS. In a cell nobody holds (a server without a peer), the 3DS runs them itself, as offline |
+| Fights | The player's swings go to the server's copy of the player (the input tier's use bit), so blows land there, armor and all, and the server's copy takes the world's blows: its health, magicka and fatigue come back (SelfStats). Crimes the server sees come back as bounty |
+| Objects | Items taken, doors opened, locks, objects scripts switch on or off, the dead: each cell's state from the server on arrival, and everyone's changes as they happen |
+| Containers | Chests, corpses and plants hold the same for everyone: the first to open one fixes what is in it, then every take or put is the server's |
+| The story | Journal stages, dialogue topics, globals, faction ranks and reputation, the bounty (as the server's sharing settings say) |
+| The clock | The server's time and date; a rest or a wait asks the server to move everyone's clock on |
+
+**Not yet:** spells cast at the world's people (they do nothing to them yet: CombatSpellHit), things dropped into
+the world (ObjectSpawnRequest) and other players' drops, merchants' purses, a conversation's lock on an NPC
+(DialogueLock), followers and escorts, the weather, and the werewolf's first-person claws.
 
 Each player sees the others walk and run where they are, dressed as they are.
 
@@ -78,7 +87,7 @@ The protocol is openmw-web's `server/PROTOCOL.md` (omw-mp.2, proto 3). The clien
 | `websocket.cpp` | The WebSocket and HTTP/1.1 clients |
 | `lser.cpp` | OpenMW's Lua serialization, which every event body is |
 | `online.cpp` | Signing in, the session, the binary frames, the events |
-| `mpgame.cpp` | The game side: the record put on, the state sent, the other players drawn, the Online screen |
+| `mpgame.cpp` | The game side: the record put on, the state sent, the other players and the world's people drawn, objects, containers, the story and the clock, the Online screen |
 
 A platform server (its gateway, an `https://` address) is reached the way openmw-web's launcher reaches it:
 
@@ -90,7 +99,10 @@ A platform server (its gateway, an `https://` address) is reached the way openmw
 
 A single world server (a `ws://` or `wss://` address) takes the password in `SessionLoginRequest` instead.
 
-The 3DS says it does not simulate actors, so the server's simulation keeps the NPCs. Its content list is
+The 3DS says it does not simulate actors, so the server's simulation keeps the NPCs. The world's objects and people are
+addressed by their reference numbers (OpenMW's RefNum: the content file and the index), which the converter keeps in
+each cell's file (`"rn"`). Data converted before that gets them with `python tools/convert/refnums.py` (the same
+`MW3DS_OUT`, `MW3DS_TRIBUNAL` and `MW3DS_BLOODMOON` as its conversion), in a minute, without converting again. Its content list is
 `builtin.omwscripts`, the data's masters (`morrowind.esm`, `tribunal.esm`, `bloodmoon.esm`) and `mp.omwscripts`, as a
 browser's is. A server that runs other files says which; the client retries with that list only when every file in it
 is one this data has.
@@ -131,6 +143,10 @@ gateway runs those worlds with `--server-entry dist/testhost.mjs`.
 - `say`: a line said once in the world.
 - `join`: a friend's username, whose request is accepted and whose world is joined.
 - `probe`: a public address fetched first, to check the console's TLS without signing in anywhere.
+
+A server with no sim peer runs every cell's people on the clients. To try the world's stream without one, the local
+test server's `mp-simpeer.ts` (in FractumSeraph's test copy of the server) logs in as the peer with the server's
+`[server] password` and streams a few of Seyda Neen's people round the first player it sees.
 
 Use only a local test server's test accounts here. The PC test build (`tools/test/native`) talks `ws://` and `http://`;
 `MW3DS_ONLINE_REALTIME=1` holds it to real time so a scripted run meets other players.
