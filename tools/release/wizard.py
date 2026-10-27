@@ -331,6 +331,15 @@ class Wizard:
         self.tribunal_note.grid(row=row, column=1, columnspan=2, sticky="w", padx=28)
         row += 1
 
+        # Bloodmoon (FractumSeraph/mw3ds): the add-on after Tribunal, when Bloodmoon.esm and Bloodmoon.bsa are in Data
+        # Files (build_cia.py --bloodmoon): Solstheim, and the load order openmw-web's multiplayer servers ask for
+        self.bloodmoon = tk.BooleanVar(value=self.settings.get("bloodmoon", False))
+        self.bloodmoon_check = ttk.Checkbutton(f, text="Add Bloodmoon (Solstheim; needed to play online with "
+                                               "openmw-web servers that run it)", variable=self.bloodmoon,
+                                               command=lambda: self.bloodmoon.get() and self.tribunal.set(True))
+        self.bloodmoon_check.grid(row=row, column=1, columnspan=2, sticky="w", **pad)
+        row += 1
+
         self.pc_saves = tk.BooleanVar(value=self.settings.get("pc_saves", True))
         self.saves_check = ttk.Checkbutton(f, text="Bring my PC saves across (the .ess files in Morrowind's Saves "
                                                    "folder)", variable=self.pc_saves)
@@ -407,7 +416,7 @@ class Wizard:
         s = {"morrowind": self.morrowind.get(), "console": self.console.get(), "language": self.language.get(),
              "plugins": self.chosen_plugins(), "mods": self.mods.get(), "output_kind": self.output_kind.get(),
              "out_dir": self.out_dir.get(), "work": self.work.get(), "pc_saves": self.pc_saves.get(),
-             "tribunal": self.tribunal.get()}
+             "tribunal": self.tribunal.get(), "bloodmoon": self.bloodmoon.get()}
         try:
             SETTINGS.write_text(json.dumps(s, indent=2), encoding="utf-8")
         except OSError:
@@ -475,6 +484,10 @@ class Wizard:
         if not have:
             self.tribunal.set(False)
         self.tribunal_check.config(state="normal" if have else "disabled")
+        bm = have and (data / "Bloodmoon.esm").is_file() and (data / "Bloodmoon.bsa").is_file()
+        if not bm:
+            self.bloodmoon.set(False)
+        self.bloodmoon_check.config(state="normal" if bm else "disabled")
         self.tribunal_note.config(text="Saves made with it need a Tribunal build to load; a game without it plays on "
                                        "with it added." if have else "Not found: Tribunal.esm and Tribunal.bsa go in "
                                        "Data Files (the Game of the Year edition has them).")
@@ -538,8 +551,8 @@ class Wizard:
         self.log.config(state="disabled")
         job = dict(morrowind=folder, work=work, out=out, old=self.console.get() == "old",
                    encoding=dict(LANGUAGES).get(self.language.get(), "win1252"), plugins=self.chosen_plugins(),
-                   mods=self.mods.get(), sd=self.output_kind.get() == "sd", tribunal=self.tribunal.get(),
-                   saves=pc_save_files(folder) if self.pc_saves.get() else [])
+                   mods=self.mods.get(), sd=self.output_kind.get() == "sd", tribunal=self.tribunal.get() or self.bloodmoon.get(),
+                   bloodmoon=self.bloodmoon.get(), saves=pc_save_files(folder) if self.pc_saves.get() else [])
         threading.Thread(target=self.run, args=(job,), daemon=True).start()
 
     def run(self, job):
@@ -586,7 +599,7 @@ class Wizard:
                "--prebuilt"]
         cmd += ["--mods"] if job["mods"] else []
         cmd += ["--old3ds"] if job["old"] else []
-        cmd += ["--tribunal"] if job.get("tribunal") else []
+        cmd += ["--bloodmoon"] if job.get("bloodmoon") else ["--tribunal"] if job.get("tribunal") else []
         cmd += ["--no-data"] if job["sd"] else []
         cmd += ["--small"] if job.get("small") else []        # (only the Balmora area: for trying the converter out)
         say(f"language: {job['encoding']}, plugins: {', '.join(job['plugins']) or 'none'}")
@@ -612,7 +625,7 @@ class Wizard:
         # Hand over the results
         out = job["out"]
         out.mkdir(parents=True, exist_ok=True)
-        trib = "-tribunal" if job.get("tribunal") else ""
+        trib = "-bloodmoon" if job.get("bloodmoon") else "-tribunal" if job.get("tribunal") else ""
         cia = work / "build" / (("mw3ds-o3ds" if job["old"] else "mw3ds") + trib + ".cia")
         # (moved, not copied: a second gigabyte for nothing; the next run packs a new one)
         shutil.move(cia, out / "mw3ds.cia")
@@ -669,7 +682,7 @@ class Wizard:
         one PC save of the player's own, the template for what a 3DS save doesn't hold."""
         folder = self.morrowind.get().strip()
         work = APP if (APP / ".git").exists() else Path(self.work.get().strip())
-        data = work / "out" / (("o3ds" if self.console.get() == "old" else "data") + ("-tribunal" if self.tribunal.get() else ""))
+        data = work / "out" / (("o3ds" if self.console.get() == "old" else "data") + ("-bloodmoon" if self.bloodmoon.get() else "-tribunal" if self.tribunal.get() else ""))
         if not (data / "game.json").is_file():
             messagebox.showerror(TITLE, "Convert the game first (Start): the 3DS saves are read against the "
                                         "converted game, the same one your console runs.")
