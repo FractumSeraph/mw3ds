@@ -76,6 +76,8 @@ struct OnlineGame
 	float contAt = 0;
 	std::map<std::string, int> contSaid;
 	std::map<uint64_t, std::map<std::string, int>> contPending;
+	struct ContOp { uint64_t key; std::string id; int dn; int ref; };
+	std::map<int, ContOp> contOps;       // by opId, until the server answers
 	bool clockAdopted = false;
 	float clockHour = -1;                // gameHour after the last frame (a jump past it is a rest or a wait)
 };
@@ -1385,6 +1387,41 @@ void putContents(Ref& r, const LValue* items)
 }
 }
 
+// What the player took out of an open container or put in since we last looked: one operation each on the server's
+// copy, and kept as ours until the server echoes it
+void Session::onlineContainerFlush(int ri)
+{
+	if (ri < 0 || ri >= (int)w.refs.size())
+		return;
+	const Ref& r = w.refs[ri];
+	if (r.rnFile < 0 || r.rnFile >= (int)og->contentFiles.size() || og->contentFiles[r.rnFile] < 0)
+		return;
+	std::map<std::string, int> have = contentsOf(r);
+	std::set<std::string> ids;
+	for (auto& c : have)
+		ids.insert(c.first);
+	for (auto& c : og->contSaid)
+		ids.insert(c.first);
+	uint64_t key = netRefKey(og->contentFiles[r.rnFile], r.rnIndex);
+	for (auto& id : ids)
+	{
+		int dn = (have.count(id) ? have[id] : 0) - (og->contSaid.count(id) ? og->contSaid[id] : 0);
+		if (!dn)
+			continue;
+		LValue b = LValue::newTable();
+		b.set("ref", LValue::refNum(r.rnIndex, og->contentFiles[r.rnFile]));
+		b.set("cellKey", og->cellKeys.size() > (size_t)r.cell ? og->cellKeys[r.cell] : "");
+		b.set("opId", (double)++og->opId);
+		b.set("op", dn < 0 ? "take" : "put");
+		b.set("itemId", id);
+		b.set("n", (double)abs(dn));
+		g_online->sendEvent("ContainerOpRequest", b);
+		og->contPending[key][id] += dn;
+		og->contOps[og->opId] = { key, id, dn, ri };
+	}
+	og->contSaid = have;
+}
+
 void Session::onlineContainers(float now)
 {
 	Online& on = *g_online;
@@ -1396,19 +1433,15 @@ void Session::onlineContainers(float now)
 			|| (r.actor >= 0 && !r.dead))
 			cr = -1;                  // (a spawned one, or someone's pockets: ours alone)
 	}
-	auto body = [&](const Ref& r) {
-		LValue b = LValue::newTable();
-		b.set("ref", LValue::refNum(r.rnIndex, og->contentFiles[r.rnFile]));
-		b.set("cellKey", og->cellKeys.size() > (size_t)r.cell ? og->cellKeys[r.cell] : "");
-		return b;
-	};
 	if (cr != og->contRef)
 	{
+		onlineContainerFlush(og->contRef);     // (what was taken just as it closed)
 		og->contRef = cr;
 		if (cr < 0)
 			return;
 		const Ref& r = w.refs[cr];
 		og->contSaid = contentsOf(r);
+		og->contPending.erase(netRefKey(og->contentFiles[r.rnFile], r.rnIndex));
 		LValue items = LValue::newTable();
 		for (auto& c : og->contSaid)
 		{
@@ -1417,7 +1450,9 @@ void Session::onlineContainers(float now)
 			e.set("n", (double)c.second);
 			items.push(e);
 		}
-		LValue b = body(r);
+		LValue b = LValue::newTable();
+		b.set("ref", LValue::refNum(r.rnIndex, og->contentFiles[r.rnFile]));
+		b.set("cellKey", og->cellKeys.size() > (size_t)r.cell ? og->cellKeys[r.cell] : "");
 		b.set("contents", items);
 		on.sendEvent("ContainerOpen", b);
 		og->contAt = now + 0.25f;
@@ -1426,28 +1461,7 @@ void Session::onlineContainers(float now)
 	if (cr < 0 || now < og->contAt)
 		return;
 	og->contAt = now + 0.25f;
-	// what the player took out or put in since: one operation each on the server's copy
-	const Ref& r = w.refs[cr];
-	std::map<std::string, int> have = contentsOf(r);
-	std::set<std::string> ids;
-	for (auto& c : have)
-		ids.insert(c.first);
-	for (auto& c : og->contSaid)
-		ids.insert(c.first);
-	for (auto& id : ids)
-	{
-		int dn = (have.count(id) ? have[id] : 0) - (og->contSaid.count(id) ? og->contSaid[id] : 0);
-		if (!dn)
-			continue;
-		LValue b = body(r);
-		b.set("opId", (double)++og->opId);
-		b.set("op", dn < 0 ? "take" : "put");
-		b.set("itemId", id);
-		b.set("n", (double)abs(dn));
-		on.sendEvent("ContainerOpRequest", b);
-		og->contPending[netRefKey(og->contentFiles[r.rnFile], r.rnIndex)][id] += dn;
-	}
-	og->contSaid = have;
+	onlineContainerFlush(cr);
 }
 
 bool Session::onlineContainerEvent(const std::string& name, const LValue& b)
@@ -1456,8 +1470,32 @@ bool Session::onlineContainerEvent(const std::string& name, const LValue& b)
 		return false;
 	if (name == "ContainerOpResult")
 	{
-		if (!b.boolAt("ok", true))
-			logf("online: the world refused a container operation (%s)", b.stringAt("reason").c_str());
+		auto op = og->contOps.find((int)b.numberAt("opId", -1));
+		if (op == og->contOps.end())
+			return true;
+		OnlineGame::ContOp o = op->second;
+		og->contOps.erase(op);
+		if (b.boolAt("ok", true))
+			return true;
+		// refused (someone took it first): undone here. What was taken leaves the pack, what was put comes back, and
+		// the container is read again from the server
+		og->contPending[o.key][o.id] -= o.dn;
+		if (o.dn < 0)
+			w.removeItem(o.id, -o.dn);
+		else
+			w.addItem(o.id, o.dn);
+		logf("online: the world refused %s %d %s (%s)", o.dn < 0 ? "taking" : "putting", abs(o.dn), o.id.c_str(),
+			b.stringAt("reason").c_str());
+		if (o.ref >= 0 && o.ref < (int)w.refs.size())
+		{
+			const Ref& r = w.refs[o.ref];
+			LValue q = LValue::newTable();
+			q.set("ref", LValue::refNum(r.rnIndex, og->contentFiles[r.rnFile]));
+			q.set("cellKey", og->cellKeys.size() > (size_t)r.cell ? og->cellKeys[r.cell] : "");
+			g_online->sendEvent("ContainerOpen", q);
+			if (o.ref == og->contRef)
+				og->contSaid = contentsOf(r);     // (nothing more to tell: the answer puts the server's copy in)
+		}
 		return true;
 	}
 	const LValue* ref = b.get("ref");
@@ -1469,8 +1507,28 @@ bool Session::onlineContainerEvent(const std::string& name, const LValue& b)
 	Ref& r = w.refs[ri];
 	if (name == "ContainerState")
 	{
+		// the server's copy, with our operations it hasn't answered yet on top (taken before its answer came)
+		if (ri == og->contRef)
+			onlineContainerFlush(ri);
 		putContents(r, b.get("items"));
-		logf("online: %s holds what the world says (%d stacks)", r.id.c_str(), (int)r.contents.size());
+		auto mine = og->contPending.find(netRefKey(ref->refFile, ref->refIndex));
+		if (mine != og->contPending.end())
+		{
+			std::map<std::string, int> m = contentsOf(r);
+			for (auto& p : mine->second)
+				m[p.first] = std::max(0, m[p.first] + p.second);
+			LValue items = LValue::newTable();
+			for (auto& c : m)
+			{
+				LValue e = LValue::newTable();
+				e.set("id", c.first);
+				e.set("n", (double)c.second);
+				items.push(e);
+			}
+			putContents(r, &items);
+		}
+		logf("online: %s holds what the world says (%d stacks): %s", r.id.c_str(), (int)r.contents.size(),
+			lserDescribe(b, 200).c_str());
 	}
 	else if (const LValue* d = b.get("delta"))
 	{
