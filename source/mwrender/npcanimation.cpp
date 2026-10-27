@@ -142,6 +142,9 @@ void PlayerBody::rebuildLook(World& w, const BodyLook& look, bool weaponOut)
 		for (auto& e : *list)
 			if (e.first == want)
 				return e.second;
+		// (the werewolf's own head and hair, or nothing: never a person's hair on the beast)
+		if (want.compare(0, 8, "werewolf") == 0)
+			return std::string();
 		return list->front().second;
 	};
 	part[SLOT_HEAD] = chosen(false);
