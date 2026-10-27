@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstring>
 #include <map>
+#include <set>
 #include <cstdlib>
 #include <3ds.h>
 
@@ -17,6 +18,7 @@
 #include "mwmechanics/combathelpers.hpp"
 #include "mwmp/online.hpp"
 #include "mwrender/npcanimation.hpp"
+#include "mwworld/worldhelpers.hpp"
 
 struct OnlineGame
 {
@@ -45,6 +47,18 @@ struct OnlineGame
 	float inputAt = 0;                   // the next PlayerInput
 	float lastInputAt = -1;
 	float selfHp = -1;                   // the health SelfStats last set
+	// Quests and the rest of the shared story (PROTOCOL.md M6), as last told or heard: what goes out is what changed
+	// since (openmw-web quests.lua's diff caches, which are its echo guard too)
+	bool questSeeded = false;
+	float questAt = 0;
+	std::map<std::string, int> journalSaid;
+	std::set<std::string> topicsSaid;
+	std::map<std::string, float> globalsSaid;
+	std::map<std::string, std::string> factionsSaid;
+	int bountySaid = -1;
+	// The clock (M7): adopted from the server, and our rests and waits asked of it
+	bool clockAdopted = false;
+	float clockHour = -1;                // gameHour after the last frame (a jump past it is a rest or a wait)
 };
 
 namespace
@@ -740,10 +754,13 @@ void Session::onlineTick(float dt)
 			w.bounty = std::max(0, w.bounty + add);
 			logf("online: a crime in the world (%s): bounty %+d, now %d", e.body.stringAt("kind").c_str(), add, w.bounty);
 		}
+		else if (onlineStoryEvent(e.name, e.body))
+			;
 		else if (e.name == "WorldKillCount")
 			w.deadCounts[lowerCase(e.body.stringAt("refId"))] = (int)e.body.numberAt("count");
 	}
 	onlinePuppets(now);
+	onlineStory(now);
 	// The other players' bodies: dressed as they are, where they stand (a tenth of a second behind, between the last
 	// two poses), walking or running as fast as they go
 	for (auto it = og->bodies.begin(); it != og->bodies.end();)
@@ -802,6 +819,250 @@ void Session::onlineTick(float dt)
 		float speed = r.last.animVel * w.player.runSpeed * 0.5f;
 		b.update(w, dt, speed, false, r.last.flags & 2, weaponOut, act);
 	}
+}
+
+// ---- the shared story (PROTOCOL.md M6) and the clock (M7)
+
+namespace
+{
+// The globals the clock owns (the server's, WorldTime), the bounty's (CrimeUpdate) and the ones that never stop moving
+bool sharedGlobal(const std::string& g)
+{
+	static const char* kSkip[] = { "gamehour", "day", "month", "year", "dayspassed", "timescale", "pccrimelevel",
+		"random100", "chargenstate" };
+	for (const char* k : kSkip)
+		if (g == k)
+			return false;
+	return true;
+}
+
+std::string factionSaid(const World& w, const std::string& f)
+{
+	auto r = w.pcRank.find(f);
+	auto rep = w.pcFacRep.find(f);
+	char s[64];
+	snprintf(s, sizeof(s), "%d/%d/%d", r != w.pcRank.end() ? r->second : -1, rep != w.pcFacRep.end() ? rep->second : 0,
+		w.pcExpelled.count(f) ? 1 : 0);
+	return s;
+}
+
+// Day of the year (0-based) of a day of the month and a month (0-based)
+int dayOfYear(int day, int month)
+{
+	int d = day - 1;
+	for (int m = 0; m < month && m < 12; m++)
+		d += kMonthDays[m];
+	return d;
+}
+}
+
+void Session::onlineStory(float now)
+{
+	Online& on = *g_online;
+	// what the server already holds (the stored character just put on): only changes from here go out
+	if (!og->questSeeded)
+	{
+		og->questSeeded = true;
+		for (auto& j : w.journalIndex)
+			og->journalSaid[j.first] = j.second;
+		og->topicsSaid.insert(w.knownTopics.begin(), w.knownTopics.end());
+		for (auto& g : w.globals)
+			og->globalsSaid[g.first] = g.second;
+		for (auto& f : w.pcRank)
+			og->factionsSaid[f.first] = factionSaid(w, f.first);
+		og->bountySaid = w.bounty;
+	}
+	if (now >= og->questAt && og->chargenSaid)
+	{
+		og->questAt = now + 1.0f;
+		for (auto& j : w.journalIndex)
+		{
+			auto s = og->journalSaid.find(j.first);
+			if (s != og->journalSaid.end() && s->second == j.second)
+				continue;
+			og->journalSaid[j.first] = j.second;
+			LValue b = LValue::newTable();
+			b.set("questId", j.first);
+			b.set("index", (double)j.second);
+			on.sendEvent("JournalEntry", b);
+		}
+		LValue topics = LValue::newTable();
+		for (auto& t : w.knownTopics)
+			if (topics.arraySize() < 64 && og->topicsSaid.insert(t).second)
+				topics.push(LValue(t));
+		if (topics.arraySize() > 0)
+		{
+			LValue b = LValue::newTable();
+			b.set("topics", topics);
+			on.sendEvent("TopicsLearned", b);
+		}
+		int sent = 0;
+		for (auto& g : w.globals)
+		{
+			if (!sharedGlobal(g.first))
+				continue;
+			auto s = og->globalsSaid.find(g.first);
+			if (s != og->globalsSaid.end() && s->second == g.second)
+				continue;
+			if (sent++ >= 24)
+				break;                    // (the rest next second: the server's 60 a second budget)
+			og->globalsSaid[g.first] = g.second;
+			LValue b = LValue::newTable();
+			b.set("name", g.first);
+			b.set("value", (double)g.second);
+			on.sendEvent("GlobalVarUpdate", b);
+		}
+		for (auto& f : w.pcRank)
+		{
+			std::string s = factionSaid(w, f.first);
+			if (og->factionsSaid[f.first] == s)
+				continue;
+			og->factionsSaid[f.first] = s;
+			LValue b = LValue::newTable();
+			b.set("factionId", f.first);
+			b.set("rank", (double)std::max(-1, std::min(20, f.second)));
+			auto rep = w.pcFacRep.find(f.first);
+			if (rep != w.pcFacRep.end())
+				b.set("reputation", (double)rep->second);
+			b.set("expelled", LValue::boolean(w.pcExpelled.count(f.first) > 0));
+			on.sendEvent("FactionUpdate", b);
+		}
+		if (w.bounty != og->bountySaid)
+		{
+			og->bountySaid = w.bounty;
+			LValue b = LValue::newTable();
+			b.set("bounty", (double)std::max(0, w.bounty));
+			on.sendEvent("CrimeUpdate", b);
+		}
+	}
+	// A rest or a wait here moved the clock on: asked of the server, which moves everyone's (or says no, and the
+	// next WorldTime puts ours back)
+	if (og->clockHour >= 0 && og->clockAdopted && w.gameHour > og->clockHour + 0.5f)
+	{
+		LValue b = LValue::newTable();
+		b.set("advanceHours", (double)fminf(720.0f, w.gameHour - og->clockHour));
+		b.set("reason", w.pcSleeping ? "rest" : "wait");
+		on.sendEvent("WorldTimeRequest", b);
+		logf("online: asked the world for %.1f hours on", w.gameHour - og->clockHour);
+	}
+	og->clockHour = w.gameHour;
+}
+
+// One of the story's events from the server; false when it isn't one
+bool Session::onlineStoryEvent(const std::string& name, const LValue& b)
+{
+	if (name == "JournalSync")
+	{
+		// the shared journal (or ours): each quest at its stage, the dated log in the order earned
+		if (const LValue* log = b.get("journalLog"))
+			for (int i = 1; i <= log->arraySize(); i++)
+			{
+				const LValue* e = log->at(i);
+				w.journalAdd(lowerCase(e->stringAt("q")), (int)e->numberAt("i"));
+			}
+		if (const LValue* q = b.get("quests"))
+			for (auto& kv : q->table)
+				if (kv.first.type == LValue::STRING && kv.second.type == LValue::NUMBER)
+					w.journalAdd(lowerCase(kv.first.str), (int)kv.second.num);
+		for (auto& j : w.journalIndex)
+			og->journalSaid[j.first] = j.second;
+		if (const LValue* t = b.get("topics"))
+			for (int i = 1; i <= t->arraySize(); i++)
+			{
+				std::string id = lowerCase(t->at(i)->str);
+				w.knownTopics.insert(id);
+				og->topicsSaid.insert(id);
+			}
+		logf("online: the journal from the world: %d quests", (int)w.journalIndex.size());
+	}
+	else if (name == "JournalEntry")
+	{
+		std::string q = lowerCase(b.stringAt("questId"));
+		if (w.journalAdd(q, (int)b.numberAt("index")))
+			notify(w.game.gmst("sjournalentry", "Your journal has been updated."));
+		og->journalSaid[q] = w.journalIndex[q];
+	}
+	else if (name == "TopicsLearned")
+	{
+		if (const LValue* t = b.get("topics"))
+			for (int i = 1; i <= t->arraySize(); i++)
+			{
+				std::string id = lowerCase(t->at(i)->str);
+				w.knownTopics.insert(id);
+				og->topicsSaid.insert(id);
+			}
+	}
+	else if (name == "GlobalVarSync" || name == "GlobalVarUpdate")
+	{
+		auto put = [&](const std::string& n, double v) {
+			std::string g = lowerCase(n);
+			if (!sharedGlobal(g))
+				return;
+			w.setGlobal(g, (float)v);
+			og->globalsSaid[g] = w.globals[g];
+		};
+		if (name == "GlobalVarUpdate")
+			put(b.stringAt("name"), b.numberAt("value"));
+		else if (const LValue* g = b.get("globals"))
+			for (auto& kv : g->table)
+				if (kv.first.type == LValue::STRING && kv.second.type == LValue::NUMBER)
+					put(kv.first.str, kv.second.num);
+	}
+	else if (name == "FactionUpdate")
+	{
+		std::string f = lowerCase(b.stringAt("factionId"));
+		if (f.empty())
+			return true;
+		w.pcRank[f] = (int)b.numberAt("rank", -1);
+		if (b.get("reputation"))
+			w.pcFacRep[f] = (int)b.numberAt("reputation");
+		if (b.boolAt("expelled"))
+			w.pcExpelled.insert(f);
+		else
+			w.pcExpelled.erase(f);
+		og->factionsSaid[f] = factionSaid(w, f);
+	}
+	else if (name == "CrimeUpdate")
+	{
+		w.bounty = std::max(0, (int)b.numberAt("bounty", w.bounty));
+		w.globals["pccrimelevel"] = (float)w.bounty;
+		og->bountySaid = w.bounty;
+	}
+	else if (name == "WorldTime")
+	{
+		// The server's clock: taken outright on arrival (the world ran on while we were away), then whenever ours
+		// drifted a quarter of an hour from it. The days move by the calendar globals; gameHour keeps its own day count
+		// (respawns, corpses and corprus count by it), only its hour moves
+		int day = (int)b.numberAt("day", 1), month = (int)b.numberAt("month", 0), year = (int)b.numberAt("year", 427);
+		float hour = (float)b.numberAt("gameHour", 9.0);
+		GameDate d = w.date();
+		int days = (year - d.year) * 365 + dayOfYear(day, month) - dayOfYear(d.day, d.month);
+		float diff = days * 24.0f + hour - d.hour;
+		if (!og->clockAdopted || fabsf(diff) > 0.25f)
+		{
+			if (diff >= 0.0f)
+				w.gameHour += diff;          // (the calendar moves on with it: World::syncTime)
+			else
+			{
+				w.globals["day"] = (float)day;
+				w.globals["month"] = (float)month;
+				w.globals["year"] = (float)year;
+				w.gameHour = floorf(w.gameHour / 24.0f) * 24.0f + hour;
+			}
+			w.syncTime();
+			og->clockHour = w.gameHour;
+			if (!og->clockAdopted)
+				logf("online: the world's clock: day %d of month %d, %d, %.2f h", day, month + 1, year, hour);
+			og->clockAdopted = true;
+		}
+		if (b.get("timeScale"))
+			w.globals["timescale"] = (float)b.numberAt("timeScale");
+	}
+	else if (name == "WorldTimeRefused")
+		notify("The world's time can't move on: " + b.stringAt("reason"));
+	else
+		return false;
+	return true;
 }
 
 // ---- the world's people and creatures the server simulates (PROTOCOL.md M4): whoever holds their cell (the sim peer)

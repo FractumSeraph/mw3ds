@@ -1035,7 +1035,7 @@ void Online::onEvent(const std::string& name, const LValue& b)
 	{
 		// for the game layer (InviteAccepted, StateRefused, FriendList, JoinFriend, WorldMode ...); a few dozen at most
 		events.push_back({ name, b });
-		while (events.size() > 64)
+		while (events.size() > 512)
 			events.pop_front();
 	}
 	(void)jsonString;
