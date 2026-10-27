@@ -42,6 +42,10 @@ from textures import texels_needed, world_per_repeat
 
 # Beast races' own first-person skeleton only animates hand-to-hand; their hands fit this one
 SKELETONS = ["meshes\\base_anim.1st.nif"]
+# Bloodmoon's werewolf in first person (OpenMW's NpcAnimation: wolf/skin.1st.nif in place of the body): its own skeleton,
+# hand-to-hand groups and skinned arms in one file; the second skeleton of skeletons.skl when the data has it
+WEREWOLF_1ST = "meshes\\wolf\\skin.1st.nif"
+WEREWOLF_PIECE = "werewolf_1st"
 ARM_SLOTS = [6, 7, 8, 9, 10, 11, 12, 13, 14]
 ITEM_TAGS = ("WEAP", "ARMO", "CLOT", "MISC", "BOOK", "ALCH", "INGR", "APPA", "LOCK", "PROB", "REPA", "LIGH")
 SLOT_SHIELD, SLOT_WEAPON = 10, 25
@@ -136,6 +140,7 @@ class FirstPerson:
         objects = db["objects"]
         self.bodies = {r.id.lower(): r for r in objects.values() if r.tag == "BODY"}
         self.pose = {}
+        self.skeleton_paths = list(SKELETONS)
 
     def nif(self, path):
         key = path.lower()
@@ -465,6 +470,22 @@ class FirstPerson:
         self.pieces[name] = meshes or None
         return name if meshes else None
 
+    def werewolf(self):
+        """The werewolf's first-person arms (Bloodmoon): every skinned shape of its own file, on its own skeleton. None
+        without Bloodmoon."""
+        nif = self.nif(WEREWOLF_1ST)
+        if nif is None:
+            return None
+        bones = skeleton_pose(nif, text_key_time(nif, "IdleHH: Start"))
+        meshes = [self.mesh_record(s, "", False) for s in extract_shapes(self.arch, nif, skeleton=bones)
+                  if s["skinned"] and "raw" in s]
+        if not meshes:
+            return None
+        self.pieces[WEREWOLF_PIECE] = meshes
+        if WEREWOLF_1ST not in self.skeleton_paths:
+            self.skeleton_paths.append(WEREWOLF_1ST)
+        return WEREWOLF_PIECE
+
     def build(self, objects):
         """game.json "firstperson" for the level's items (objects: game.json objects)."""
         races = {}
@@ -569,7 +590,9 @@ class FirstPerson:
             if path:
                 ptex[str(struct.unpack("<i", r.get("INDX"))[0])] = self.textures.request(path, need, True)
         vfxlen = {p: self.vfx_len[p] for p in set(vfx.values()) if p in self.vfx_len}
+        wolf = self.werewolf()
         return {"races": races, "items": items, "third": self.third_person(objects), "vfx": vfx, "ptex": ptex,
+                **({"werewolf": {"skeleton": self.skeleton_paths.index(WEREWOLF_1ST), "piece": wolf}} if wolf else {}),
                 "vfxlen": vfxlen}
 
     def blood(self):
@@ -601,8 +624,8 @@ class FirstPerson:
     def write(self):
         self.out.mkdir(parents=True, exist_ok=True)
         with open(self.out / "skeletons.skl", "wb") as f:
-            f.write(b"MWS1" + struct.pack("<I", len(SKELETONS)))
-            write_skeleton_list(f, [skeleton_export(self.nif(p), fp_groups(self.nif(p))) for p in SKELETONS])
+            f.write(b"MWS1" + struct.pack("<I", len(self.skeleton_paths)))
+            write_skeleton_list(f, [skeleton_export(self.nif(p), fp_groups(self.nif(p))) for p in self.skeleton_paths])
         written = {"skeletons.skl"}
         for name, meshes in self.pieces.items():
             if not meshes:

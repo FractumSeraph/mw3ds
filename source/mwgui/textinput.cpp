@@ -55,6 +55,8 @@ void Session::setText(bool confirmed, const std::string& text)
 	// The online mode: a line of chat, a friend's name (PROTOCOL.md ChatSend, FriendRequest)
 	else if (kind == TEXT_CHAT && !blank && g_online)
 		g_online->sendChat(text);
+	else if (kind == TEXT_REPORT && !blank && g_online)
+		onlineReport(text);
 	else if (kind == TEXT_FRIEND && !blank && g_online)
 	{
 		LValue b = LValue::newTable();

@@ -1063,6 +1063,16 @@ bool gameLoad(GameData& g, const char* path)
 				cJSON_ArrayForEach(slot, cJSON_GetObjectItem(race, female ? "f" : "m"))
 					g.firstPerson.races[female][race->string][atoi(slot->string)] = slot->valuestring;
 			}
+		if (const cJSON* ww = cJSON_GetObjectItem(fp, "werewolf"))
+		{
+			const cJSON* sk = cJSON_GetObjectItem(ww, "skeleton");
+			const cJSON* pc = cJSON_GetObjectItem(ww, "piece");
+			if (cJSON_IsNumber(sk) && cJSON_IsString(pc))
+			{
+				g.firstPerson.werewolfSkeleton = sk->valueint;
+				g.firstPerson.werewolfPiece = pc->valuestring;
+			}
+		}
 		const cJSON* vf;
 		cJSON_ArrayForEach(vf, cJSON_GetObjectItem(fp, "vfx"))
 			if (cJSON_IsString(vf))

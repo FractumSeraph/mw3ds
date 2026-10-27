@@ -46,7 +46,9 @@ enum VmAction
 struct ViewModel
 {
 	bool ready = false;                       // skeleton loaded
-	ActorSet set;                             // skeletons[0]: the first-person skeleton; actors[0]: the arms
+	ActorSet set;                             // skeletons[0]: the first-person skeleton (a werewolf's after it); actors[0]: the arms
+	// The skeleton the arms are on now: the first-person one, or the werewolf's (Bloodmoon) while the player is one
+	const Skeleton& sk() const { return set.skeletons[set.actors[0].skeleton]; }
 	std::vector<C3D_Tex*> textures;           // indexed by the arm meshes' tex
 	std::unordered_map<std::string, FpPiece*> pieces;
 	std::string builtFor;                     // equipment key the meshes were put together for

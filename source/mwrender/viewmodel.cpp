@@ -72,7 +72,7 @@ FpPiece* ViewModel::piece(World& w, const std::string& name)
 		return nullptr;
 	bool missing = false;
 	u64 t0 = osGetTime();
-	FpPiece* p = fpLoadPiece(w, set.skeletons[0], name, &missing);
+	FpPiece* p = fpLoadPiece(w, sk(), name, &missing);
 	if (p)
 		logf("viewmodel: loaded %s in %d ms", name.c_str(), (int)(osGetTime() - t0));
 	if (p || missing)
@@ -386,6 +386,44 @@ void ViewModel::rebuild(World& w, const std::string& weaponId, const std::string
 {
 	if (!ready)
 		return;
+	const FirstPersonDef& fpd = w.game.firstPerson;
+	// A werewolf (Bloodmoon): the beast's own arms on its own skeleton, hands only (it holds nothing)
+	int skel = w.werewolf && fpd.werewolfSkeleton > 0 && fpd.werewolfSkeleton < (int)set.skeletons.size()
+		? fpd.werewolfSkeleton : 0;
+	Actor& arms = set.actors[0];
+	if (arms.skeleton != skel)
+	{
+		arms.skeleton = skel;
+		arms.pose.assign(sk().bones.size() * 12, 0.0f);
+		arms.group = 0;
+		arms.time = sk().groups.empty() ? 0.0f : sk().groups[0].start;
+		arms.mode = ANIM_LOOP;
+		inputsFor.clear();
+		builtFor.clear();
+	}
+	if (skel)
+	{
+		if (builtFor == fpd.werewolfPiece)
+			return;
+		builtFor = fpd.werewolfPiece;
+		inputsFor.clear();
+		arms.meshes.clear();
+		textures.clear();
+		if (FpPiece* p = piece(w, fpd.werewolfPiece))
+		{
+			fpRetryTextures(w, p);
+			for (auto& m : p->meshes)
+			{
+				ActorMesh copy = m;
+				copy.tex = textures.size();
+				textures.push_back(p->textures[m.tex]);
+				arms.meshes.push_back(copy);
+			}
+		}
+		arms.deformed = false;
+		logf("viewmodel: the werewolf's arms, %d meshes", (int)arms.meshes.size());
+		return;
+	}
 	int female = w.stats.female ? 1 : 0;
 	// What the parts are worked out from: the same as last frame (nearly always), the parts are too. Working them out
 	// looked up every worn item three times a frame
@@ -528,8 +566,8 @@ float ViewModel::groupLength(const char* groupName) const
 {
 	if (!ready)
 		return 0.0f;
-	int g = actorFindGroup(set.skeletons[0], groupName);
-	return g < 0 ? 0.0f : set.skeletons[0].groups[g].stop - set.skeletons[0].groups[g].start;
+	int g = actorFindGroup(sk(), groupName);
+	return g < 0 ? 0.0f : sk().groups[g].stop - sk().groups[g].start;
 }
 
 void ViewModel::play(VmAction act, const char* groupName, bool hold)
@@ -539,12 +577,12 @@ void ViewModel::play(VmAction act, const char* groupName, bool hold)
 		return;
 	Actor& a = set.actors[0];
 	// the same group held at its end (a second cast of the same kind) plays again from its start, not "already playing"
-	bool again = actorFindGroup(set.skeletons[0], groupName) == a.group && finished();
+	bool again = actorFindGroup(sk(), groupName) == a.group && finished();
 	if (actorPlay(set, a, groupName, ANIM_HOLD))
 	{
 		action = act;
 		if (again)
-			a.time = set.skeletons[0].groups[a.group].start;
+			a.time = sk().groups[a.group].start;
 	}
 	else if (act == VM_UNEQUIP)
 		action = VM_NONE;
@@ -562,14 +600,14 @@ void ViewModel::playFollow(const char* groupName, float strength)
 	// Under 0.33 the small one, under 0.66 the medium one, else the large one the group itself runs on into
 	// (data without the "FM" / "FS" groups: always the large one)
 	std::string next = std::string(groupName) + (strength < 0.33f ? "S" : "M");
-	if (strength < 0.66f && actorFindGroup(set.skeletons[0], next.c_str()) >= 0)
+	if (strength < 0.66f && actorFindGroup(sk(), next.c_str()) >= 0)
 		followTo = next;
 }
 
 bool ViewModel::finished() const
 {
 	const Actor& a = set.actors[0];
-	return a.time >= set.skeletons[0].groups[a.group].stop - 1e-4f;
+	return a.time >= sk().groups[a.group].stop - 1e-4f;
 }
 
 // A blow can't be let go before the wind-up's min attack mark (OpenMW plays it out first)
@@ -578,7 +616,7 @@ bool ViewModel::windupReached() const
 	if (!ready || action != VM_WINDUP)
 		return true;
 	const Actor& a = set.actors[0];
-	const AnimGroup& g = set.skeletons[0].groups[a.group];
+	const AnimGroup& g = sk().groups[a.group];
 	return a.time >= fminf(g.loopStart, g.stop - 1e-4f);
 }
 
@@ -588,7 +626,7 @@ bool ViewModel::releaseReached() const
 	if (!ready || action != VM_CAST)
 		return true;
 	const Actor& a = set.actors[0];
-	const AnimGroup& g = set.skeletons[0].groups[a.group];
+	const AnimGroup& g = sk().groups[a.group];
 	return a.time >= fminf(g.loopStart, g.stop - 1e-4f);
 }
 
@@ -597,7 +635,7 @@ void ViewModel::update(float dt, bool moving, bool running)
 	if (!ready)
 		return;
 	Actor& a = set.actors[0];
-	const Skeleton& sk = set.skeletons[0];
+	const Skeleton& sk = this->sk();
 	// held in a pose for a side-by-side screenshot (the test driver's VMPOSE): shown, nothing moves on
 	if (a.frozen)
 	{
@@ -687,7 +725,7 @@ bool ViewModel::boneFromEye(const char* name, float out[3]) const
 	if (!ready || set.actors.empty())
 		return false;
 	const Actor& a = set.actors[0];
-	const Skeleton& sk = set.skeletons[0];
+	const Skeleton& sk = this->sk();
 	int b = boneIndex(sk, name);
 	if (b < 0 || a.pose.size() < sk.bones.size() * 12)
 		return false;
@@ -703,7 +741,7 @@ void ViewModel::draw(const float eye[3], float yaw, float pitch, bool deform)
 	if (!ready || !visible || set.actors[0].meshes.empty())
 		return;
 	Actor& a = set.actors[0];
-	const Skeleton& sk = set.skeletons[0];
+	const Skeleton& sk = this->sk();
 	// The rig turns with the view
 	float cp[3];
 	rigEye(sk, a, cp);

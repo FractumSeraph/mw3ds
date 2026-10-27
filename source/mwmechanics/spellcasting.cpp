@@ -211,7 +211,25 @@ void Session::releaseSpell(const SpellDef& sp, int school)
 {
 	netSpell = &sp;
 	netSpellId = castSource.empty() ? sp.id : castSource;
+	size_t before = w.effects.size();
+	castSerial++;
 	releaseSpellEffects(sp, school);
+	onlineCastReleased(sp, netSpellId);   // (online: shown to the others, and on another player in the crosshair)
+	// (the effects it laid on the player: which of the record's they are, for the online mode)
+	for (size_t k = before; k < w.effects.size(); k++)
+	{
+		ActiveEffect& a = w.effects[k];
+		if (!a.spellId.empty())
+			continue;
+		for (size_t i = 0; i < sp.effects.size(); i++)
+			if (sp.effects[i].effect == a.effect && sp.effects[i].range == 0)
+			{
+				a.spellId = netSpellId;
+				a.index = (int)i;
+				a.cast = castSerial;
+				break;
+			}
+	}
 	netSpell = nullptr;
 }
 

@@ -6,6 +6,8 @@
 #include <cstdio>
 #include <cstring>
 #include <map>
+#include <unordered_set>
+#include <unordered_map>
 #include <set>
 #include <cstdlib>
 #include <3ds.h>
@@ -93,6 +95,7 @@ struct OnlineGame
 		NetObj(int s, const std::string& c) : slot(s), cellKey(c) {}
 	};
 	std::map<uint32_t, NetObj> netObjs;
+	std::map<uint32_t, int> netActors;   // the people the server's world spawned: net id -> their slot here
 	std::map<int, NetObj> pendingDrops;
 	int tempSeq = 0;
 	struct TakeOp { std::string id; int count; };
@@ -105,9 +108,40 @@ struct OnlineGame
 	std::map<std::string, uint16_t> weatherHolder;
 	// The server's people following us (claimed), and the merchant whose purse is open (its gold as last told)
 	float followAt = 0;
-	std::set<int> followers;
+	std::set<int> followers, travelSaid;
 	int purseRef = -1, purseSaid = 0;
 	bool purseOpened = false;
+	// Our own body: death told when, the pack's counts and the Mark as last told, the magic we said is on us (key ->
+	// spell), and what shows on the other players (id -> cast key -> effects)
+	float deathSaidAt = -100, selfAt = 0, markAt = 0, activeAt = 0;
+	std::map<std::string, int> countsSaid;
+	bool countsSeeded = false;
+	std::string markSaid;
+	std::map<std::string, std::string> activeSaid;
+	std::map<uint16_t, std::map<std::string, std::vector<int>>> playerMagic;
+	// Scripts: the objects whose variables we watch (until when) and their values as told; the global scripts running
+	std::map<int, float> memberWatch;
+	std::map<int, std::vector<float>> memberSaid;
+	float memberAt = 0, globalScriptsAt = 0;
+	std::set<std::string> globalScriptsSaid;
+	bool globalScriptsSeeded = false;
+	// Records we made, told to the server (tempId -> our id) or refused by it
+	float recordsAt = 0;
+	std::map<int, std::string> recordPending;
+	std::set<std::string> recordRefused;
+	// The outdoor cells we said we explored; the server's last correction of where we stand, as seen
+	std::set<std::string> exploredSaid;
+	bool exploredSeeded = false;
+	float correctionSeen = 0;
+	std::string reportName;              // the player a report is being written about
+	bool isOwner = false;                // this world is ours (WorldMode isOwner): we may send guests home
+	int presence = 0;                    // who sees us: 0 everyone, 1 friends, 2 nobody (private), 3 appearing offline
+	// A friend's world's journal while we visit it (JournalSync borrowed): our own, set aside until we are home
+	bool journalBorrowed = false;
+	std::unordered_map<std::string, int> ownJournalIndex;
+	std::vector<JournalLine> ownJournal;
+	std::unordered_set<std::string> ownTopics;
+	float dynamicHp = -1, dynamicFt = -1;   // the bars as last told (the local gain, d, is counted from them)
 	bool clockAdopted = false;
 	float clockHour = -1;                // gameHour after the last frame (a jump past it is a rest or a wait)
 };
@@ -179,6 +213,14 @@ int slotOf(const Object* o, int& ringsSeen, bool& gloveLeftUsed)
 	}
 	(void)gloveLeftUsed;
 }
+
+// A reference the server's world spawned (a summons, a leveled creature): its content file on the wire is -2 and its
+// index the server's net id (openmw-web mwmp/luabindings.cpp); a Ref here keeps the same pair in rnFile / rnIndex
+const int kNetActorFile = -2;
+
+// A record's id on the wire and back (our own made ones travel by the server's id: onlineRecords)
+std::string netIdOf(const std::string& local);
+std::string localIdOf(const std::string& net);
 
 std::string cellKeyAt(const World& w, int cell)
 {
@@ -446,7 +488,7 @@ LValue equipmentOf(const World& w)
 				for (auto& kv : slots.table)
 					taken = taken || kv.first.num == (double)slot;
 				if (!taken)
-					slots.table.emplace_back(key, LValue(lowerCase(it.id)));
+					slots.table.emplace_back(key, LValue(netIdOf(it.id)));
 			}
 		}
 	LValue b = LValue::newTable();
@@ -619,14 +661,22 @@ void Session::onlineTick(float dt)
 			return v;
 		};
 		LValue d = LValue::newTable();
-		d.set("hp", bar(w.stats.health, w.stats.healthMax));
+		LValue hpBar = bar(w.stats.health, w.stats.healthMax), ftBar = bar(w.stats.fatigue, w.stats.fatigueMax);
+		// (a gain here since the last claim: the server adds it to the bar it holds, which the world may have lowered)
+		if (og->dynamicHp >= 0 && w.stats.health > og->dynamicHp + 0.5f)
+			hpBar.set("d", (double)floorf(w.stats.health - og->dynamicHp + 0.5f));
+		if (og->dynamicFt >= 0 && w.stats.fatigue > og->dynamicFt + 0.5f)
+			ftBar.set("d", (double)floorf(w.stats.fatigue - og->dynamicFt + 0.5f));
+		d.set("hp", hpBar);
 		d.set("mp", bar(fmaxf(0.0f, w.stats.magicka), w.stats.magickaMax));
-		d.set("ft", bar(w.stats.fatigue, w.stats.fatigueMax));
+		d.set("ft", ftBar);
 		std::string s = describe(d);
 		if (s != og->dynamicSaid)
 		{
 			og->dynamicSaid = s;
 			on.sendEvent("PlayerStatsDynamic", d);
+			og->dynamicHp = w.stats.health;
+			og->dynamicFt = w.stats.fatigue;
 		}
 	}
 	if (now >= og->progressAt && og->chargenSaid)
@@ -665,7 +715,7 @@ void Session::onlineTick(float dt)
 		LValue items = LValue::newTable();
 		std::map<std::string, int> counts;
 		for (auto& it : w.inventory)
-			counts[lowerCase(it.id)] += it.count;
+			counts[netIdOf(it.id)] += it.count;
 		for (auto& c : counts)
 		{
 			LValue e = LValue::newTable();
@@ -687,7 +737,7 @@ void Session::onlineTick(float dt)
 		og->spellsAt = now + 1.0f;
 		std::vector<std::string> have;
 		for (auto& id : w.stats.spells)
-			have.push_back(lowerCase(id));
+			have.push_back(netIdOf(id));
 		std::sort(have.begin(), have.end());
 		if (!og->spellsSeeded)
 		{
@@ -750,7 +800,10 @@ void Session::onlineTick(float dt)
 			}
 		}
 		else if (e.name == "WorldMode")
+		{
 			og->party = e.body.stringAt("mode") == "party";
+			og->isOwner = e.body.boolAt("isOwner");
+		}
 		else if (e.name == "InviteAccepted")
 		{
 			int cell = cellOfKey(w, lowerCase(e.body.stringAt("cellKey")));
@@ -806,7 +859,9 @@ void Session::onlineTick(float dt)
 			logf("online: a crime in the world (%s): bounty %+d, now %d", e.body.stringAt("kind").c_str(), add, w.bounty);
 		}
 		else if (onlineStoryEvent(e.name, e.body) || onlineDropEvent(e.name, e.body) || onlineObjectEvent(e.name, e.body)
-			|| onlineContainerEvent(e.name, e.body) || onlineTalkAndSkyEvent(e.name, e.body))
+			|| onlineContainerEvent(e.name, e.body) || onlineTalkAndSkyEvent(e.name, e.body) || onlineSelfEvent(e.name, e.body)
+			|| onlineScriptEvent(e.name, e.body) || onlineActorEvent(e.name, e.body)
+			|| onlineRecordEvent(e.name, e.body) || onlineCombatEvent(e.name, e.body))
 			;
 		else if (e.name == "WorldKillCount")
 			w.deadCounts[lowerCase(e.body.stringAt("refId"))] = (int)e.body.numberAt("count");
@@ -819,6 +874,10 @@ void Session::onlineTick(float dt)
 	onlineContainers(now);
 	onlineTalkAndSky(now);
 	onlineFollowersAndPurses(now);
+	onlineSelf(now);
+	onlineScripts(now);
+	onlineRecords(now);
+	onlineWorldMisc(now);
 	// The other players' bodies: dressed as they are, where they stand (a tenth of a second behind, between the last
 	// two poses), walking or running as fast as they go
 	for (auto it = og->bodies.begin(); it != og->bodies.end();)
@@ -871,6 +930,14 @@ void Session::onlineTick(float dt)
 		b.placeFeet[1] = r.prev.y + (r.last.y - r.prev.y) * t;
 		b.placeFeet[2] = r.prev.z + (r.last.z - r.prev.z) * t;
 		b.placeYaw = r.prev.yaw + yd * t;
+		{
+			float invis = 0.0f, cham = 0.0f;
+			for (auto& c : og->playerMagic[r.id])
+				for (int fx : c.second)
+					invis += fx == 39 ? 1.0f : 0.0f, cham += fx == 40 ? 50.0f : 0.0f;
+			if (!b.set.actors.empty())
+				b.set.actors[0].alpha = actorSeeThrough(false, invis, cham);
+		}
 		BodyAct act;
 		act.moveY = r.last.animVel > 0.05f ? 1.0f : 0.0f;
 		act.airborne = r.last.flags & 8;
@@ -1011,6 +1078,26 @@ bool Session::onlineStoryEvent(const std::string& name, const LValue& b)
 {
 	if (name == "JournalSync")
 	{
+		bool borrowed = b.boolAt("borrowed");
+		if (borrowed && !og->journalBorrowed)
+		{
+			og->ownJournalIndex = w.journalIndex;
+			og->ownJournal = w.journal;
+			og->ownTopics = w.knownTopics;
+			w.journalIndex.clear();
+			w.journal.clear();
+			og->journalSaid.clear();
+			og->journalBorrowed = true;
+			logf("online: a friend's journal for this visit; ours set aside");
+		}
+		else if (!borrowed && og->journalBorrowed)
+		{
+			w.journalIndex = og->ownJournalIndex;
+			w.journal = og->ownJournal;
+			w.knownTopics = og->ownTopics;
+			og->journalBorrowed = false;
+			logf("online: our own journal back");
+		}
 		// the shared journal (or ours): each quest at its stage, the dated log in the order earned
 		if (const LValue* log = b.get("journalLog"))
 			for (int i = 1; i <= log->arraySize(); i++)
@@ -1141,6 +1228,8 @@ ObjSeen objNow(const Ref& r)
 uint64_t keyOfRefKey(const std::string& k)
 {
 	long long index, file;
+	if (sscanf(k.c_str(), "n:%lld", &index) == 1)
+		return netRefKey(kNetActorFile, (uint32_t)index);
 	if (sscanf(k.c_str(), "c:%lld:%lld", &index, &file) != 2)
 		return 0;
 	return netRefKey((int32_t)file, (uint32_t)index);
@@ -1152,6 +1241,8 @@ int Session::onlineRefOf(unsigned long long key, const std::string& cellKey)
 {
 	auto match = [&](int i) {
 		const Ref& r = w.refs[i];
+		if (r.rnFile == kNetActorFile)
+			return netRefKey(kNetActorFile, r.rnIndex) == key;
 		return r.rnFile >= 0 && r.rnFile < (int)og->contentFiles.size()
 			&& netRefKey(og->contentFiles[r.rnFile], r.rnIndex) == key;
 	};
@@ -1242,6 +1333,32 @@ void Session::onlineCellState(const std::string& cellKey, const LValue& b)
 	each("disabled", "enabled", 0);
 	each("enabled", "enabled", 1);
 	each("deaths", "dead", 1);
+	if (const LValue* moved = b.get("moved"))
+		for (auto& kv : moved->table)
+		{
+			int ri = onlineRefOf(keyOfRefKey(kv.first.str), cellKey);
+			if (ri < 0 || w.refs[ri].actor >= 0)
+				continue;
+			Ref& r = w.refs[ri];
+			r.pos[0] = (float)kv.second.numberAt("x", r.pos[0]);
+			r.pos[1] = (float)kv.second.numberAt("y", r.pos[1]);
+			r.pos[2] = (float)kv.second.numberAt("z", r.pos[2]);
+			r.rot[2] = (float)kv.second.numberAt("rotZ", r.rot[2]);
+			r.moved = true;
+			r.fitBox();
+			n++;
+		}
+	if (const LValue* vars = b.get("memberVars"))
+		for (auto& kv : vars->table)
+		{
+			int ri = onlineRefOf(keyOfRefKey(kv.first.str), cellKey);
+			if (ri < 0)
+				continue;
+			for (auto& v : kv.second.table)
+				if (v.first.type == LValue::STRING && v.second.type == LValue::NUMBER)
+					onlineMemberVar(ri, v.first.str, v.second.num);
+			n++;
+		}
 	if (const LValue* placed = b.get("placed"))
 		for (int i = 1; i <= placed->arraySize(); i++)
 			onlinePlace(*placed->at(i));
@@ -1415,7 +1532,7 @@ void putContents(Ref& r, const LValue* items)
 			const LValue* e = items->at(i);
 			int n = (int)e->numberAt("n");
 			if (n > 0)
-				want[lowerCase(e->stringAt("id"))] += n;
+				want[localIdOf(e->stringAt("id"))] += n;
 		}
 	std::vector<ContentItem> kept;
 	for (auto& c : r.contents)
@@ -1462,7 +1579,7 @@ void Session::onlineContainerFlush(int ri)
 		b.set("cellKey", og->cellKeys.size() > (size_t)r.cell ? og->cellKeys[r.cell] : "");
 		b.set("opId", (double)++og->opId);
 		b.set("op", dn < 0 ? "take" : "put");
-		b.set("itemId", id);
+		b.set("itemId", netIdOf(id));
 		b.set("n", (double)abs(dn));
 		g_online->sendEvent("ContainerOpRequest", b);
 		og->contPending[key][id] += dn;
@@ -1495,7 +1612,7 @@ void Session::onlineContainers(float now)
 		for (auto& c : og->contSaid)
 		{
 			LValue e = LValue::newTable();
-			e.set("id", c.first);
+			e.set("id", netIdOf(c.first));
 			e.set("n", (double)c.second);
 			items.push(e);
 		}
@@ -1591,7 +1708,7 @@ bool Session::onlineContainerEvent(const std::string& name, const LValue& b)
 	else if (const LValue* d = b.get("delta"))
 	{
 		// a take or a put; ours come back too (the server's one way of applying them), already done here
-		std::string id = lowerCase(d->stringAt("itemId"));
+		std::string id = localIdOf(d->stringAt("itemId"));
 		int dn = (int)d->numberAt("dn");
 		int& mine = og->contPending[netRefKey(ref->refFile, ref->refIndex)][id];
 		if (mine != 0 && (mine > 0) == (dn > 0) && abs(mine) >= abs(dn))
@@ -1625,7 +1742,7 @@ bool Session::onlineSpellHit(int ri, const SpellEffect& e)
 	if (!netSpell || netSpellId.empty() || !onlinePuppet(ri))
 		return false;
 	OnlineGame::SpellHit& h = og->spellHits[ri];
-	h.spellId = lowerCase(netSpellId);
+	h.spellId = netIdOf(netSpellId);
 	const SpellEffect* first = netSpell->effects.data();
 	int index = &e >= first && &e < first + netSpell->effects.size() ? (int)(&e - first) : -1;
 	std::string id = magicEffectId(e.effect);
@@ -1653,11 +1770,15 @@ void Session::onlineSpellHits()
 		if (h.effects.arraySize() == 0 || ri < 0 || ri >= (int)w.refs.size())
 			continue;
 		const Ref& r = w.refs[ri];
-		if (r.rnFile < 0 || r.rnFile >= (int)og->contentFiles.size() || og->contentFiles[r.rnFile] < 0)
+		bool net = r.rnFile == kNetActorFile;
+		if (!net && (r.rnFile < 0 || r.rnFile >= (int)og->contentFiles.size() || og->contentFiles[r.rnFile] < 0))
 			continue;
 		std::string cellKey = onlineActorCell(ri);
 		LValue target = LValue::newTable();
-		target.set("ref", LValue::refNum(r.rnIndex, og->contentFiles[r.rnFile]));
+		if (net)
+			target.set("net", (double)r.rnIndex);
+		else
+			target.set("ref", LValue::refNum(r.rnIndex, og->contentFiles[r.rnFile]));
 		target.set("cellKey", cellKey);
 		auto ep = g_online->epochOf.find(cellKey);
 		if (ep != g_online->epochOf.end())
@@ -1698,9 +1819,27 @@ LValue dropState(const Ref& r)
 void Session::onlinePlace(const LValue& b)
 {
 	uint32_t net = (uint32_t)b.numberAt("netId", 0);
-	if (!net || b.boolAt("actor") || og->netObjs.count(net))
+	if (!net || og->netObjs.count(net))
 		return;
-	std::string id = lowerCase(b.stringAt("recordId"));
+	if (b.boolAt("actor"))
+	{
+		// someone the server's world spawned (a summons, a leveled creature): here as one of its people
+		if (og->netActors.count(net))
+			return;
+		std::string rid = localIdOf(b.stringAt("recordId"));
+		float at[3] = { (float)b.numberAt("x"), (float)b.numberAt("y"), (float)b.numberAt("z") };
+		int c = cellOfKey(w, b.stringAt("cellKey"));
+		int slot = c >= 0 ? w.spawnActor(rid, at, (float)b.numberAt("rotZ"), c) : -1;
+		if (slot >= 0)
+		{
+			w.refs[slot].rnFile = kNetActorFile;
+			w.refs[slot].rnIndex = net;
+			og->netActors[net] = slot;
+			logf("online: %s spawned by the world (net %u)", rid.c_str(), net);
+		}
+		return;
+	}
+	std::string id = localIdOf(b.stringAt("recordId"));
 	float pos[3] = { (float)b.numberAt("x"), (float)b.numberAt("y"), (float)b.numberAt("z") };
 	int cell = cellOfKey(w, b.stringAt("cellKey"));
 	if (cell < 0 || !w.game.object(id))
@@ -1758,7 +1897,7 @@ void Session::onlineDrops()
 		og->pendingDrops[tempId] = OnlineGame::NetObj(slot, cellKey);
 		LValue b = LValue::newTable();
 		b.set("tempId", (double)tempId);
-		b.set("recordId", r.idLower.str());
+		b.set("recordId", netIdOf(r.idLower.str()));
 		b.set("cellKey", cellKey);
 		b.set("x", (double)r.pos[0]);
 		b.set("y", (double)r.pos[1]);
@@ -1821,6 +1960,15 @@ bool Session::onlineDropEvent(const std::string& name, const LValue& b)
 	}
 	if (name == "ObjectDelete" && b.get("net"))
 	{
+		auto na = og->netActors.find((uint32_t)b.numberAt("net"));
+		if (na != og->netActors.end())
+		{
+			int slot = na->second;
+			og->netActors.erase(na);
+			if (slot < (int)w.refs.size() && w.refs[slot].rnFile == kNetActorFile)
+				w.despawn(slot);
+			return true;
+		}
 		auto n = og->netObjs.find((uint32_t)b.numberAt("net"));
 		if (n != og->netObjs.end())
 		{
@@ -1964,8 +2112,29 @@ void Session::onlineFollowersAndPurses(float now)
 		for (int i : w.loadedActors)
 		{
 			const Ref& r = w.refs[i];
-			if (r.dead || (r.aiPackage != AIPKG_FOLLOW && r.aiPackage != AIPKG_ESCORT) || r.aiTarget != "player"
-				|| !onlinePuppet(i))
+			if (r.dead || !onlinePuppet(i))
+				continue;
+			if (r.aiPackage == AIPKG_TRAVEL && og->talkRef == i && !og->travelSaid.count(i))
+			{
+				// (a conversation sent them somewhere: the holder walks them there)
+				og->travelSaid.insert(i);
+				if (r.rnFile >= 0 && r.rnFile < (int)og->contentFiles.size() && og->contentFiles[r.rnFile] >= 0)
+				{
+					std::string ck = onlineActorCell(i);
+					LValue b = LValue::newTable();
+					b.set("cellKey", ck);
+					auto ep = on.epochOf.find(ck);
+					b.set("epoch", (double)(ep != on.epochOf.end() ? ep->second : 0));
+					b.set("ref", LValue::refNum(r.rnIndex, og->contentFiles[r.rnFile]));
+					LValue t = LValue::newTable();
+					t.set("x", (double)r.aiDest[0]);
+					t.set("y", (double)r.aiDest[1]);
+					t.set("z", (double)r.aiDest[2]);
+					b.set("travel", t);
+					on.sendEvent("ActorAI", b);
+				}
+			}
+			if ((r.aiPackage != AIPKG_FOLLOW && r.aiPackage != AIPKG_ESCORT) || r.aiTarget != "player")
 				continue;
 			following.insert(i);
 		}
@@ -2054,6 +2223,1016 @@ void Session::onlineFollowersAndPurses(float now)
 	}
 }
 
+// ---- the player's own body in the world (PROTOCOL.md M2 and Phase 4): death and coming back, what the player gains
+// (drop conservation), the Mark, the magic on them (the server's copy wears it too), and what the server's copy of
+// them went through there: skill uses, spells, magic and item wear
+
+void Session::onlineSelf(float now)
+{
+	Online& on = *g_online;
+	// Dead: told, and told again every five seconds until the world brings us back (PlayerResurrect)
+	if (playerDead)
+	{
+		if (now - og->deathSaidAt >= 5.0f)
+		{
+			og->deathSaidAt = now;
+			on.sendEvent("PlayerDeath", LValue::newTable());
+			logf("online: dead; the world is told");
+		}
+	}
+	else
+		og->deathSaidAt = -100.0f;
+	if (now < og->selfAt)
+		return;
+	og->selfAt = now + 0.25f;
+	// Every count that went up since: credited on the server against what we may drop (PlayerItemAcquired)
+	std::map<std::string, int> counts;
+	for (auto& it : w.inventory)
+		counts[lowerCase(it.id)] += it.count;
+	if (og->countsSeeded)
+		for (auto& c : counts)
+		{
+			auto was = og->countsSaid.find(c.first);
+			int before = was == og->countsSaid.end() ? 0 : was->second;
+			if (c.second > before)
+			{
+				LValue b = LValue::newTable();
+				b.set("id", c.first);
+				b.set("n", (double)(c.second - before));
+				on.sendEvent("PlayerItemAcquired", b);
+			}
+		}
+	og->countsSaid.swap(counts);
+	og->countsSeeded = true;
+	// The Mark (once a second is plenty: it is set by a spell)
+	if (w.markCell >= 0 && now >= og->markAt)
+	{
+		og->markAt = now + 1.0f;
+		char fp[96];
+		snprintf(fp, sizeof(fp), "%d|%.0f|%.0f|%.0f", w.markCell, w.markPos[0], w.markPos[1], w.markPos[2]);
+		if (og->markSaid != fp)
+		{
+			bool first = og->markSaid.empty();
+			og->markSaid = fp;
+			if (!first || !on.playerRecord)
+			{
+				LValue b = LValue::newTable();
+				b.set("cell", cellKeyAt(w, w.markCell));
+				b.set("x", (double)w.markPos[0]);
+				b.set("y", (double)w.markPos[1]);
+				b.set("z", (double)w.markPos[2]);
+				on.sendEvent("PlayerMark", b);
+			}
+		}
+	}
+	// The magic on us that we cast ourselves, by cast (its spell and which of its effects): the server's copy wears
+	// the same, so the world's blows meet our Shield, and the others see our Invisibility (PlayerActiveSpells)
+	if (now >= og->activeAt)
+	{
+		og->activeAt = now + 0.5f;
+		std::map<std::string, std::pair<std::string, std::set<int>>> active;   // key -> spell, effect indexes
+		for (auto& e : w.effects)
+			if (!e.spellId.empty() && e.index >= 0 && e.remaining > 0.0f)
+			{
+				auto& a = active[std::to_string(e.cast)];
+				a.first = e.spellId;
+				a.second.insert(e.index);
+			}
+		LValue add = LValue::newTable(), remove = LValue::newTable();
+		for (auto& a : active)
+			if (!og->activeSaid.count(a.first))
+			{
+				LValue e = LValue::newTable();
+				e.set("key", a.first);
+				e.set("id", netIdOf(a.second.first));
+				LValue idx = LValue::newTable();
+				for (int i : a.second.second)
+					idx.push(LValue(i));
+				e.set("effects", idx);
+				add.push(e);
+			}
+		for (auto& s : og->activeSaid)
+			if (!active.count(s.first))
+			{
+				LValue e = LValue::newTable();
+				e.set("key", s.first);
+				e.set("id", s.second);
+				remove.push(e);
+			}
+		if (add.arraySize() || remove.arraySize())
+		{
+			LValue b = LValue::newTable();
+			b.set("add", add);
+			b.set("remove", remove);
+			on.sendEvent("PlayerActiveSpells", b);
+		}
+		og->activeSaid.clear();
+		for (auto& a : active)
+			og->activeSaid[a.first] = lowerCase(a.second.first);
+	}
+}
+
+// A spell record's effects (by 0-based index) put on the player as the world laid them on its copy of us
+void Session::onlineSpellOnSelf(const std::string& spellId, const LValue* indexes, const std::string& source)
+{
+	auto sp = w.game.spells.find(localIdOf(spellId));
+	if (sp == w.game.spells.end())
+		return;
+	const std::vector<SpellEffect>& fx = sp->second.effects;
+	std::vector<int> which;
+	if (indexes && indexes->arraySize() > 0)
+		for (int i = 1; i <= indexes->arraySize(); i++)
+			which.push_back((int)indexes->at(i)->num);
+	else
+		for (size_t i = 0; i < fx.size(); i++)
+			which.push_back((int)i);
+	for (int i : which)
+		if (i >= 0 && i < (int)fx.size())
+			applyEffectToPlayer(fx[i], source.empty() ? sp->second.name : source);
+}
+
+bool Session::onlineSelfEvent(const std::string& name, const LValue& b)
+{
+	if (name == "PlayerResurrect")
+	{
+		// back from death (the respawn plugin: where we fell, or the server's spot), or stood up where we lie
+		playerDead = false;
+		if (b.boolAt("restoreHp"))
+		{
+			w.stats.health = w.stats.healthMax;
+			w.stats.magicka = w.stats.magickaMax;
+			w.stats.fatigue = w.stats.fatigueMax;
+		}
+		else
+			w.stats.health = fmaxf(1.0f, (float)b.numberAt("hp", w.stats.healthMax * 0.1f));
+		if (screen == SCR_DEATH)
+			screen = SCR_NONE;
+		std::string key = lowerCase(b.stringAt("cellKey"));
+		int cell = key.empty() ? -1 : cellOfKey(w, key);
+		if (cell >= 0)
+		{
+			float pos[3] = { (float)b.numberAt("x"), (float)b.numberAt("y"), (float)b.numberAt("z") };
+			teleportPlayer(cell, pos, w.player.yaw);
+		}
+		og->dynamicSaid.clear();
+		notify("You are back among the living.");
+		logf("online: resurrected (%s)", key.empty() ? "where we lie" : key.c_str());
+		return true;
+	}
+	if (name == "SelfSkillUse")
+	{
+		// a block or an armor hit on our copy: our skill learns from it
+		std::string s = lowerCase(b.stringAt("skill"));
+		logf("online: our copy used %s there", s.c_str());
+		for (int k = 0; k < 27; k++)
+			if (s == kSkillFuncs[k])
+				useSkill(k, (int)b.numberAt("useType", 0));
+		return true;
+	}
+	if (name == "SelfSpells")
+	{
+		// spells the world gave our copy (a disease from a bite): ours now
+		if (const LValue* add = b.get("add"))
+			for (int i = 1; i <= add->arraySize(); i++)
+			{
+				std::string id = localIdOf(add->at(i)->str);
+				if (id.empty() || !w.game.spells.count(id))
+					continue;
+				bool have = false;
+				for (auto& s : w.stats.spells)
+					have |= lowerCase(s) == id;
+				if (!have)
+				{
+					w.stats.spells.push_back(id);
+					notify("You have contracted " + w.game.spells.at(id).name + ".");
+				}
+			}
+		w.refreshStats();
+		return true;
+	}
+	if (name == "SelfActiveSpells")
+	{
+		// magic the world laid on our copy (a hostile Paralyze): on us too
+		if (const LValue* add = b.get("add"))
+			for (int i = 1; i <= add->arraySize(); i++)
+			{
+				const LValue* e = add->at(i);
+				onlineSpellOnSelf(e->stringAt("id"), e->get("effects"), "");
+			}
+		return true;
+	}
+	if (name == "SelfItemStates")
+	{
+		// our items' wear, charge and souls as the world's swings and casts left them, in order per item
+		if (const LValue* st = b.get("itemStates"))
+			for (auto& kv : st->table)
+			{
+				std::string id = lowerCase(kv.first.str);
+				int k = 1;
+				for (auto& it : w.inventory)
+				{
+					if (lowerCase(it.id) != id)
+						continue;
+					const LValue* s = kv.second.at(k++);
+					if (!s)
+						break;
+					if (s->get("condition"))
+						it.condition = (int)s->numberAt("condition");
+					if (s->get("charge"))
+						it.charge = (float)s->numberAt("charge");
+					if (s->get("soul"))
+						it.soul = s->stringAt("soul");
+				}
+			}
+		return true;
+	}
+	if (name == "AvatarActiveSpells")
+	{
+		// another player's magic: what shows on their body (Invisibility, Chameleon)
+		auto p = g_online->players.find((uint16_t)b.numberAt("id"));
+		if (p == g_online->players.end())
+			return true;
+		auto effectsOf = [&](const LValue* e) {
+			std::vector<int> out;
+			auto sp = w.game.spells.find(lowerCase(e->stringAt("id")));
+			if (sp == w.game.spells.end())
+				return out;
+			const LValue* idx = e->get("effects");
+			for (int i = 1; idx && i <= idx->arraySize(); i++)
+			{
+				int k = (int)idx->at(i)->num;
+				if (k >= 0 && k < (int)sp->second.effects.size())
+					out.push_back(sp->second.effects[k].effect);
+			}
+			return out;
+		};
+		auto& shown = og->playerMagic[p->first];
+		if (const LValue* add = b.get("add"))
+			for (int i = 1; i <= add->arraySize(); i++)
+				shown[add->at(i)->stringAt("key")] = effectsOf(add->at(i));
+		if (const LValue* rem = b.get("remove"))
+			for (int i = 1; i <= rem->arraySize(); i++)
+				shown.erase(rem->at(i)->stringAt("key"));
+		return true;
+	}
+	return false;
+}
+
+// ---- scripts' state (PROTOCOL.md M6): an object's own variables (MemberVarUpdate), watched on what we talk to or open,
+// and the global scripts running (GlobalScriptsUpdate / Sync)
+
+namespace
+{
+ScriptInstance* scriptOf(World& w, int ri)
+{
+	if (ri < 0 || ri >= (int)w.refs.size())
+		return nullptr;
+	int s = w.refs[ri].script;
+	return s >= 0 && s < (int)w.scripts.size() && w.scripts[s].script ? &w.scripts[s] : nullptr;
+}
+}
+
+void Session::onlineScripts(float now)
+{
+	Online& on = *g_online;
+	// what we talk to and what we have open: watched while it lasts and two seconds after (a result script's last word)
+	for (int ri : { og->talkRef, og->contRef })
+		if (ri >= 0)
+		{
+			auto it = og->memberWatch.find(ri);
+			if (it == og->memberWatch.end())
+			{
+				// first look: as it is (what the server already has, or our own start)
+				if (ScriptInstance* si = scriptOf(w, ri))
+					og->memberSaid[ri] = si->locals;
+			}
+			og->memberWatch[ri] = now + 2.0f;
+		}
+	if (now >= og->memberAt)
+	{
+		og->memberAt = now + 0.25f;
+		for (auto it = og->memberWatch.begin(); it != og->memberWatch.end();)
+		{
+			int ri = it->first;
+			ScriptInstance* si = scriptOf(w, ri);
+			const Ref* r = ri < (int)w.refs.size() ? &w.refs[ri] : nullptr;
+			if (si && r && r->rnFile >= 0 && r->rnFile < (int)og->contentFiles.size() && og->contentFiles[r->rnFile] >= 0)
+			{
+				std::vector<float>& said = og->memberSaid[ri];
+				said.resize(si->locals.size(), 0.0f);
+				for (size_t k = 0; k < si->locals.size() && k < si->script->localNames.size(); k++)
+				{
+					if (si->locals[k] == said[k])
+						continue;
+					said[k] = si->locals[k];
+					LValue b = LValue::newTable();
+					b.set("ref", LValue::refNum(r->rnIndex, og->contentFiles[r->rnFile]));
+					b.set("name", lowerCase(si->script->localNames[k]));
+					b.set("value", (double)si->locals[k]);
+					on.sendEvent("MemberVarUpdate", b);
+				}
+			}
+			if (now > it->second)
+			{
+				og->memberSaid.erase(ri);
+				it = og->memberWatch.erase(it);
+			}
+			else
+				++it;
+		}
+	}
+	// The global scripts running (Sleepers, VampireCheck ...), every few seconds: the campaign keeps them going
+	if (now >= og->globalScriptsAt)
+	{
+		og->globalScriptsAt = now + 3.0f;
+		std::set<std::string> running;
+		for (auto& s : w.scripts)
+			if (s.ref < 0 && s.running && s.script && s.item.empty())
+				running.insert(lowerCase(s.script->name));
+		if (og->globalScriptsSeeded)
+		{
+			LValue started = LValue::newTable(), stopped = LValue::newTable();
+			for (auto& n : running)
+				if (!og->globalScriptsSaid.count(n) && started.arraySize() < 256)
+					started.push(LValue(n));
+			for (auto& n : og->globalScriptsSaid)
+				if (!running.count(n) && stopped.arraySize() < 256)
+					stopped.push(LValue(n));
+			if (started.arraySize() || stopped.arraySize())
+			{
+				LValue b = LValue::newTable();
+				if (started.arraySize())
+					b.set("started", started);
+				if (stopped.arraySize())
+					b.set("stopped", stopped);
+				on.sendEvent("GlobalScriptsUpdate", b);
+			}
+		}
+		og->globalScriptsSaid.swap(running);
+		og->globalScriptsSeeded = true;
+	}
+}
+
+// An object's variable set as the world has it
+void Session::onlineMemberVar(int ri, const std::string& name, double value)
+{
+	ScriptInstance* si = scriptOf(w, ri);
+	if (!si)
+		return;
+	std::string n = lowerCase(name);
+	if (float* v = si->local(n))
+	{
+		*v = (float)value;
+		auto said = og->memberSaid.find(ri);
+		int k = si->script->localIndex(n);
+		if (said != og->memberSaid.end() && k >= 0 && k < (int)said->second.size())
+			said->second[k] = (float)value;
+	}
+}
+
+bool Session::onlineScriptEvent(const std::string& name, const LValue& b)
+{
+	if (name == "MemberVarUpdate")
+	{
+		const LValue* ref = b.get("ref");
+		if (!ref || ref->type != LValue::REFNUM)
+			return true;
+		int ri = onlineRefOf(netRefKey(ref->refFile, ref->refIndex), b.stringAt("cellKey"));
+		if (ri >= 0)
+			onlineMemberVar(ri, b.stringAt("name"), b.numberAt("value"));
+		return true;
+	}
+	if (name == "GlobalScriptsSync")
+	{
+		// the campaign's running global scripts: any we lack start (and are not told back)
+		int started = 0;
+		if (const LValue* run = b.get("running"))
+			for (int i = 1; i <= run->arraySize(); i++)
+			{
+				std::string n = lowerCase(run->at(i)->str);
+				bool have = false;
+				for (auto& s : w.scripts)
+					have |= s.ref < 0 && s.running && s.script && lowerCase(s.script->name) == n;
+				if (!have && w.startGlobalScript(n) >= 0)
+					started++;
+				og->globalScriptsSaid.insert(n);
+			}
+		logf("online: the world's global scripts: %d started here", started);
+		return true;
+	}
+	return false;
+}
+
+// ---- the world's people, the rest of what their holder says (PROTOCOL.md M4): the magic that shows on them, their
+// disposition and Fight / Flee / Alarm, a door they went through, a unique corpse stripped, a scripted line, a package
+// done; and a guard of the world come to arrest us (PlayerArrest)
+
+bool Session::onlineActorEvent(const std::string& name, const LValue& b)
+{
+	if (name == "PlayerArrest")
+	{
+		const LValue* g = b.get("guard");
+		int ri = g && g->type == LValue::REFNUM ? onlineRefOf(netRefKey(g->refFile, g->refIndex), "") : -1;
+		if (ri < 0 || w.refs[ri].dead)
+			return true;
+		arrestingGuard = ri;
+		w.refs[ri].alarmed = true;
+		if (screen != SCR_NONE)
+			closeScreen();
+		forceGreeting(ri);
+		if (screen != SCR_DIALOGUE)
+			openScreen(SCR_ARREST);
+		logf("online: %s arrests us", w.refs[ri].id.c_str());
+		return true;
+	}
+	if (name != "ActorEffects" && name != "ActorDisposition" && name != "ActorCellChange" && name != "ActorStripLoot"
+		&& name != "ActorSay" && name != "ActorAI")
+		return false;
+	const LValue* ref = b.get("ref");
+	LValue netRef = LValue::refNum((uint32_t)b.numberAt("net", 0), kNetActorFile);
+	if (!ref && b.get("net"))
+		ref = &netRef;
+	if (!ref || ref->type != LValue::REFNUM)
+		return true;
+	int ri = onlineRefOf(netRefKey(ref->refFile, ref->refIndex), b.stringAt("cellKey"));
+	if (ri < 0)
+		return true;
+	Ref& r = w.refs[ri];
+	if (name != "ActorAI")
+		logf("online: %s on %s", name.c_str(), r.id.c_str());
+	if (name == "ActorEffects")
+	{
+		// what shows: added as timed effects on them, taken off by the spell's effects when it ends there
+		if (const LValue* add = b.get("add"))
+			for (int i = 1; i <= add->arraySize(); i++)
+			{
+				const LValue* e = add->at(i);
+				auto sp = w.game.spells.find(lowerCase(e->stringAt("id")));
+				if (sp == w.game.spells.end())
+					continue;
+				const LValue* idx = e->get("effects");
+				for (int k = 1; idx && k <= idx->arraySize(); k++)
+				{
+					int n = (int)idx->at(k)->num;
+					if (n < 0 || n >= (int)sp->second.effects.size())
+						continue;
+					const SpellEffect& fx = sp->second.effects[n];
+					r.effects.push_back({ fx.effect, (fx.min + fx.max) * 0.5f, (float)std::max(1, fx.duration) });
+				}
+			}
+		if (const LValue* rem = b.get("remove"))
+			for (int i = 1; i <= rem->arraySize(); i++)
+			{
+				auto sp = w.game.spells.find(lowerCase(rem->at(i)->stringAt("id")));
+				if (sp == w.game.spells.end())
+					continue;
+				for (auto& fx : sp->second.effects)
+					for (auto it = r.effects.begin(); it != r.effects.end();)
+						it = it->effect == fx.effect ? r.effects.erase(it) : std::next(it);
+			}
+	}
+	else if (name == "ActorDisposition")
+	{
+		r.disposition = std::max(0, std::min(100, (int)b.numberAt("disposition", r.disposition)));
+		if (const LValue* ai = b.get("ai"))
+		{
+			if (ai->get("fight"))
+				r.fight = std::max(0, std::min(100, (int)ai->numberAt("fight")));
+			if (ai->get("flee"))
+				r.flee = std::max(0, std::min(100, (int)ai->numberAt("flee")));
+			if (ai->get("alarm"))
+				r.alarm = std::max(0, std::min(100, (int)ai->numberAt("alarm")));
+		}
+	}
+	else if (name == "ActorCellChange")
+	{
+		// through a door there: here too (out of sight of this cell, into the other)
+		int cell = cellOfKey(w, lowerCase(b.stringAt("toCellKey")));
+		float pos[3] = { (float)b.numberAt("x"), (float)b.numberAt("y"), (float)b.numberAt("z") };
+		if (cell >= 0)
+			w.relocate(ri, cell, pos, r.rot[2]);
+		auto a = g_online->actors.find(netRefKey(ref->refFile, ref->refIndex));
+		if (a != g_online->actors.end())
+			a->second.lastAt = a->second.prevAt = -1;
+	}
+	else if (name == "ActorStripLoot")
+	{
+		r.contents.clear();
+		r.gold = 0;
+	}
+	else if (name == "ActorSay")
+	{
+		if (!b.stringAt("file").empty())
+			say(ri, b.stringAt("file"), b.stringAt("text"));
+	}
+	else if (name == "ActorAI" && b.boolAt("done"))
+		r.aiDone = true;              // (GetAIPackageDone: the holder's package finished)
+	return true;
+}
+
+// A crime's witness the server simulates turned on us here (makeHostile on a puppet): the fight is the holder's to
+// start, so it is claimed there (ActorAI combat = us, crime)
+void Session::onlineCrimeCombat(int ri, bool pursue)
+{
+	if (!g_online || !og || !onlinePuppet(ri))
+		return;
+	const Ref& r = w.refs[ri];
+	if (r.rnFile < 0 || r.rnFile >= (int)og->contentFiles.size() || og->contentFiles[r.rnFile] < 0)
+		return;
+	std::string cellKey = onlineActorCell(ri);
+	LValue b = LValue::newTable();
+	b.set("cellKey", cellKey);
+	auto ep = g_online->epochOf.find(cellKey);
+	b.set("epoch", (double)(ep != g_online->epochOf.end() ? ep->second : 0));
+	b.set("ref", LValue::refNum(r.rnIndex, og->contentFiles[r.rnFile]));
+	b.set("combat", (double)g_online->playerId);
+	b.set("crime", LValue::boolean(true));
+	if (pursue)
+		b.set("pursue", LValue::boolean(true));
+	g_online->sendEvent("ActorAI", b);
+}
+
+// ---- records the players make (PROTOCOL.md M7): a spell from the spellmaker, a brewed potion, an enchantment and the
+// item it is on. Each gets the server's id (RecordCreate -> Ack), and that id is what travels in its place; the others'
+// arrive in RecordsSync and are built here under their server id
+
+namespace
+{
+std::map<std::string, std::string> g_recNet;          // our record id -> the server's
+std::map<std::string, std::string> g_recLocal;        // and back
+
+LValue effectsData(const std::vector<SpellEffect>& fx)
+{
+	LValue list = LValue::newTable();
+	for (auto& e : fx)
+	{
+		LValue d = LValue::newTable();
+		d.set("id", magicEffectId(e.effect));
+		if (e.skill >= 0 && e.skill < 27)
+			d.set("affectedSkill", kSkillFuncs[e.skill]);
+		if (e.attribute >= 0 && e.attribute < 8)
+			d.set("affectedAttribute", kAttrFuncs[e.attribute]);
+		d.set("range", (double)e.range);
+		d.set("area", (double)e.area);
+		d.set("magnitudeMin", (double)std::min(100, e.min));
+		d.set("magnitudeMax", (double)std::min(100, e.max));
+		d.set("duration", (double)std::min(1440, e.duration));
+		list.push(d);
+	}
+	return list;
+}
+
+std::vector<SpellEffect> effectsFrom(const LValue* list)
+{
+	std::vector<SpellEffect> out;
+	for (int i = 1; list && i <= list->arraySize(); i++)
+	{
+		const LValue* d = list->at(i);
+		std::string id = lowerCase(d->stringAt("id"));
+		int effect = -1;
+		for (int k = 0; k < 143 && effect < 0; k++)
+			if (magicEffectId(k) == id)
+				effect = k;
+		if (effect < 0)
+			continue;
+		SpellEffect e = { effect, -1, -1, (int)d->numberAt("magnitudeMin"), (int)d->numberAt("magnitudeMax"),
+			(int)d->numberAt("duration"), (int)d->numberAt("range") };
+		e.area = (int)d->numberAt("area");
+		std::string sk = lowerCase(d->stringAt("affectedSkill")), at = lowerCase(d->stringAt("affectedAttribute"));
+		for (int k = 0; k < 27; k++)
+			if (sk == kSkillFuncs[k])
+				e.skill = k;
+		for (int k = 0; k < 8; k++)
+			if (at == kAttrFuncs[k])
+				e.attribute = k;
+		out.push_back(e);
+	}
+	return out;
+}
+
+const char* itemKind(const Object& o)
+{
+	switch (o.recType)
+	{
+	case REC_WEAP: return "weapon";
+	case REC_ARMO: return "armor";
+	case REC_CLOT: return "clothing";
+	case REC_BOOK: return "book";
+	case REC_ALCH: return "potion";
+	default: return "misc";
+	}
+}
+}
+
+namespace
+{
+// The id a record travels by: the server's for one of ours it named, else the id itself
+std::string netIdOf(const std::string& local)
+{
+	auto it = g_recNet.find(lowerCase(local));
+	return it != g_recNet.end() ? it->second : lowerCase(local);
+}
+
+// And the id here of one that came in: ours by its server id, else the id itself (others' are built under it)
+std::string localIdOf(const std::string& net)
+{
+	auto it = g_recLocal.find(lowerCase(net));
+	return it != g_recLocal.end() ? it->second : lowerCase(net);
+}
+}
+
+void Session::onlineRecords(float now)
+{
+	if (now < og->recordsAt)
+		return;
+	og->recordsAt = now + 2.0f;
+	Online& on = *g_online;
+	auto pending = [&](const std::string& id) {
+		for (auto& p : og->recordPending)
+			if (p.second == id)
+				return true;
+		return false;
+	};
+	auto send = [&](const std::string& id, const char* kind, const LValue& data) {
+		int temp = ++og->tempSeq;
+		og->recordPending[temp] = id;
+		LValue b = LValue::newTable();
+		b.set("tempId", (double)temp);
+		b.set("kind", kind);
+		b.set("data", data);
+		on.sendEvent("RecordCreate", b);
+		logf("online: %s %s told to the world", kind, id.c_str());
+	};
+	auto known = [&](const std::string& id) { return g_recNet.count(id) || pending(id) || og->recordRefused.count(id); };
+	for (auto& sid : w.madeSpells)
+	{
+		std::string id = lowerCase(sid);
+		auto sp = w.game.spells.find(id);
+		if (known(id) || sp == w.game.spells.end())
+			continue;
+		LValue d = LValue::newTable();
+		d.set("name", sp->second.name);
+		d.set("type", 0.0);
+		d.set("cost", (double)std::max(1, sp->second.cost));
+		d.set("isAutocalc", LValue::boolean(false));
+		d.set("effects", effectsData(sp->second.effects));
+		send(id, "spell", d);
+	}
+	for (auto& pid : w.brewed)
+	{
+		std::string id = lowerCase(pid);
+		const Object* o = w.game.object(id);
+		if (known(id) || !o)
+			continue;
+		LValue d = LValue::newTable();
+		d.set("name", o->name.str());
+		d.set("model", "m\\misc_potion_standard_01.nif");
+		d.set("icon", o->icon.str());
+		d.set("weight", (double)o->weight);
+		d.set("value", (double)o->value);
+		d.set("effects", effectsData(o->effects));
+		send(id, "potion", d);
+	}
+	for (auto& iid : w.madeItems)
+	{
+		std::string id = lowerCase(iid);
+		const Object* o = w.game.object(id);
+		if (known(id) || !o)
+			continue;
+		// the enchantment first: the item names it by the server's id
+		std::string ench = lowerCase(o->ench.str());
+		auto en = w.game.spells.find(ench);
+		if (!ench.empty() && en != w.game.spells.end() && !g_recNet.count(ench))
+		{
+			if (!known(ench))
+			{
+				LValue d = LValue::newTable();
+				d.set("type", (double)std::max(0, en->second.type - ENCH_ONCE));
+				d.set("cost", (double)std::max(1, en->second.cost));
+				d.set("charge", (double)std::min(400, std::max(0, en->second.charge)));
+				d.set("isAutocalc", LValue::boolean(false));
+				d.set("effects", effectsData(en->second.effects));
+				send(ench, "enchantment", d);
+			}
+			continue;
+		}
+		LValue d = LValue::newTable();
+		d.set("name", o->name.str());
+		d.set("icon", o->icon.str());
+		d.set("weight", (double)o->weight);
+		d.set("value", (double)o->value);
+		if (!ench.empty())
+			d.set("enchant", netIdOf(ench));
+		if (o->subtype >= 0)
+			d.set("type", (double)o->subtype);
+		if (o->health > 0)
+			d.set("health", (double)o->health);
+		if (o->enchant > 0)
+			d.set("enchantCapacity", (double)o->enchant);
+		if (o->recType == REC_WEAP)
+		{
+			d.set("chopMinDamage", (double)o->chop[0]);
+			d.set("chopMaxDamage", (double)o->chop[1]);
+			d.set("slashMinDamage", (double)o->slash[0]);
+			d.set("slashMaxDamage", (double)o->slash[1]);
+			d.set("thrustMinDamage", (double)o->thrust[0]);
+			d.set("thrustMaxDamage", (double)o->thrust[1]);
+			d.set("speed", (double)std::min(2.0f, o->speed));
+			d.set("reach", (double)std::min(2.0f, o->reach));
+		}
+		if (o->recType == REC_ARMO)
+			d.set("baseArmor", (double)std::min(200, o->armor));
+		send(id, itemKind(*o), d);
+	}
+}
+
+// Someone's record built here under its server id: a spell or enchantment as a spell, a potion or an item as a copy of
+// one of the game's of its kind (its look: the one with the same icon when there is one) with the record's own values
+void Session::onlineRecord(const LValue& r)
+{
+	std::string net = lowerCase(r.stringAt("recordNetId")), kind = r.stringAt("kind");
+	const LValue* d = r.get("data");
+	if (net.empty() || !d || g_recLocal.count(net) || w.game.spells.count(net) || w.game.object(net))
+		return;
+	if (kind == "spell" || kind == "enchantment")
+	{
+		SpellDef sp;
+		sp.id = net;
+		sp.name = d->stringAt("name", net);
+		sp.cost = (int)d->numberAt("cost");
+		sp.charge = (int)d->numberAt("charge");
+		sp.type = kind == "spell" ? (int)d->numberAt("type") : ENCH_ONCE + (int)d->numberAt("type");
+		sp.effects = effectsFrom(d->get("effects"));
+		w.game.spells[net] = sp;
+		return;
+	}
+	RecName want = kind == "potion" ? REC_ALCH : kind == "weapon" ? REC_WEAP : kind == "armor" ? REC_ARMO
+		: kind == "clothing" ? REC_CLOT : kind == "book" ? REC_BOOK : REC_MISC;
+	std::string icon = lowerCase(d->stringAt("icon"));
+	const Object* base = nullptr;
+	for (auto& kv : w.game.objects)
+		if (kv.second.recType == want && kv.second.iconIx >= 0)
+		{
+			std::string oi = lowerCase(kv.second.icon.str());
+			bool same = !icon.empty() && !oi.empty() && (icon.size() >= oi.size() ? icon.compare(icon.size() - oi.size(),
+				oi.size(), oi) == 0 : oi.compare(oi.size() - icon.size(), icon.size(), icon) == 0);
+			if (!base || same)
+				base = &kv.second;
+			if (same)
+				break;
+		}
+	if (!base)
+		return;
+	Object o = *base;
+	o.id = net;
+	o.name = d->stringAt("name", net);
+	o.value = (int)d->numberAt("value", o.value);
+	o.weight = (float)d->numberAt("weight", o.weight);
+	if (want == REC_ALCH)
+		o.effects = effectsFrom(d->get("effects"));
+	std::string ench = d->stringAt("enchant");
+	if (!ench.empty())
+	{
+		o.ench = localIdOf(ench);
+		o.magic = true;
+		if (o.iconBase.empty())
+			o.iconBase = base->id;
+	}
+	w.game.objects[net] = o;
+}
+
+bool Session::onlineRecordEvent(const std::string& name, const LValue& b)
+{
+	if (name == "RecordCreateAck" || name == "RecordCreateRefused")
+	{
+		auto p = og->recordPending.find((int)b.numberAt("tempId", -1));
+		if (p == og->recordPending.end())
+			return true;
+		std::string local = p->second;
+		og->recordPending.erase(p);
+		if (name == "RecordCreateAck")
+		{
+			std::string net = lowerCase(b.stringAt("recordNetId"));
+			g_recNet[local] = net;
+			g_recLocal[net] = local;
+			logf("online: %s is %s to the world", local.c_str(), net.c_str());
+		}
+		else
+		{
+			og->recordRefused.insert(local);
+			logf("online: the world refused our record %s (%s)", local.c_str(), b.stringAt("reason").c_str());
+		}
+		return true;
+	}
+	if (name == "RecordsSync")
+	{
+		// (enchantments first: the items name them)
+		if (const LValue* recs = b.get("records"))
+			for (int pass = 0; pass < 2; pass++)
+				for (int i = 1; i <= recs->arraySize(); i++)
+				{
+					const LValue* r = recs->at(i);
+					bool spellish = r->stringAt("kind") == "spell" || r->stringAt("kind") == "enchantment";
+					if (spellish == (pass == 0))
+						onlineRecord(*r);
+				}
+		return true;
+	}
+	return false;
+}
+
+// ---- hits and spells on us, our spells on other players and their casts (PROTOCOL.md M5); the map's explored places
+// and a cell made new again (M7); the server's correction of where we stand (0x0103)
+
+// Our cast just released: shown on others' screens (CombatCast), and its touch / target effects, when the crosshair
+// is on another player rather than on one of the world's people, sent to them (CombatSpellHit: a heal on a friend,
+// or harm where the server allows player fights)
+void Session::onlineCastReleased(const SpellDef& sp, const std::string& spellId)
+{
+	if (!g_online || !og || g_online->phase != Online::IN_WORLD)
+		return;
+	Online& on = *g_online;
+	LValue cast = LValue::newTable();
+	cast.set("spellId", netIdOf(spellId));
+	cast.set("casterId", (double)on.playerId);
+	cast.set("kind", castSource.empty() ? "spell" : "enchant");
+	on.sendEvent("CombatCast", cast);
+	bool touch = false, target = false;
+	for (auto& e : sp.effects)
+		touch |= e.range == 1, target |= e.range == 2;
+	if (!touch && !target)
+		return;
+	float eye[3] = { w.player.feet[0], w.player.feet[1], w.player.feet[2] + PLAYER_EYE_HEIGHT };
+	float dir[3] = { sinf(w.player.yaw) * cosf(w.player.pitch), cosf(w.player.yaw) * cosf(w.player.pitch), sinf(w.player.pitch) };
+	int best = -1;
+	float bestD = 1e9f;
+	for (auto& kv : on.players)
+	{
+		const RemotePlayer& p = kv.second;
+		if (!p.inView || p.lastAt < 0)
+			continue;
+		float to[3] = { p.last.x - eye[0], p.last.y - eye[1], p.last.z + 80.0f - eye[2] };
+		float d = sqrtf(to[0] * to[0] + to[1] * to[1] + to[2] * to[2]);
+		float reach = target ? 4000.0f : 200.0f;
+		if (d < 1.0f || d > reach)
+			continue;
+		float along = (to[0] * dir[0] + to[1] * dir[1] + to[2] * dir[2]) / d;
+		if (along > cosf(0.12f) && d < bestD)
+		{
+			best = kv.first;
+			bestD = d;
+		}
+	}
+	if (best < 0)
+		return;
+	LValue effects = LValue::newTable(), indexes = LValue::newTable();
+	for (size_t i = 0; i < sp.effects.size(); i++)
+	{
+		const SpellEffect& e = sp.effects[i];
+		if (e.range != 1 && e.range != 2)
+			continue;
+		LValue fx = LValue::newTable();
+		fx.set("id", magicEffectId(e.effect));
+		fx.set("magnitude", (double)((e.min + e.max) / 2));
+		fx.set("duration", (double)e.duration);
+		fx.set("index", (double)i);
+		effects.push(fx);
+		indexes.push(LValue((int)i));
+	}
+	LValue t = LValue::newTable();
+	t.set("playerId", (double)best);
+	LValue b = LValue::newTable();
+	b.set("target", t);
+	b.set("spellId", netIdOf(spellId));
+	b.set("effects", effects);
+	b.set("indexes", indexes);
+	b.set("casterId", (double)on.playerId);
+	on.sendEvent("CombatSpellHit", b);
+	logf("online: %s at player %d", spellId.c_str(), best);
+}
+
+void Session::onlineWorldMisc(float now)
+{
+	Online& on = *g_online;
+	// People a script placed: the server's world places them (PROTOCOL.md M3 ObjectSpawnRequest actor=true -> QuestSpawn)
+	w.actorsElsewhere = !on.holderOf.empty();
+	for (auto& a : w.spawnAsks)
+	{
+		LValue b = LValue::newTable();
+		b.set("tempId", 0.0);
+		b.set("recordId", netIdOf(a.id));
+		b.set("cellKey", cellKeyAt(w, w.current));
+		b.set("x", (double)a.pos[0]);
+		b.set("y", (double)a.pos[1]);
+		b.set("z", (double)a.pos[2]);
+		b.set("rotZ", (double)a.yaw);
+		b.set("count", (double)std::min(10, a.count));
+		b.set("actor", LValue::boolean(true));
+		on.sendEvent("ObjectSpawnRequest", b);
+		logf("online: asked the world to place %d %s", a.count, a.id.c_str());
+	}
+	w.spawnAsks.clear();
+	// The places we have been outdoors (the map), told once each
+	if (w.current >= 0 && !w.cells[w.current].interior)
+	{
+		std::string key = cellKeyAt(w, w.current);
+		if (og->exploredSaid.insert(key).second && og->exploredSeeded)
+		{
+			LValue keys = LValue::newTable();
+			keys.push(LValue(key));
+			LValue b = LValue::newTable();
+			b.set("cellKeys", keys);
+			on.sendEvent("WorldMapExplored", b);
+		}
+		og->exploredSeeded = true;
+	}
+	// Where the server says we stand (it refused a move, or it runs our movement): put there when it is far from here
+	if (on.correctionAt > og->correctionSeen)
+	{
+		og->correctionSeen = on.correctionAt;
+		float dx = on.correction.x - w.player.feet[0], dy = on.correction.y - w.player.feet[1];
+		float dz = on.correction.z - w.player.feet[2];
+		if (dx * dx + dy * dy + dz * dz > 96.0f * 96.0f && w.current >= 0)
+		{
+			float pos[3] = { on.correction.x, on.correction.y, on.correction.z };
+			teleportPlayer(w.current, pos, w.player.yaw);
+			logf("online: the world put us back at %.0f %.0f %.0f", pos[0], pos[1], pos[2]);
+		}
+	}
+	(void)now;
+}
+
+bool Session::onlineCombatEvent(const std::string& name, const LValue& b)
+{
+	if (name == "CombatHit")
+	{
+		// a blow on us the server sent here to land (no copy of us there): our armor takes its share
+		const LValue* d = b.get("damage");
+		if (!d)
+			return true;
+		float hp = (float)d->numberAt("health"), ft = (float)d->numberAt("fatigue"), mp = (float)d->numberAt("magicka");
+		float armor = playerArmor();
+		if (hp > 0.0f)
+			hp = hp * hp / (hp + fmaxf(0.0f, armor));     // (OpenMW's armor: damage x damage / (damage + rating))
+		w.stats.health -= hp;
+		w.stats.fatigue -= ft;
+		w.stats.magicka = fmaxf(0.0f, w.stats.magicka - mp);
+		if (hp > 0.0f)
+			playSound(-1, "Health Damage");
+		logf("online: hit by player %d for %.1f", (int)b.numberAt("attackerId", -1), hp);
+		return true;
+	}
+	if (name == "CombatSpellHit")
+	{
+		// a spell on us (a friend's heal, a foe's fire): the record's effects that hit, with our own reflect and
+		// resistances
+		onlineSpellOnSelf(b.stringAt("spellId"), b.get("indexes"), "");
+		return true;
+	}
+	if (name == "CombatCast")
+	{
+		// someone cast: the cast's light on their body
+		auto p = g_online->players.find((uint16_t)b.numberAt("fromId", b.numberAt("casterId", -1)));
+		auto sp = w.game.spells.find(localIdOf(b.stringAt("spellId")));
+		if (p != g_online->players.end() && p->second.lastAt >= 0 && sp != w.game.spells.end())
+		{
+			float pos[3] = { p->second.last.x, p->second.last.y, p->second.last.z };
+			spellVfx(sp->second, 0, pos, -2, p->second.last.yaw);
+		}
+		return true;
+	}
+	if (name == "WorldMapExplored")
+	{
+		// places the others found: on our map (the named ones, as the game marks only those)
+		if (const LValue* keys = b.get("cellKeys"))
+			for (int i = 1; i <= keys->arraySize(); i++)
+			{
+				std::string key = keys->at(i)->str;
+				og->exploredSaid.insert(key);
+				int c = cellOfKey(w, key);
+				if (c >= 0 && !w.cells[c].interior && w.cells[c].name.str() != w.cells[c].region.str()
+					&& lowerCase(w.cells[c].name.str()) != "wilderness")
+					w.mapKnown.insert(lowerCase(w.cells[c].name.str()));
+			}
+		return true;
+	}
+	if (name == "WorldCellReset")
+	{
+		// the server made a cell new again: its objects as the level has them, then its state asked for afresh
+		int c = cellOfKey(w, b.stringAt("cellKey"));
+		if (c >= 0)
+		{
+			w.respawnCell(c);
+			LValue q = LValue::newTable();
+			q.set("cellKey", b.stringAt("cellKey"));
+			g_online->sendEvent("ResyncRequest", q);
+			logf("online: %s made new again", b.stringAt("cellKey").c_str());
+		}
+		return true;
+	}
+	return false;
+}
+
 // ---- the world's people and creatures the server simulates (PROTOCOL.md M4): whoever holds their cell (the sim peer)
 // streams them; here they stand, walk, swing and die as it says (openmw-web's puppet.lua)
 
@@ -2079,7 +3258,11 @@ bool Session::onlinePuppet(int ri)
 	if (!g_online || !og || g_online->phase != Online::IN_WORLD || ri < 0 || ri >= (int)w.refs.size())
 		return false;
 	const Ref& r = w.refs[ri];
-	if (r.rnFile < 0 || r.actor < 0 || r.rnFile >= (int)og->contentFiles.size() || og->contentFiles[r.rnFile] < 0)
+	if (r.actor < 0)
+		return false;
+	if (r.rnFile == kNetActorFile)
+		return true;                  // (spawned by the server's world: always its)
+	if (r.rnFile < 0 || r.rnFile >= (int)og->contentFiles.size() || og->contentFiles[r.rnFile] < 0)
 		return false;
 	Online& on = *g_online;
 	auto a = on.actors.find(netRefKey(og->contentFiles[r.rnFile], r.rnIndex));
@@ -2138,7 +3321,8 @@ void Session::onlinePuppets(float now)
 		Ref& r = w.refs[i];
 		if (r.actor < 0 || !r.visible() || !onlinePuppet(i))
 			continue;
-		auto it = on.actors.find(netRefKey(og->contentFiles[r.rnFile], r.rnIndex));
+		auto it = on.actors.find(r.rnFile == kNetActorFile ? netRefKey(kNetActorFile, r.rnIndex)
+			: netRefKey(og->contentFiles[r.rnFile], r.rnIndex));
 		if (it == on.actors.end())
 			continue;
 		NetActor& n = it->second;
@@ -2203,6 +3387,19 @@ void Session::onlineDrawPlayers(bool deform)
 	}
 }
 
+// A report written about a player (the online screen's Report): to the server's moderators
+void Session::onlineReport(const std::string& reason)
+{
+	if (!g_online || !og || og->reportName.empty())
+		return;
+	LValue b = LValue::newTable();
+	b.set("name", og->reportName);
+	b.set("reason", reason.substr(0, 400));
+	g_online->sendEvent("ReportPlayer", b);
+	notify("Reported " + og->reportName + ". Thank you.");
+	og->reportName.clear();
+}
+
 void Session::onlineFree()
 {
 	if (!og)
@@ -2250,6 +3447,44 @@ void Session::drawOnline()
 			right.push_back(kv.second.inView ? "near" : kv.second.cellKey);
 		}
 		uiList(og->list, 4, 50, 312, 150, rows, 0.5f, true, &right);
+		// (a player to report: ReportPlayer files it for the server's moderators with what they said lately)
+		int sel = og->list.selected;
+		if (sel >= 1 && sel < (int)rows.size())
+		{
+			auto it = on.players.begin();
+			std::advance(it, sel - 1);
+			const std::string& who = it->second.name;
+			if (uiButton(110, 208, 100, 28, "Report"))
+			{
+				og->reportName = who;
+				wantText = TEXT_REPORT;
+			}
+			// (block: no messages, requests or invites from them; mute: their chat hidden; the owner sends a guest home)
+			bool muted = false;
+			if (const LValue* m = og->friends.get("muted"))
+				for (int i = 1; i <= m->arraySize(); i++)
+					muted |= lowerCase(m->at(i)->stringAt("name")) == lowerCase(who);
+			if (uiButton(4, 174, 100, 26, "Block"))
+			{
+				LValue b = LValue::newTable();
+				b.set("name", who);
+				on.sendEvent("BlockAdd", b);
+				notify("Blocked " + who);
+			}
+			if (!muted && uiButton(108, 174, 100, 26, "Mute"))
+			{
+				LValue b = LValue::newTable();
+				b.set("name", who);
+				on.sendEvent("MuteAdd", b);
+				notify("Muted " + who);
+			}
+			if (og->isOwner && uiButton(212, 174, 100, 26, "Send home"))
+			{
+				LValue b = LValue::newTable();
+				b.set("name", who);
+				on.sendEvent("WorldKick", b);
+			}
+		}
 	}
 	else if (og->tab == 1)
 	{
@@ -2275,11 +3510,13 @@ void Session::drawOnline()
 		take("requests", "request");
 		take("invites", "invite");
 		take("friends", "friend");
+		take("blocked", "blocked");
+		take("muted", "muted");
 		for (auto& f : fr)
 		{
 			rows.push_back(f.name);
 			right.push_back(f.kind == "request" ? "wants to be friends" : f.kind == "invite" ? "invites you"
-				: f.online ? "online" : "offline");
+				: f.kind == "blocked" ? "blocked" : f.kind == "muted" ? "muted" : f.online ? "online" : "offline");
 		}
 		int pick = uiList(og->list, 4, 50, 312, 120, rows, 0.5f, true, &right);
 		(void)pick;
@@ -2312,6 +3549,36 @@ void Session::drawOnline()
 		}
 		if (uiButton(108, 174, 100, 26, "Add friend"))
 			wantText = TEXT_FRIEND;
+		static const char* kRemove[][2] = { { "friend", "FriendRemove" }, { "blocked", "BlockRemove" }, { "muted", "MuteRemove" } };
+		static const char* kRemoveLabel[] = { "Remove", "Unblock", "Unmute" };
+		bool removing = false;
+		for (int k = 0; k < 3 && has; k++)
+			if (fr[sel].kind == kRemove[k][0])
+			{
+				removing = true;
+				if (uiButton(110, 208, 100, 28, kRemoveLabel[k]))
+				{
+					LValue b = LValue::newTable();
+					b.set("acct", fr[sel].acct);
+					on.sendEvent(kRemove[k][1], b);
+				}
+			}
+		// who sees us: everyone, friends, nobody, or we appear offline (PresenceMode, SetAvailability)
+		static const char* kPresence[] = { "Seen: all", "Seen: friends", "Seen: none", "Offline" };
+		if (!removing && uiButton(110, 208, 100, 28, kPresence[og->presence]))
+		{
+			og->presence = (og->presence + 1) % 4;
+			static const char* kMode[] = { "public", "friends", "private" };
+			LValue a = LValue::newTable();
+			a.set("state", og->presence == 3 ? "offline" : "online");
+			on.sendEvent("SetAvailability", a);
+			if (og->presence < 3)
+			{
+				LValue m = LValue::newTable();
+				m.set("mode", kMode[og->presence]);
+				on.sendEvent("PresenceMode", m);
+			}
+		}
 	}
 	if (uiButton(4, 208, 100, 28, "Say"))
 		wantText = TEXT_CHAT;

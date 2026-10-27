@@ -19,6 +19,7 @@
 
 void Session::makeHostile(int ri)
 {
+	onlineCrimeCombat(ri, false);     // (online, one of the server's people: its holder starts the real fight)
 	Ref& r = w.refs[ri];
 	if (r.dead || r.ai == AI_COMBAT)
 		return;

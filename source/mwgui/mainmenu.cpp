@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "mwmp/online.hpp"
 #include "mwgui/windowmanagerimp.hpp"
 #include "mwbase/session.hpp"
 #include <algorithm>
@@ -86,6 +87,14 @@ void Session::drawGameMenu()
 
 void Session::drawDeath()
 {
+	// Online: the world brings the dead back (its respawn: PlayerResurrect, mwmp/mpgame.cpp); nothing to load
+	if (g_online && g_online->phase == Online::IN_WORLD)
+	{
+		header("You have fallen");
+		uiPanel(4, 24, 312, 150);
+		uiTextBox(scroll, 10, 30, 300, 140, "The world will bring you back in a moment.", 0.5f, false);
+		return;
+	}
 	// Morrowind and OpenMW: death leads to loading a game, never a getting up again where one fell
 	header("You have died");
 	uiPanel(4, 24, 312, 150);

@@ -50,6 +50,16 @@ std::optional<float> transformationExtensions(Ctx& c, const Node& n, World& w, b
 	case F_PLACEATPC: case F_PLACEATME:
 	{
 		bool atPC = n.func == F_PLACEATPC || !r;
+		if (w.actorsElsewhere && w.game.spawns.count(lower(argStr(c, n, 0))))
+		{
+			// (online: a person or creature is the server's world's to place; it asks, and they come back as its own)
+			const float* at = atPC ? w.player.feet : r->pos;
+			float yaw = atPC ? w.player.yaw : r->rot[2], dist = argNum(c, n, 2, 0);
+			World::SpawnAsk ask = { lower(argStr(c, n, 0)), std::max(1, (int)argNum(c, n, 1, 1)),
+				{ at[0] + sinf(yaw) * dist, at[1] + cosf(yaw) * dist, at[2] }, yaw };
+			w.spawnAsks.push_back(ask);
+			return 0.0f;
+		}
 		w.placeAt(argStr(c, n, 0), (int)argNum(c, n, 1, 1), argNum(c, n, 2, 0), (int)argNum(c, n, 3, 0),
 			atPC ? w.player.feet : r->pos, atPC ? w.player.yaw : r->rot[2]);
 		return 0.0f;

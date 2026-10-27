@@ -19,7 +19,8 @@ struct MechanicsState
 	// Online: the player's spell (or the item it came from) while its effects land, so a hit on one of the server's
 	// people goes to the server whole (mwmp/mpgame.cpp onlineSpellHit) instead of landing here
 	const struct SpellDef* netSpell = nullptr;
-	std::string netSpellId, castSource;         // a spell's animation is playing: it lands at the animation's release mark
+	std::string netSpellId, castSource;
+	int castSerial = 0;               // the player's casts so far (each one's effects on the player share its number)         // a spell's animation is playing: it lands at the animation's release mark
 
 	SpellDef castDef;                 // that spell, as chosen when the cast began
 

@@ -59,6 +59,9 @@ struct ThirdPersonDef
 struct FirstPersonDef
 {
 	ThirdPersonDef third;
+	// Bloodmoon's werewolf in first person: its own skeleton (an index into fp/skeletons.skl, -1 none) and arms
+	int werewolfSkeleton = -1;
+	std::string werewolfPiece;
 	std::unordered_map<std::string, std::string> vfx;   // spell visual static id -> piece
 	std::unordered_map<int, std::string> ptex;          // magic effect -> its particle texture (a piece's fx shapes take it)
 	std::unordered_map<std::string, float> vfxLength;  // spell visual piece -> seconds it plays (its longest controller)

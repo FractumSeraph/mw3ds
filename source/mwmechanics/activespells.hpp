@@ -11,4 +11,8 @@ struct ActiveEffect
 	std::string source;
 	int ref = -1;                     // summons: the creature, gone when the effect ends
 	std::string item, prev;           // bound items: the item given, and what it replaced
+	// The player's own cast it came from (online: PlayerActiveSpells): the spell, which of its effects, and the cast's
+	// number (one key per cast); "" for anything else
+	std::string spellId;
+	int index = -1, cast = 0;
 };

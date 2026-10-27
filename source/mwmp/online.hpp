@@ -150,6 +150,9 @@ public:
 	int loadOrderOf(int contentFile) const;        // and back (-1: not one of this data's files)
 	// ---- the input tier (0x0102): what the player does, for the server's copy of them to swing, block and ready
 	void sendInput(float moveAxis, float sideAxis, float yaw, float pitch, uint8_t flags, int simMs);
+	// The server's word on where we stand (0x0103 PlayerStateBatch: a move it refused, or its own movement model)
+	NetPose correction;
+	float correctionAt = 0;
 	float selfStatsAt = -100;                     // when the server last reported our bars (SelfStats: its copy of us takes the blows)
 	std::deque<ChatLine> chat;                            // the newest last, a few dozen kept
 	int chatRevision = 0;

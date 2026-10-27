@@ -486,11 +486,13 @@ bool Engine::frame()
 			bool offer = session->wantText == Session::TEXT_OFFER;          // the gold offered in a barter: the number pad
 			bool chat = session->wantText == Session::TEXT_CHAT;            // the online mode: a line to say
 			bool friendName = session->wantText == Session::TEXT_FRIEND;
+			bool report = session->wantText == Session::TEXT_REPORT;     // why a player is reported
 			if (offer)
 				swkbdInit(&kb, SWKBD_TYPE_NUMPAD, 2, 6);
 			else
-				swkbdInit(&kb, SWKBD_TYPE_NORMAL, 2, console || classDesc || chat ? 200 : 31);
+				swkbdInit(&kb, SWKBD_TYPE_NORMAL, 2, console || classDesc || chat || report ? 200 : 31);
 			swkbdSetHintText(&kb, chat ? "Say (start with ! for everyone in the world)" : friendName ? "Your friend's username"
+				: report ? "What did they do?"
 				: offer ? "Your offer (gold)" : console ? "Script line, e.g. Player->AddItem gold_001 100" : search ? "Search"
 				: classDesc ? "Describe your class" : session->wantText == Session::TEXT_CLASSNAME ? "Name your class"
 				: session->screen == SCR_ENCHANT ? "Name the item" : "Name the spell");

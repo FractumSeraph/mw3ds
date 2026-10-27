@@ -31,7 +31,8 @@ What the engine runs for Bloodmoon (`source/mwmechanics/werewolf.cpp` and the sc
 
 The werewolf is drawn as Bloodmoon draws its werewolf NPCs: the beast-legged skeleton under the werewolf robe, with
 the werewolf head and hair. That covers the player in third person and other online players who are werewolves.
-**Not yet:** the beast's first-person claws (the first-person view shows bare hands).
+In first person the werewolf has its own arms and claws (`wolf/skin.1st.nif`, with its hand-to-hand animations), on
+its own skeleton: the converter writes it as the second first-person skeleton when the data has Bloodmoon.
 
 ## The online mode
 
@@ -59,23 +60,27 @@ Chat lines also show as notes on the top screen.
 The game's own autosave goes to `sdmc:/3ds/mw3ds/online_save.json` while online, so it never replaces the offline
 one. The server keeps the online character.
 
-### What is shared, and what is not yet
+### What is shared
+
+Every part of openmw-web's protocol (server/PROTOCOL.md) a player's client takes part in, phase by phase:
 
 | What | How |
 |---|---|
-| The players | Moves (15 a second), cell changes, looks, equipment, health / magicka / fatigue, attributes, skills, level, pack, spells, chat, friends, invites, party worlds. Character creation done (ChargenComplete), the stored character put back on |
-| The world's people and creatures | On a server with a sim peer (openmw-web's platform), the peer simulates them and streams them; the 3DS draws them where it says: standing, walking, running, weapon out, their blows, their health, deaths and revivals. They have no mind of their own on the 3DS. In a cell nobody holds (a server without a peer), the 3DS runs them itself, as offline |
-| Fights | The player's swings go to the server's copy of the player (the input tier's use bit), so blows land there, armor and all, and the server's copy takes the world's blows: its health, magicka and fatigue come back (SelfStats). The player's spells on the server's people go to it whole (CombatSpellHit: the spell, or the item it came from, and the effects that hit), and their owner applies them, reflect and resistances included; the server only takes spells the character knows. Crimes the server sees come back as bounty |
-| Objects | Items taken, doors opened, locks, objects scripts switch on or off, the dead: each cell's state from the server on arrival, and everyone's changes as they happen. Things dropped from the pack lie there for everyone (ObjectSpawnRequest / ObjectPlace), and picking one up is the server's to grant: someone who got there first keeps it |
-| Containers | Chests, corpses and plants hold the same for everyone: the first to open one fixes what is in it, then every take or put is the server's |
-| The story | Journal stages, dialogue topics, globals, faction ranks and reputation, the bounty (as the server's sharing settings say) |
-| The clock | The server's time and date; a rest or a wait asks the server to move everyone's clock on |
-| The sky | Each region's weather is simulated by one player there (the server picks), and everyone else in it gets the same sky and its changes |
-| Conversations | One player talks to a person at a time (DialogueLock): someone who is already talking to them keeps them, and the 3DS says who |
-| Followers | Someone a conversation sends after the player (AIFollow, AIEscort) follows the server's copy of the player there (ActorAI follow claim). Not yet tried against a server with a sim peer |
-| Merchants' gold | A merchant's purse is one for everyone: trading changes it on the server (op "gold"). Not yet tried in a trade |
+| The players (M1, M2) | Moves (15 a second), cell changes, looks, equipment, health / magicka / fatigue (with the local gain, `d`), attributes, skills, level and reputation, pack, spells, the Mark, chat (and `!` to the whole world). Character creation done (ChargenComplete), the stored character put back on. Everything picked up is credited for what may be dropped (PlayerItemAcquired). Other players' visible magic (Invisibility, Chameleon) shows on their bodies |
+| Death (M2) | Dying online tells the server (PlayerDeath, again every five seconds until it answers); its respawn brings the player back where they fell or at its spot (PlayerResurrect). The death screen waits for that instead of offering a load |
+| The input tier (Phase 3, 4) | 30 times a second while the server simulates the world: where the player looks, their swing (the use bit) and their stance, so the server's copy of them fights there. What that copy goes through comes back: its bars (SelfStats), skill uses from blocks and armor hits (SelfSkillUse), diseases and other spells (SelfSpells), magic laid on it (SelfActiveSpells), its items' wear, charge and souls (SelfItemStates). The player's own magic is worn by the copy too (PlayerActiveSpells). Where the server corrects the player's position (0x0103), they are put there |
+| The world's people and creatures (M4) | On a server with a sim peer (openmw-web's platform), the peer simulates them and streams them (ActorMoveBatch); the 3DS draws them where it says: standing, walking, running, weapon out, their blows, health, deaths and revivals, the magic that shows on them, disposition and Fight / Flee / Alarm, a door they go through, a scripted line, a finished package, a unique corpse stripped. People the server spawns (summons, leveled creatures, a quest's PlaceAtPC, which the 3DS asks the server for) appear as its own. They have no mind of their own on the 3DS. In a cell nobody holds (a server without a peer), the 3DS runs them itself, as offline |
+| Fights (M5) | The player's swings land on the server's copy (above). Their spells on the server's people go to it whole (CombatSpellHit: the spell, or the item it came from, and which effects hit), and on another player in the crosshair to that player (a heal, or harm where the server allows player fights); a cast shows on everyone's screen (CombatCast). Blows and spells sent to the player land with their own armor, reflect and resistances. A witness the server simulates who turns on the player is claimed to fight there. Crimes the server sees come back as bounty, and its guards' arrests open the arrest conversation (PlayerArrest) |
+| Objects (M3) | Items taken, doors opened, locks, objects scripts switch on or off or move, script variables of objects (MemberVarUpdate: watched on whoever we talk to and whatever we open), the dead: each cell's state from the server on arrival, and everyone's changes as they happen. Things dropped from the pack lie there for everyone (ObjectSpawnRequest / ObjectPlace), and picking one up is the server's to grant: someone who got there first keeps it |
+| Containers (M3) | Chests, corpses and plants hold the same for everyone: the first to open one fixes what is in it, then every take or put is the server's. A merchant's purse is one for everyone too (op "gold") |
+| The story (M6) | Journal stages, dialogue topics, globals, faction ranks and reputation, the bounty, the global scripts running (as the server's sharing settings say). Visiting a friend's world, their journal is put on for the visit and ours put back at home |
+| Conversations (M6) | One player talks to a person at a time (DialogueLock): someone who is already talking to them keeps them, and the 3DS says who. A conversation that sends someone after the player (AIFollow, AIEscort) or somewhere (AITravel) has the server's copy do it |
+| The world (M7) | The server's time and date; a rest or a wait asks the server to move everyone's clock on. Each region's weather is simulated by one player there and shown to the rest. Spells, potions and enchanted items players make get the server's id and travel by it (RecordCreate); the others' are built here (RecordsSync). The places explored outdoors go on everyone's map. A cell the server makes new again is reset here |
+| Social (Phase C) | Friends (requests, accept, remove), block, mute, invites, joining a friend's party world, opening ours, sending a guest home (as the owner), who sees us online (PresenceMode, SetAvailability), reporting a player to the server's moderators |
 
-**Not yet:** the werewolf's first-person claws.
+The 3DS's own limits: the world's people are drawn with the clothes and weapon the converter dressed them in, so a
+change of their equipment there (ActorEquip) does not show; a script moving one of the server's people with
+PositionCell moves our copy only.
 
 Each player sees the others walk and run where they are, dressed as they are.
 

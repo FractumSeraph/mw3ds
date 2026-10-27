@@ -291,7 +291,12 @@ struct World
 	int dropItem(const InventoryItem& it, const float pos[3], float yaw, int cell = -1);
 	// In front of a spot on the floor there (dist units along yaw)
 	int dropItemAt(const InventoryItem& it, const float base[3], float yaw, float dist);
-	std::vector<int> playerDrops;     // online: what the player dropped from the pack since mwmp last looked
+	std::vector<int> playerDrops;
+	// Online, with the world's people simulated by the server: people a script places (PlaceAtPC / PlaceAtMe) are the
+	// server's to spawn (it does, and they come back as its own); asked here, sent by mwmp
+	bool actorsElsewhere = false;
+	struct SpawnAsk { std::string id; int count; float pos[3]; float yaw; };
+	std::vector<SpawnAsk> spawnAsks;     // online: what the player dropped from the pack since mwmp last looked
 	int spawnActor(const std::string& id, const float pos[3], float yaw, int cell = -1);
 	void despawn(int ri);             // a placed reference goes (a summons ends)
 	// Day and night outdoors: the tint on baked lighting, the sky's and the fog colour for this hour

@@ -868,8 +868,22 @@ void Online::onBinary(const std::string& data)
 			a.lastAt = now;
 		}
 	}
-	// 0x0103 (our own pose corrected: only under the server's input-replay model, which is off with clientAuthority)
-	(void)T_STATE_BATCH;
+	else if (type == T_STATE_BATCH)
+	{
+		// [u8 count] count x (u16 id, u32 last input seq, 20-byte pose): ours is where the server says we stand
+		if (n < 1)
+			return;
+		int count = body[0];
+		for (int i = 0; i < count && 1 + (size_t)(i + 1) * 26 <= n; i++)
+		{
+			const uint8_t* e = body + 1 + i * 26;
+			if (getU16(e) == (uint16_t)playerId)
+			{
+				correction = getPose(e + 6);
+				correctionAt = now > 0 ? now : 0.001f;
+			}
+		}
+	}
 }
 
 // The events this client acts on (PROTOCOL.md event tier); the rest wait in `events` for the game, or are dropped
@@ -998,6 +1012,9 @@ void Online::onEvent(const std::string& name, const LValue& b)
 	else if (name == "ActorStatsDynamic" || name == "ActorDeath" || name == "ActorRevive" || name == "ActorAI")
 	{
 		const LValue* ref = b.get("ref");
+		LValue netRef = LValue::refNum((uint32_t)b.numberAt("net", 0), -2);   // (a server-spawned actor: content file -2)
+		if (!ref && b.get("net"))
+			ref = &netRef;
 		if (!ref || ref->type != LValue::REFNUM)
 			return;
 		NetActor& a = actors[netRefKey(ref->refFile, ref->refIndex)];
@@ -1013,6 +1030,8 @@ void Online::onEvent(const std::string& name, const LValue& b)
 		{
 			if (const LValue* c = b.get("combat"))
 				a.combat = c->type == LValue::NUMBER ? (int)c->num : 0;
+			if (b.boolAt("done"))
+				events.push_back({ name, b });
 		}
 		else
 			a.dead = name == "ActorDeath";
