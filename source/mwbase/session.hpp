@@ -501,6 +501,11 @@ struct Session : ScriptHost, WindowManagerState, MechanicsState, RenderState, So
 	void onlinePuppets(float now);
 	void onlineStory(float now);
 	bool onlineStoryEvent(const std::string& name, const struct LValue& body);
+	int onlineRefOf(unsigned long long wireKey, const std::string& cellKey);
+	void onlineObjectApply(int ri, const char* what, double value);
+	void onlineCellState(const std::string& cellKey, const struct LValue& body);
+	void onlineObjects(float now);
+	bool onlineObjectEvent(const std::string& name, const struct LValue& body);
 	void onlineTick(float dt);
 	void onlineDrawPlayers(bool deform);
 	void onlineFree();

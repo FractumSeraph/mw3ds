@@ -20,6 +20,13 @@
 #include "mwrender/npcanimation.hpp"
 #include "mwworld/worldhelpers.hpp"
 
+// What the online mode watches of a placed object (PROTOCOL.md M3): taken, a swing door open, its lock (0 open), shown
+struct ObjSeen
+{
+	bool taken = false, open = false, enabled = true;
+	int lock = 0;
+};
+
 struct OnlineGame
 {
 	std::map<uint16_t, PlayerBody> bodies;
@@ -57,6 +64,12 @@ struct OnlineGame
 	std::map<std::string, std::string> factionsSaid;
 	int bountySaid = -1;
 	// The clock (M7): adopted from the server, and our rests and waits asked of it
+	// The world's objects: each as last seen or told (by wire key), the cells' states waiting for their objects
+	std::map<uint64_t, ObjSeen> objSeen;
+	std::map<std::string, LValue> cellStates;
+	bool objectsHidden = false;          // something was hidden or shown: World::refreshHidden
+	float objectsAt = 0;
+	int opId = 0;
 	bool clockAdopted = false;
 	float clockHour = -1;                // gameHour after the last frame (a jump past it is a rest or a wait)
 };
@@ -754,13 +767,14 @@ void Session::onlineTick(float dt)
 			w.bounty = std::max(0, w.bounty + add);
 			logf("online: a crime in the world (%s): bounty %+d, now %d", e.body.stringAt("kind").c_str(), add, w.bounty);
 		}
-		else if (onlineStoryEvent(e.name, e.body))
+		else if (onlineStoryEvent(e.name, e.body) || onlineObjectEvent(e.name, e.body))
 			;
 		else if (e.name == "WorldKillCount")
 			w.deadCounts[lowerCase(e.body.stringAt("refId"))] = (int)e.body.numberAt("count");
 	}
 	onlinePuppets(now);
 	onlineStory(now);
+	onlineObjects(now);
 	// The other players' bodies: dressed as they are, where they stand (a tenth of a second behind, between the last
 	// two poses), walking or running as fast as they go
 	for (auto it = og->bodies.begin(); it != og->bodies.end();)
@@ -1062,6 +1076,258 @@ bool Session::onlineStoryEvent(const std::string& name, const LValue& b)
 		notify("The world's time can't move on: " + b.stringAt("reason"));
 	else
 		return false;
+	return true;
+}
+
+// ---- the world's objects (PROTOCOL.md M3): what was taken, opened, unlocked, switched on or off, and who lies dead
+
+namespace
+{
+ObjSeen objNow(const Ref& r)
+{
+	ObjSeen s;
+	s.taken = r.pickedUp;
+	s.open = r.doorTarget > 0.0f;
+	s.lock = r.lockLevel > 0 ? r.lockLevel : 0;
+	s.enabled = r.enabled;
+	return s;
+}
+
+// "c:<index>:<content file>" (the server's doc keys) as a wire key; 0 for a spawned object's "n:<id>"
+uint64_t keyOfRefKey(const std::string& k)
+{
+	long long index, file;
+	if (sscanf(k.c_str(), "c:%lld:%lld", &index, &file) != 2)
+		return 0;
+	return netRefKey((int32_t)file, (uint32_t)index);
+}
+}
+
+// The reference of this level a wire key names, in the cell given (or any loaded one); -1 when it isn't here
+int Session::onlineRefOf(unsigned long long key, const std::string& cellKey)
+{
+	auto match = [&](int i) {
+		const Ref& r = w.refs[i];
+		return r.rnFile >= 0 && r.rnFile < (int)og->contentFiles.size()
+			&& netRefKey(og->contentFiles[r.rnFile], r.rnIndex) == key;
+	};
+	int c = cellKey.empty() ? -1 : cellOfKey(w, cellKey);
+	if (c >= 0 && w.cells[c].refsLoaded)
+	{
+		const LevelCell& lc = w.cells[c];
+		for (int i = lc.refBase; i < lc.refBase + lc.refCount; i++)
+			if (match(i))
+				return i;
+	}
+	int found = -1;
+	w.forLoadedRefs([&](int i) {
+		if (found < 0 && match(i))
+			found = i;
+	});
+	return found;
+}
+
+// What the world says of one object, put on it here (and noted as seen: it is not told back)
+void Session::onlineObjectApply(int ri, const char* what, double value)
+{
+	Ref& r = w.refs[ri];
+	std::string k = what;
+	if (k == "taken" || k == "deleted")
+	{
+		if (isItemType(r.type.str()))
+			r.pickedUp = true;
+		else if (r.actor < 0)
+			r.enabled = false;
+		else if (!r.dead)
+		{
+			r.dead = true;            // (a corpse cleared away there)
+			r.enabled = false;
+		}
+		og->objectsHidden = true;
+	}
+	else if (k == "enabled")
+	{
+		r.enabled = value != 0.0;
+		og->objectsHidden = true;
+	}
+	else if (k == "open")
+	{
+		bool open = value != 0.0;
+		if ((r.doorTarget > 0.0f) != open)
+		{
+			r.doorTarget = open ? 1.5708f : 0.0f;
+			if (r.obj)
+				playSound(ri, open ? r.obj->openSound : r.obj->closeSound);
+		}
+	}
+	else if (k == "lock")
+		r.lockLevel = value > 0 ? (int)value : r.lockLevel > 0 ? -r.lockLevel : r.lockLevel;
+	else if (k == "dead")
+	{
+		// dead there: a body here, already lying down (no fall, no sound, no tally: WorldKillCount keeps that)
+		if (r.actor >= 0 && !r.dead)
+		{
+			r.dead = true;
+			r.health = 0.0f;
+			r.ai = AI_IDLE;
+			w.syncActor(ri);
+		}
+	}
+	if (r.rnFile >= 0 && r.rnFile < (int)og->contentFiles.size())
+		og->objSeen[netRefKey(og->contentFiles[r.rnFile], r.rnIndex)] = objNow(r);
+}
+
+// A cell's state as the server keeps it (WorldCellState), once its objects are here
+void Session::onlineCellState(const std::string& cellKey, const LValue& b)
+{
+	int c = cellOfKey(w, cellKey);
+	if (c < 0 || !w.cells[c].refsLoaded)
+		return;
+	int n = 0;
+	auto each = [&](const char* field, const char* what, double value) {
+		if (const LValue* list = b.get(field))
+			for (int i = 1; i <= list->arraySize(); i++)
+			{
+				uint64_t key = keyOfRefKey(list->at(i)->str);
+				int ri = key ? onlineRefOf(key, cellKey) : -1;
+				if (ri >= 0)
+					onlineObjectApply(ri, what, value), n++;
+			}
+	};
+	each("deleted", "deleted", 1);
+	each("disabled", "enabled", 0);
+	each("enabled", "enabled", 1);
+	each("deaths", "dead", 1);
+	if (const LValue* doors = b.get("doors"))
+		for (auto& kv : doors->table)
+		{
+			int ri = onlineRefOf(keyOfRefKey(kv.first.str), cellKey);
+			if (ri >= 0)
+				onlineObjectApply(ri, "open", kv.second.truthy() ? 1 : 0), n++;
+		}
+	if (const LValue* locks = b.get("locks"))
+		for (auto& kv : locks->table)
+		{
+			int ri = onlineRefOf(keyOfRefKey(kv.first.str), cellKey);
+			if (ri >= 0)
+				onlineObjectApply(ri, "lock", kv.second.numberAt("lockLevel", 0)), n++;
+		}
+	if (n)
+		logf("online: %s as the world has it: %d objects changed", cellKey.c_str(), n);
+}
+
+void Session::onlineObjects(float now)
+{
+	Online& on = *g_online;
+	// cells whose state came before their objects did: put on once they are here
+	for (auto it = og->cellStates.begin(); it != og->cellStates.end();)
+	{
+		int c = cellOfKey(w, it->first);
+		if (c >= 0 && w.cells[c].refsLoaded)
+		{
+			onlineCellState(it->first, it->second);
+			it = og->cellStates.erase(it);
+		}
+		else
+			++it;
+	}
+	if (og->objectsHidden)
+	{
+		og->objectsHidden = false;
+		w.refreshHidden();
+	}
+	if (now < og->objectsAt)
+		return;
+	og->objectsAt = now + 0.5f;
+	// What the player did to the world since: told (a take is the server's to grant; the others are relayed)
+	w.forLoadedRefs([&](int i) {
+		const Ref& r = w.refs[i];
+		if (r.rnFile < 0 || r.rnFile >= (int)og->contentFiles.size() || og->contentFiles[r.rnFile] < 0)
+			return;
+		if (r.actor >= 0)
+			return;                   // (people and creatures are the M4 stream's)
+		uint64_t key = netRefKey(og->contentFiles[r.rnFile], r.rnIndex);
+		ObjSeen s = objNow(r);
+		auto seen = og->objSeen.find(key);
+		if (seen == og->objSeen.end())
+		{
+			og->objSeen[key] = s;     // (first look: as the level and the world's state have it)
+			return;
+		}
+		ObjSeen was = seen->second;
+		seen->second = s;
+		std::string cellKey = og->cellKeys.size() > (size_t)r.cell ? og->cellKeys[r.cell] : "";
+		auto body = [&]() {
+			LValue b = LValue::newTable();
+			b.set("ref", LValue::refNum(r.rnIndex, og->contentFiles[r.rnFile]));
+			b.set("cellKey", cellKey);
+			return b;
+		};
+		if (s.taken && !was.taken)
+		{
+			LValue b = body();
+			b.set("opId", (double)++og->opId);
+			on.sendEvent("ObjectTakeRequest", b);
+		}
+		if (s.open != was.open && r.recType == REC_DOOR)
+		{
+			LValue b = body();
+			b.set("open", LValue::boolean(s.open));
+			on.sendEvent("DoorState", b);
+		}
+		if (s.lock != was.lock)
+		{
+			LValue b = body();
+			if (s.lock > 0)
+				b.set("lockLevel", (double)s.lock);
+			on.sendEvent("ObjectLock", b);
+		}
+		if (s.enabled != was.enabled)
+		{
+			LValue b = body();
+			b.set("enabled", LValue::boolean(s.enabled));
+			on.sendEvent("ObjectEnabled", b);
+		}
+	});
+}
+
+// One of the objects' events from the server; false when it isn't one
+bool Session::onlineObjectEvent(const std::string& name, const LValue& b)
+{
+	if (name == "WorldCellState")
+	{
+		std::string key = b.stringAt("cellKey");
+		int c = cellOfKey(w, key);
+		if (c >= 0 && w.cells[c].refsLoaded)
+			onlineCellState(key, b);
+		else if (c >= 0)
+			og->cellStates[key] = b;
+		return true;
+	}
+	if (name != "ObjectDelete" && name != "DoorState" && name != "ObjectLock" && name != "ObjectEnabled"
+		&& name != "ObjectTakeResult")
+		return false;
+	if (name == "ObjectTakeResult")
+	{
+		if (!b.boolAt("ok", true))
+			logf("online: the world refused a take (%s)", b.stringAt("reason").c_str());
+		return true;
+	}
+	const LValue* ref = b.get("ref");
+	if (!ref || ref->type != LValue::REFNUM || b.numberAt("byId", -1) == g_online->playerId)
+		return true;
+	int ri = onlineRefOf(netRefKey(ref->refFile, ref->refIndex), b.stringAt("cellKey"));
+	if (ri < 0)
+		return true;
+	logf("online: %s on %s from player %d", name.c_str(), w.refs[ri].id.c_str(), (int)b.numberAt("byId", -1));
+	if (name == "ObjectDelete")
+		onlineObjectApply(ri, "deleted", 1);
+	else if (name == "DoorState")
+		onlineObjectApply(ri, "open", b.boolAt("open") ? 1 : 0);
+	else if (name == "ObjectLock")
+		onlineObjectApply(ri, "lock", b.numberAt("lockLevel", 0));
+	else
+		onlineObjectApply(ri, "enabled", b.boolAt("enabled", true) ? 1 : 0);
 	return true;
 }
 
