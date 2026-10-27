@@ -586,7 +586,31 @@ void Session::updateDress(float dt)
 				continue;
 			const Ref& r = w.refs[a.ref];
 			const ActorDef& d = w.game.actors[r.actor];
-			if (d.creature || d.worn.empty() || d.worn.size() > 32)
+			if (d.creature)
+				continue;
+			// Online: what the server's copy of them wears (ActorEquip), when that isn't their library's outfit
+			if (r.wornNetHash)
+			{
+				if (a.wornNetDone == r.wornNetHash)
+					continue;
+				a.wornNetDone = r.wornNetHash;
+				const auto& shown = w.game.firstPerson.third.items;
+				std::vector<std::string> on, lib;
+				for (auto& id : r.wornNet)
+					if (shown.count(id))
+						on.push_back(id);
+				for (auto& k : d.worn)
+					if (shown.count(k.str()))
+						lib.push_back(k.str());
+				std::sort(on.begin(), on.end());
+				std::sort(lib.begin(), lib.end());
+				if (on == lib && !a.dressed)
+					continue;
+				if (!npcDress(w, *l, a, d, on))
+					logf("npcdress: %s kept as it was (a piece wouldn't load)", d.id.c_str());
+				continue;
+			}
+			if (d.worn.empty() || d.worn.size() > 32)
 				continue;
 			u32 mask = 0;
 			std::vector<std::string> left;

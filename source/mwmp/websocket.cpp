@@ -348,6 +348,7 @@ bool HttpRequest::start(const std::string& method, const std::string& u, const s
 	sock.close();
 	in.clear();
 	body.clear();
+	head.clear();
 	err.clear();
 	status = 0;
 	sent = 0;
@@ -363,10 +364,17 @@ bool HttpRequest::start(const std::string& method, const std::string& u, const s
 		st = FAILED;
 		return false;
 	}
-	request = method + " " + url.path + " HTTP/1.1\r\nHost: " + url.host + "\r\nConnection: close\r\n"
-		"User-Agent: mw3ds\r\nAccept: application/json\r\nOrigin: " + url.origin() + "\r\n";
+	request = method + " " + url.path + " HTTP/1.1\r\nHost: " + url.host + "\r\nConnection: close\r\nUser-Agent: mw3ds\r\n";
+	if (sendOrigin)
+		request += "Origin: " + url.origin() + "\r\n";
+	bool accept = false;
 	for (auto& h : headers)
+	{
 		request += h + "\r\n";
+		accept |= lowerCase(h.substr(0, 7)) == "accept:";
+	}
+	if (!accept)
+		request += "Accept: application/json\r\n";
 	if (!reqBody.empty() || method == "POST" || method == "PUT" || method == "PATCH")
 	{
 		char len[64];
@@ -388,10 +396,13 @@ bool HttpRequest::finish()
 		st = FAILED;
 		return false;
 	}
-	std::string head = lowerCase(in.substr(0, end));
-	sscanf(head.c_str(), "http/%*s %d", &status);
+	head = in.substr(0, end);
+	std::string lower = lowerCase(head);
+	sscanf(lower.c_str(), "http/%*s %d", &status);
 	std::string raw = in.substr(end + 4);
-	if (head.find("transfer-encoding: chunked") != std::string::npos)
+	in.clear();
+	in.shrink_to_fit();                  // (a download's whole file: not held twice over)
+	if (lower.find("transfer-encoding: chunked") != std::string::npos)
 	{
 		size_t p = 0;
 		while (p < raw.size())
@@ -407,9 +418,24 @@ bool HttpRequest::finish()
 		}
 	}
 	else
-		body = raw;
+		body = std::move(raw);
 	st = DONE;
 	return true;
+}
+
+std::string HttpRequest::header(const char* name) const
+{
+	std::string lower = lowerCase(head), key = "\r\n" + lowerCase(name) + ":";
+	size_t at = lower.find(key);
+	if (at == std::string::npos)
+		return "";
+	size_t from = at + key.size(), to = head.find("\r\n", from);
+	std::string v = head.substr(from, to == std::string::npos ? std::string::npos : to - from);
+	while (!v.empty() && (v[0] == ' ' || v[0] == '\t'))
+		v.erase(0, 1);
+	while (!v.empty() && (v.back() == ' ' || v.back() == '\t'))
+		v.pop_back();
+	return v;
 }
 
 HttpRequest::State HttpRequest::update()

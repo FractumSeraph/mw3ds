@@ -162,6 +162,7 @@ struct Actor
 	// library is (mwrender/renderingmanager.cpp actorTint scales it back)
 	u32 wornMask = ~0u;
 	bool dressed = false;
+	u32 wornNetDone = 0;               // the online mode's outfit it was dressed in last (Ref::wornNetHash)
 };
 
 // How solid an actor is drawn under Invisibility and Chameleon (OpenMW's CharacterController::setVisibility): invisible,

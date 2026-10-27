@@ -89,9 +89,15 @@ Every part of openmw-web's protocol (server/PROTOCOL.md) a player's client takes
 | The world (M7) | The server's time and date; a rest or a wait asks the server to move everyone's clock on. Each region's weather is simulated by one player there and shown to the rest. Spells, potions and enchanted items players make get the server's id and travel by it (RecordCreate); the others' are built here (RecordsSync). The places explored outdoors go on everyone's map. A cell the server makes new again is reset here |
 | Social (Phase C) | Friends (requests, accept, remove), block, mute, invites, joining a friend's party world, opening ours, sending a guest home (as the owner), who sees us online (PresenceMode, SetAvailability), reporting a player to the server's moderators |
 
-The 3DS's own limits: the world's people are drawn with the clothes and weapon the converter dressed them in, so a
-change of their equipment there (ActorEquip) does not show; a script moving one of the server's people with
-PositionCell moves our copy only.
+What the server itself does to a player is done too: an operator's give (AdminGive) and teleport (AdminTeleport), a
+console line from the world's owner (ConsoleCommand, run as the in-game console runs one), an object a quest still
+needs put back (QuestSpawn), an attack it refused (CombatRefused, said on screen), a reset cell's state
+(CellSnapshotReplace). The HOME menu tells the server the game is paused (ClientVisibility), so it holds our frames
+rather than dropping a link that went quiet.
+
+When the server's copy of one of its people changes clothes or armor (ActorEquip), the 3DS dresses them in it from the
+third-person pieces (as a stripped corpse is). The 3DS's own limits: their weapon and torch stay the ones the converter
+gave them; a script moving one of the server's people with PositionCell moves our copy only.
 
 Each player sees the others walk and run where they are, dressed as they are.
 
@@ -124,6 +130,31 @@ each cell's file (`"rn"`). Data converted before that gets them with `python too
 `builtin.omwscripts`, the data's masters (`morrowind.esm`, `tribunal.esm`, `bloodmoon.esm`) and `mp.omwscripts`, as a
 browser's is. A server that runs other files says which; the client retries with that list only when every file in it
 is one this data has.
+
+### Updating
+
+At the title screen, when the console is on Wi-Fi, MW3DS asks GitHub for the latest release of FractumSeraph/mw3ds
+(`source/mwmp/selfupdate.cpp`). A newer one puts **Update mp-X.Y.Z** beside **Online** (or press SELECT). Its screen
+shows the release notes and three buttons: **Update**, **Not now**, and **Never** (no more checks; delete
+`sdmc:/3ds/mw3ds/update_off` to have them back).
+
+Only the program downloads, never anything of Morrowind's. An installed copy takes `mw3ds-program.cia` (the CIA without
+data) and installs it through the console's own installer; a copy run from the Homebrew Launcher takes `mw3ds.3dsx` and
+swaps it in beside the old one. Each file is checked against the size and SHA-256 GitHub lists for it, and a mismatch
+changes nothing. The program-only CIA reads its data from `sdmc:/3ds/mw3ds/data`, so the first update of a CIA that
+carries its data inside copies that data out to the SD card first (once; 1.4 GB for the whole island with Bloodmoon,
+some minutes; the SD card needs that much free). From then on an update is the program alone. Installed, **Start it**
+restarts into the new version. The HOME menu's banner then plays the plain tune (the release can't carry Morrowind's
+music).
+
+Data and program go together: the converter writes `data_version.txt` (the format, `kDataVersion` in
+`source/components/files/dataversion.hpp`), and a release's `update.json` says which it needs. When a release needs
+newer data than the console has, the screen says so and installs nothing: convert again with that release's converter.
+
+*Releasing:* tag the commit `mp-X.Y.Z` and push the tag to the fork. `.github/workflows/release.yml` builds a draft
+release with the converter, `mw3ds-program.cia`, `mw3ds.3dsx` and `update.json`; publishing the draft is what consoles
+see (GitHub's "latest" skips drafts and pre-releases). Raise `kDataVersion` in the same commit as a converter change the
+program needs.
 
 ### Building
 

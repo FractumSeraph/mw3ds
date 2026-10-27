@@ -6,10 +6,14 @@ name: Release
 # own copy. Before the draft is made, check_version.py checks the tag is the version everywhere a player sees one.
 # tex3ds and makerom for Windows come from this repository's "build-tools" release (uploaded once by hand, pinned
 # below by checksum): devkitPro's package server has refused GitHub's runners before.
+# The fork (FractumSeraph/mw3ds) tags its releases mp-X.Y.Z. Its releases also carry what the 3DS's self-updater
+# (source/mwmp/selfupdate.cpp) downloads, the program alone, never anything of Morrowind's: mw3ds-program.cia (the CIA
+# without data), mw3ds.3dsx and update.json (the version and the data format it needs). GitHub lists each file's
+# SHA-256, which the console checks.
 
 on:
   push:
-    tags: ["[0-9]+.[0-9]+.[0-9]+"]
+    tags: ["[0-9]+.[0-9]+.[0-9]+", "mp-[0-9]+.[0-9]+.[0-9]+"]
   workflow_dispatch:
     inputs:
       tag:
@@ -39,7 +43,7 @@ jobs:
           mkdir -p engine
           cp mw3ds.elf "engine/mw3ds-${TAG}-debug.elf"
           "$DEVKITARM/bin/arm-none-eabi-strip" --strip-debug -o engine/mw3ds.elf mw3ds.elf
-          cp mw3ds.smdh engine/
+          cp mw3ds.smdh mw3ds.3dsx engine/
       - uses: actions/upload-artifact@v4
         with:
           name: engine
@@ -74,6 +78,18 @@ jobs:
           TEX3DS: ${{ github.workspace }}\build-tools\tex3ds.exe
           MW3DS_CTR_TOOLS_DIR: ${{ github.workspace }}\build-tools
         run: python tools/release/make_release.py --elf engine --zip
+      - name: The self-updater's files (the program-only CIA, the 3dsx, update.json)
+        shell: bash
+        env:
+          MW3DS_CTR_TOOLS_DIR: ${{ github.workspace }}\build-tools
+          MW3DS_VERSION: ${{ env.TAG }}
+        run: |
+          cp engine/mw3ds.elf engine/mw3ds.smdh .
+          python tools/build/make_cia.py --prebuilt --no-data --out build/mw3ds-program.cia
+          cp engine/mw3ds.3dsx build/mw3ds.3dsx
+          data=$(sed -n 's/.*kDataVersion = \([0-9]*\).*/\1/p' source/components/files/dataversion.hpp)
+          printf '{"version": "%s", "data": %s}\n' "$TAG" "$data" > build/update.json
+          cat build/update.json
       - name: The bundled Python runs the packages and the build script
         shell: bash
         run: |
@@ -97,4 +113,5 @@ jobs:
         run: |
           gh release view "$TAG" > /dev/null 2>&1 || gh release create "$TAG" --draft --title "$TAG" \
             --notes "Unzip MW3DS-Converter, run MW3DS Converter.exe and pick your own Morrowind install: it makes the CIA. Nothing from Morrowind is in this download."
-          gh release upload "$TAG" --clobber build/release/MW3DS-Converter-*.zip "engine/mw3ds-${TAG}-debug.elf"
+          gh release upload "$TAG" --clobber build/release/MW3DS-Converter-*.zip "engine/mw3ds-${TAG}-debug.elf" \
+            build/mw3ds-program.cia build/mw3ds.3dsx build/update.json

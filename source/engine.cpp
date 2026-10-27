@@ -30,6 +30,8 @@
 #include "mwgui/loadingscreen.hpp"
 #include "mwmp/online.hpp"
 #include "mwmp/netsocket.hpp"
+#include "mwmp/selfupdate.hpp"
+#include "components/files/dataversion.hpp"
 #include "extern/cjson/cJSON.h"
 
 extern "C" u32 __ctru_heap_size, __ctru_linear_heap_size;
@@ -183,7 +185,8 @@ bool Engine::prepare()
 	// the program-only CIA read the card's
 	dataDir = romfs && stat("romfs:/data/game.json", &st) == 0 ? kRomfsDataDir
 		: stat(kSdDataDir, &st) == 0 ? kSdDataDir : kRomfsDataDir;
-	logf("romfs %s, data dir %s", romfs ? "mounted" : "absent", dataDir);
+	logf("romfs %s, data dir %s, data format %d (this program's %d)", romfs ? "mounted" : "absent", dataDir,
+		dataVersionOf(dataDir), kDataVersion);
 	int maxTex = dataMaxTex(dataDir);
 	logf("data: textures up to %d texels%s", maxTex, maxTex ? "" : " (not recorded: converted before max_tex)");
 	// (not for a scripted test run: the native Old 3DS suite runs the New 3DS's data on purpose)
@@ -247,6 +250,20 @@ bool Engine::prepare()
 				startCell = onlineStartCell(key->valuestring);
 		}
 	}
+	// The self-updater's test (sdmc:/3ds/mw3ds/update_answer.txt): the check and the screen's answer, then the quit
+	if (selfUpdateTest(top, bottom, dataDir))
+	{
+		delete session;
+		audioExit();
+		uiExit();
+		rendererExit();
+		C2D_Fini();
+		C3D_Fini();
+		irrstExit();
+		logExit();
+		gfxExit();
+		return false;
+	}
 	// MW3DS_INTRO (a recording of the start, tools/test/video.py): a scripted run first plays the logos and shows the
 	// title screen for five seconds, then carries on as it would
 	if (testRun && getenv("MW3DS_INTRO"))
@@ -266,9 +283,15 @@ bool Engine::prepare()
 		startupMovie(top, bottom, dataDir, "mw_logo", kMwLogoZoom, true);
 		startSave = titleScreen(top, bottom, dataDir);
 		// Online (FractumSeraph/mw3ds): signed in and welcomed, the server's character is loaded instead of a save: a new
-		// one through Morrowind's creation, a returning one where they were (Session::onlineApplyRecord after loading)
-		while (startSave == "online")
+		// one through Morrowind's creation, a returning one where they were (Session::onlineApplyRecord after loading).
+		// Update: the self-updater's screen (mwmp/selfupdate.cpp); installed, the program quits for the new one
+		while (startSave == "online" || startSave == "update")
 		{
+			if (startSave == "update")
+			{
+				startSave = selfUpdateScreen(top, bottom, dataDir) == "quit" ? "quit" : titleScreen(top, bottom, dataDir);
+				continue;
+			}
 			if (onlineTitleScreen(top, bottom, dataDir) == "play")
 			{
 				startSave.clear();
@@ -296,6 +319,7 @@ bool Engine::prepare()
 			gfxExit();
 			return false;
 		}
+		selfUpdateStop();
 		logf("title: %s", startSave.empty() ? "new game" : startSave.c_str());
 		MARK("after the title");
 		drawLoading(top, bottom, "Loading...");

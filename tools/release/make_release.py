@@ -51,6 +51,8 @@ APP_FILES = [
     "tools/release/wizard.py",
     # (mwscript.engine_functions reads the engine's script function table at convert time)
     "source/components/interpreter/scriptfunctions.hpp",
+    # (level.py writes the data format the program checks: data_version.txt)
+    "source/components/files/dataversion.hpp",
     "LICENSE", "LANGUAGES.md", "requirements.txt",
 ]
 

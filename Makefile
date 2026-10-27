@@ -61,6 +61,9 @@ CFLAGS	:=	-g -Wall -O3 -flto=auto -fomit-frame-pointer -fno-math-errno -mword-re
 
 CFLAGS	+=	$(INCLUDE) -D__3DS__
 
+# (the self-updater compares it with the fork's latest release: mwmp/selfupdate.cpp)
+VERSION_FLAGS	:=	-DMW3DS_VERSION_TEXT=\"$(MW3DS_VERSION)\"
+
 CXXFLAGS	:= $(CFLAGS) -fno-rtti -fno-exceptions -std=gnu++20
 
 ASFLAGS	:=	-g $(ARCH)
@@ -217,6 +220,10 @@ $(OUTPUT).3dsx	:	$(OUTPUT).elf $(_3DSXDEPS)
 $(OUTPUT).smdh	:	$(TOPDIR)/$(BUILD)/version.txt
 
 $(OFILES_SOURCES) : $(HFILES)
+
+# (the version the self-updater knows itself by: built again when it changes)
+mwmp/selfupdate.o	:	$(TOPDIR)/$(BUILD)/version.txt
+mwmp/selfupdate.o	:	CXXFLAGS += $(VERSION_FLAGS)
 
 $(OUTPUT).elf	:	$(OFILES)
 

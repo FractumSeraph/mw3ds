@@ -34,6 +34,9 @@ struct Ref
 	int rnFile = -1;
 	u32 rnIndex = 0;
 	u32 netId = 0;                // online: a dropped thing the server named (its net id), 0 none
+	// online: what the server's copy of this NPC wears (ActorEquip: item ids, lowercase), and its hash (0: as placed)
+	std::vector<std::string> wornNet;
+	u32 wornNetHash = 0;
 	int cell = 0;                 // index into World::cells; -1: a free slot (its cell's objects left memory)
 	u32 baseHash = 0;             // refHash as read from the cell file: saves keep only what changed
 	int at = -1;                  // moved to another cell (PositionCell): the cell it stands in now

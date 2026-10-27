@@ -109,6 +109,7 @@ struct OnlineGame
 	// The server's people following us (claimed), and the merchant whose purse is open (its gold as last told)
 	float followAt = 0;
 	std::set<int> followers, travelSaid;
+	bool simReady = false;               // SimReady: the world's peer simulates its people
 	int purseRef = -1, purseSaid = 0;
 	bool purseOpened = false;
 	// Our own body: death told when, the pack's counts and the Mark as last told, the magic we said is on us (key ->
@@ -502,6 +503,27 @@ LValue equipmentOf(const World& w)
 }
 }
 
+#ifdef __3DS__
+namespace
+{
+// The HOME menu (or the console's sleep) pauses the program: the server is told, so it holds our frames and doesn't
+// take the stalled link for one to drop (ClientVisibility; a browser tab in the background, for openmw-web)
+aptHookCookie s_visHook;
+void visibilityHook(APT_HookType hook, void*)
+{
+	if (!g_online || g_online->phase != Online::IN_WORLD)
+		return;
+	bool hidden = hook == APTHOOK_ONSUSPEND || hook == APTHOOK_ONSLEEP;
+	if (!hidden && hook != APTHOOK_ONRESTORE && hook != APTHOOK_ONWAKEUP)
+		return;
+	LValue v = LValue::newTable();
+	v.set("hidden", hidden);
+	g_online->sendEvent("ClientVisibility", v);
+	g_online->update(0.0f);              // (out before the pause)
+}
+}
+#endif
+
 void Session::onlineTick(float dt)
 {
 	if (!g_online)
@@ -509,6 +531,14 @@ void Session::onlineTick(float dt)
 	if (!og)
 		og = new OnlineGame();
 	Online& on = *g_online;
+#ifdef __3DS__
+	static bool hooked = false;
+	if (!hooked)
+	{
+		aptHook(&s_visHook, visibilityHook, nullptr);
+		hooked = true;
+	}
+#endif
 	// The PC test build steps its frames as fast as it can: MW3DS_ONLINE_REALTIME=1 holds them to 30 a second, so a
 	// scripted run meets the other players in real time (the console is real time already, and has no such variable)
 	static const bool realtime = getenv("MW3DS_ONLINE_REALTIME") != nullptr;
@@ -904,7 +934,7 @@ void Session::onlineTick(float dt)
 		else if (onlineStoryEvent(e.name, e.body) || onlineDropEvent(e.name, e.body) || onlineObjectEvent(e.name, e.body)
 			|| onlineContainerEvent(e.name, e.body) || onlineTalkAndSkyEvent(e.name, e.body) || onlineSelfEvent(e.name, e.body)
 			|| onlineScriptEvent(e.name, e.body) || onlineActorEvent(e.name, e.body)
-			|| onlineRecordEvent(e.name, e.body) || onlineCombatEvent(e.name, e.body))
+			|| onlineRecordEvent(e.name, e.body) || onlineCombatEvent(e.name, e.body) || onlineServerEvent(e.name, e.body))
 			;
 		else if (e.name == "WorldKillCount")
 			w.deadCounts[lowerCase(e.body.stringAt("refId"))] = (int)e.body.numberAt("count");
@@ -2731,7 +2761,7 @@ bool Session::onlineActorEvent(const std::string& name, const LValue& b)
 		return true;
 	}
 	if (name != "ActorEffects" && name != "ActorDisposition" && name != "ActorCellChange" && name != "ActorStripLoot"
-		&& name != "ActorSay" && name != "ActorAI")
+		&& name != "ActorSay" && name != "ActorAI" && name != "ActorEquip")
 		return false;
 	const LValue* ref = b.get("ref");
 	LValue netRef = LValue::refNum((uint32_t)b.numberAt("net", 0), kNetActorFile);
@@ -2804,6 +2834,24 @@ bool Session::onlineActorEvent(const std::string& name, const LValue& b)
 	{
 		r.contents.clear();
 		r.gold = 0;
+	}
+	else if (name == "ActorEquip")
+	{
+		// what they wear there (a slot each: OpenMW's equipment slots, item record ids): dressed in it here
+		// (Session::updateDress, npcDress), the library's weapon and torch kept
+		std::vector<std::string> worn;
+		if (const LValue* slots = b.get("slots"))
+			for (auto& kv : slots->table)
+				if (kv.second.type == LValue::STRING && !kv.second.str.empty())
+					worn.push_back(lowerCase(localIdOf(kv.second.str)));
+		std::sort(worn.begin(), worn.end());
+		u32 h = 2166136261u;
+		for (auto& id : worn)
+			for (char c : id + ",")
+				h = (h ^ (u8)c) * 16777619u;
+		r.wornNet = worn;
+		r.wornNetHash = h ? h : 1;
+		dressTimer = 0.0f;                  // (looked at on the next frame)
 	}
 	else if (name == "ActorSay")
 	{
@@ -3319,6 +3367,110 @@ bool Session::onlineCombatEvent(const std::string& name, const LValue& b)
 			g_online->sendEvent("ResyncRequest", q);
 			logf("online: %s made new again", b.stringAt("cellKey").c_str());
 		}
+		return true;
+	}
+	return false;
+}
+
+bool Session::onlineServerEvent(const std::string& name, const LValue& b)
+{
+	Online& on = *g_online;
+	if (name == "AdminGive")
+	{
+		// an operator's give: in the pack, reported as any item is
+		std::string id = localIdOf(b.stringAt("recordId"));
+		int n = std::max(1, (int)b.numberAt("count", 1));
+		if (w.game.object(id))
+		{
+			w.addItem(id, n);
+			notify(std::to_string(n) + " x " + w.game.object(id)->name.str() + " given by the server");
+			logf("online: the server gives %d x %s", n, id.c_str());
+		}
+		else
+			logf("online: the server gives %s, which this data hasn't", id.c_str());
+		return true;
+	}
+	if (name == "AdminTeleport")
+	{
+		// an operator's tp: there, then reported as any move (PlayerCellChange)
+		int c = cellOfKey(w, lowerCase(b.stringAt("cellKey")));
+		float pos[3] = { (float)b.numberAt("x"), (float)b.numberAt("y"), (float)b.numberAt("z") };
+		if (c >= 0)
+		{
+			teleportPlayer(c, pos, w.player.yaw);
+			notify("The server moved you");
+			logf("online: the server moves us to %s", b.stringAt("cellKey").c_str());
+		}
+		return true;
+	}
+	if (name == "ConsoleCommand")
+	{
+		// a console line from the world's owner (rank 3, logged by the server): run as the console runs one, line by line
+		std::string script = b.stringAt("script");
+		logf("online: the server's console line: %s", script.c_str());
+		size_t at = 0;
+		while (at <= script.size())
+		{
+			size_t nl = script.find('\n', at);
+			std::string line = script.substr(at, nl == std::string::npos ? std::string::npos : nl - at);
+			if (!line.empty() && line.back() == '\r')
+				line.pop_back();
+			if (!line.empty())
+				console.run(w, *this, line);
+			if (nl == std::string::npos)
+				break;
+			at = nl + 1;
+		}
+		return true;
+	}
+	if (name == "QuestSpawn")
+	{
+		// what a quest still needs, put back by the operator's rules (or a spawn the cell's holder, us, is asked for)
+		std::string id = localIdOf(b.stringAt("recordId"));
+		std::string key = lowerCase(b.stringAt("cellKey"));
+		int c = cellOfKey(w, key);
+		float pos[3] = { (float)b.numberAt("x"), (float)b.numberAt("y"), (float)b.numberAt("z") };
+		if (c < 0)
+			return true;
+		auto h = on.holderOf.find(key);
+		bool ours = h == on.holderOf.end() || h->second == (uint16_t)on.playerId;
+		int n = std::max(1, (int)b.numberAt("count", 1));
+		auto sp = w.game.spawns.find(id);
+		if (sp != w.game.spawns.end() && sp->second.actor >= 0)
+		{
+			if (!ours)
+				return true;             // (the holder spawns it, and it comes to us in its stream)
+			for (int k = 0; k < n; k++)
+				w.spawnActor(id, pos, 0.0f, c);
+		}
+		else if (w.game.object(id))
+			for (int k = 0; k < n; k++)
+				w.placeObject(id, c, pos, 0.0f);
+		logf("online: %d x %s put back for %s (%s)", n, id.c_str(), b.stringAt("questId").c_str(), key.c_str());
+		return true;
+	}
+	if (name == "CombatRefused")
+	{
+		std::string why = b.stringAt("reason");
+		notify(why == "pvp" ? "Players can't fight here" : why == "rate" ? "Too fast: that blow didn't count"
+			: "The server refused that attack (" + why + ")");
+		return true;
+	}
+	if (name == "CellSnapshotReplace")
+	{
+		// a reset cell's truth from the server, straight after WorldCellReset: as its state on arrival
+		std::string key = b.stringAt("cellKey");
+		int c = cellOfKey(w, key);
+		if (c >= 0 && w.cells[c].refsLoaded)
+			onlineCellState(key, b);
+		else if (c >= 0)
+			og->cellStates[key] = b;
+		return true;
+	}
+	if (name == "SimReady")
+	{
+		og->simReady = b.boolAt("ready");
+		logf("online: the world's peer %s", og->simReady ? "simulates" : "is not simulating yet");
 		return true;
 	}
 	return false;

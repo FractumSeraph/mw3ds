@@ -57,13 +57,17 @@ public:
 		const std::string& body);
 	State update();
 	State state() const { return st; }
+	void cancel() { sock.close(); st = IDLE; }           // given up: the connection closed
 	int status = 0;
 	std::string body;                                     // the response's, de-chunked
+	std::string header(const char* name) const;          // a response header's value ("" none), name in any case
+	size_t received() const { return in.size(); }         // bytes of the answer so far (a download's progress)
+	bool sendOrigin = true;                               // (the updater's requests to GitHub go without one)
 	const std::string& error() const { return err; }
 private:
 	NetSocket sock;
 	NetUrl url;
-	std::string request, in, err;
+	std::string request, in, err, head;
 	size_t sent = 0;
 	State st = IDLE;
 	bool finish();

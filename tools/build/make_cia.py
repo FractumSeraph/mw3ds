@@ -49,7 +49,8 @@ def app_version():
         if not text:
             r = subprocess.run(["git", "describe", "--tags", *args], cwd=ROOT, capture_output=True, text=True)
             text = r.stdout.strip() if r.returncode == 0 else ""
-    m = re.match(r"v?(\d+)\.(\d+)\.(\d+)", text or "")
+    # (the fork's releases are tagged mp-X.Y.Z: FractumSeraph/mw3ds, beside the original's X.Y.Z)
+    m = re.match(r"(?:v|mp-)?(\d+)\.(\d+)\.(\d+)", text or "")
     if not m:
         return "0.0.0", 0
     major, minor, micro = (int(g) for g in m.groups())

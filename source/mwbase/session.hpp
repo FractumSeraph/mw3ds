@@ -532,6 +532,9 @@ struct Session : ScriptHost, WindowManagerState, MechanicsState, RenderState, So
 	void onlineCastReleased(const struct SpellDef& sp, const std::string& spellId);
 	void onlineWorldMisc(float now);
 	bool onlineCombatEvent(const std::string& name, const struct LValue& body);
+	// The server's own doings to us (an operator's give / tp, a console line for its owner, a quest repair's spawn, a
+	// refused attack, the reset cell's truth, whether its peer simulates yet)
+	bool onlineServerEvent(const std::string& name, const struct LValue& body);
 	void onlineReport(const std::string& reason);
 	void onlineForgetWorld();
 	bool onlineContainerEvent(const std::string& name, const struct LValue& body);

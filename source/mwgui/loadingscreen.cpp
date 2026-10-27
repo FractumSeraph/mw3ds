@@ -1,5 +1,6 @@
 // Loading screens, the logos and the title screen (mwgui/loadingscreen.hpp)
 #include "mwmp/online.hpp"
+#include "mwmp/selfupdate.hpp"
 #include <3ds.h>
 #include <citro2d.h>
 #include <citro3d.h>
@@ -304,9 +305,13 @@ std::string titleScreen(C3D_RenderTarget* top, C3D_RenderTarget* bottom, const c
 	bool shotTest = stat("sdmc:/3ds/mw3ds/autoshot", &st) == 0;
 	int frame = 0, dissolve = 0;
 	u64 lastTick = 0;
+	// (a newer release of the fork, asked of GitHub while the title shows: mwmp/selfupdate.cpp)
+	if (!shotTest && showFrames <= 0)
+		selfUpdateCheck();
 	while (aptMainLoop())
 	{
 		audioUpdate();                       // (the title music streams: nothing else feeds it before the game runs)
+		selfUpdatePoll();
 		if (showFrames > 0 && ++frame >= showFrames)
 			return "";
 		if (shotTest && ++frame == 60)
@@ -418,6 +423,10 @@ std::string titleScreen(C3D_RenderTarget* top, C3D_RenderTarget* bottom, const c
 		// The online mode (FractumSeraph/mw3ds, mwgui/onlinescreen.cpp): play on an openmw-web server
 		if (uiButton(232, 1, 86, 18, "Online") || (down & KEY_Y))
 			result = "online";
+		// A newer MW3DS (the self-updater): its screen asks first
+		const std::string& offer = selfUpdateOffer();
+		if (!offer.empty() && (uiButton(120, 1, 108, 18, "Update " + offer) || (down & KEY_SELECT)))
+			result = "update";
 		int pick = uiSaveList(list, saves, 4, 24, 312, 176);
 		if (down & KEY_RIGHT) focus = (focus + 1) % 2;
 		if (down & KEY_LEFT) focus = (focus + 1) % 2;

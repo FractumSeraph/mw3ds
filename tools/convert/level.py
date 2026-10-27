@@ -241,6 +241,12 @@ def plugin_script_report(db):
     return out
 
 
+def data_version():
+    """kDataVersion from source/components/files/dataversion.hpp: the format this converter writes."""
+    src = (ROOT / "source/components/files/dataversion.hpp").read_text(encoding="utf-8")
+    return int(re.search(r"kDataVersion\s*=\s*(\d+)", src).group(1))
+
+
 def json_text(value):
     """Compact JSON as UTF-8 bytes. Text outside ASCII stays as it is (cJSON reads UTF-8): as \\u escapes a Cyrillic
     letter took 6 bytes instead of 2, and the 3DS holds a whole part while it parses it."""
@@ -1008,6 +1014,9 @@ def main():
     # The largest texture edge: an Old 3DS refuses data converted for a New 3DS (source/main.cpp dataMaxTex)
     game["max_tex"] = args.max_tex
     (OUT / "game.json").write_bytes(json_text(game))
+    # The data's format, which the program checks (source/components/files/dataversion.hpp; the self-updater won't
+    # install a program that needs newer data than this)
+    (OUT / "data_version.txt").write_text(f"{data_version()}\n")
     sizes = {}
     for p in split:
         name = re.sub(r"_\d+$", "", p.stem[5:])

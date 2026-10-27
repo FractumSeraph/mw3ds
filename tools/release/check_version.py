@@ -2,7 +2,7 @@
 title version (FBI, System Settings > Data Management) that make_cia.py works out on the player's machine, and the
 HOME menu's description in mw3ds.smdh. release.yml runs it before the draft release is made.
     python tools/release/check_version.py <tag> [<converter folder>]     (default build/release/MW3DS-Converter)
-The tag is major.minor.micro (a leading "v" is allowed): the CIA's title version holds major and minor up to 63 and
+The tag is major.minor.micro (a leading "v", or the fork's "mp-", is allowed): the CIA's title version holds major and minor up to 63 and
 micro up to 15, anything above is clamped and two releases would show the same number.
 """
 import argparse
@@ -50,7 +50,7 @@ def main():
     app = Path(a.folder) / "app"
     errors = []
 
-    m = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", a.tag)
+    m = re.fullmatch(r"(?:v|mp-)?(\d+)\.(\d+)\.(\d+)", a.tag)
     if not m:
         raise SystemExit(f"tag {a.tag!r} is not major.minor.micro: the CIA's title version can't hold it")
     major, minor, micro = (int(g) for g in m.groups())
