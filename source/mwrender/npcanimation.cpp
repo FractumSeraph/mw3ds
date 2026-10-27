@@ -27,20 +27,51 @@ const int kRobeHides[] = { 3, 4, 5, 11, 12, 13, 14, 19, 20, 21, 22 };
 const int kSkirtHides[] = { 4, 21, 22 };
 }
 
-const std::vector<std::pair<std::string, std::string>>* playerHeadChoices(const World& w, bool hair)
+static const std::vector<std::pair<std::string, std::string>>* headChoices(const World& w, const std::string& race,
+	bool female, bool hair)
 {
 	const ThirdPersonDef& t = w.game.firstPerson.third;
-	int female = w.stats.female ? 1 : 0;
-	auto& map = (hair ? t.hairs : t.heads)[female];
-	auto it = map.find(lower(w.stats.race));
+	auto& map = (hair ? t.hairs : t.heads)[female ? 1 : 0];
+	auto it = map.find(lower(race));
 	return it != map.end() && !it->second.empty() ? &it->second : nullptr;
+}
+
+const std::vector<std::pair<std::string, std::string>>* playerHeadChoices(const World& w, bool hair)
+{
+	return headChoices(w, w.stats.race, w.stats.female, hair);
+}
+
+BodyLook playerLook(const World& w)
+{
+	BodyLook look;
+	look.race = lower(w.stats.race);
+	look.female = w.stats.female;
+	look.head = w.stats.head;
+	look.hair = w.stats.hair;
+	for (auto& it : w.inventory)
+		if (it.equipped)
+			if (const Object* o = w.game.object(it))
+			{
+				if (o->recType == REC_CLOT || o->recType == REC_ARMO)
+					look.worn.push_back(lower(it.id));
+				// Equipped arrows and bolts are ammo, not the weapon (Session::playerWeaponItem): arrows ahead of a
+				// sword in the inventory put the arrow in the fist
+				else if (o->recType == REC_WEAP && o->subtype < WEAP_ARROW && look.weapon.empty())
+					look.weapon = lower(it.id);
+			}
+	return look;
 }
 
 void PlayerBody::rebuild(World& w, bool weaponOut)
 {
+	rebuildLook(w, playerLook(w), weaponOut);
+}
+
+void PlayerBody::rebuildLook(World& w, const BodyLook& look, bool weaponOut)
+{
 	const ThirdPersonDef& t = w.game.firstPerson.third;
-	std::string race = lower(w.stats.race);
-	int female = w.stats.female ? 1 : 0;
+	std::string race = look.race;
+	int female = look.female ? 1 : 0;
 	// The skeleton: the one NPCs of this race and sex use
 	if (!ready || race != forRace || (female != 0) != forFemale)
 	{
@@ -87,10 +118,10 @@ void PlayerBody::rebuild(World& w, bool weaponOut)
 				part[s.first] = s.second;
 	}
 	auto chosen = [&](bool hair) {
-		const auto* list = playerHeadChoices(w, hair);
+		const auto* list = headChoices(w, race, female != 0, hair);
 		if (!list)
 			return std::string();
-		const std::string& want = hair ? w.stats.hair : w.stats.head;
+		const std::string& want = hair ? look.hair : look.head;
 		for (auto& e : *list)
 			if (e.first == want)
 				return e.second;
@@ -99,17 +130,14 @@ void PlayerBody::rebuild(World& w, bool weaponOut)
 	part[SLOT_HEAD] = chosen(false);
 	part[SLOT_HAIR] = chosen(true);
 	// A helmet takes the hair away (a coif or hood with a hair part of its own sets it back below)
-	for (auto& it : w.inventory)
-		if (it.equipped)
-			if (const Object* o = w.game.object(it))
-				if (o->recType == REC_ARMO && o->subtype == 0)
-					part[SLOT_HAIR].clear();
+	for (auto& id : look.worn)
+		if (const Object* o = w.game.object(id))
+			if (o->recType == REC_ARMO && o->subtype == 0)
+				part[SLOT_HAIR].clear();
 	for (int layer = 0; layer < 4; layer++)
-		for (auto& it : w.inventory)
+		for (auto& id : look.worn)
 		{
-			if (!it.equipped)
-				continue;
-			const Object* o = w.game.object(it);
+			const Object* o = w.game.object(id);
 			if (!o || (o->recType != REC_CLOT && o->recType != REC_ARMO))
 				continue;
 			int l = o->recType == REC_ARMO ? 1 : o->subtype == CLOT_SKIRT ? 2 : o->subtype == CLOT_ROBE ? 3 : 0;
@@ -121,33 +149,26 @@ void PlayerBody::rebuild(World& w, bool weaponOut)
 			if (o->recType == REC_CLOT && o->subtype == CLOT_SKIRT)
 				for (int s : kSkirtHides)
 					part[s].clear();
-			auto fit = t.items.find(lower(it.id));
+			auto fit = t.items.find(id);
 			if (fit == t.items.end())
 				continue;
 			for (auto& s : fit->second)
 				if (s.first >= 0 && s.first < kSlotCount && s.first != SLOT_WEAPON)
 				{
 					part[s.first] = female && !s.second.second.empty() ? s.second.second : s.second.first;
-					glow[s.first] = w.game.enchantGlow(it.id);
+					glow[s.first] = w.game.enchantGlow(id);
 				}
 		}
-	// The weapon while it is out (the first-person piece of it rides the weapon bone either way). Equipped arrows and
-	// bolts are ammo, not the weapon (Session::playerWeaponItem): arrows ahead of a sword in the inventory put the arrow
-	// in the fist, a thin stick with its head out at the tip
-	if (weaponOut)
-		for (auto& it : w.inventory)
-			if (it.equipped)
-				if (const Object* o = w.game.object(it))
-					if (o->recType == REC_WEAP && o->subtype < WEAP_ARROW)
-					{
-						auto fit = w.game.firstPerson.items.find(lower(it.id));
-						if (fit != w.game.firstPerson.items.end() && fit->second.slots.count(SLOT_WEAPON))
-						{
-							part[SLOT_WEAPON] = fit->second.slots.at(SLOT_WEAPON).first;
-							glow[SLOT_WEAPON] = w.game.enchantGlow(it.id);
-						}
-						break;
-					}
+	// The weapon while it is out (the first-person piece of it rides the weapon bone either way)
+	if (weaponOut && !look.weapon.empty())
+	{
+		auto fit = w.game.firstPerson.items.find(look.weapon);
+		if (fit != w.game.firstPerson.items.end() && fit->second.slots.count(SLOT_WEAPON))
+		{
+			part[SLOT_WEAPON] = fit->second.slots.at(SLOT_WEAPON).first;
+			glow[SLOT_WEAPON] = w.game.enchantGlow(look.weapon);
+		}
+	}
 	weapon = part[SLOT_WEAPON];
 	std::string key;
 	for (int s = 0; s < kSlotCount; s++)
@@ -224,10 +245,11 @@ void PlayerBody::update(World& w, float dt, float speed, bool swimming, bool sne
 		return;
 	Actor& a = set.actors[0];
 	const Skeleton& sk = actorSkeleton(set, a.skeleton);
-	// Place: at the feet, turned to the view, the race's size
-	const Player& p = w.player;
-	float c = cosf(-p.yaw), s = sinf(-p.yaw);
-	float place[12] = { c, -s, 0, p.feet[0], s, c, 0, p.feet[1], 0, 0, 1, p.feet[2] };
+	// Place: at the feet, turned to the view, the race's size (another player's body: where they stand)
+	const float* feet = placed ? placeFeet : w.player.feet;
+	float yaw = placed ? placeYaw : w.player.yaw;
+	float c = cosf(-yaw), s = sinf(-yaw);
+	float place[12] = { c, -s, 0, feet[0], s, c, 0, feet[1], 0, 0, 1, feet[2] };
 	memcpy(a.place, place, sizeof(place));
 	// held in a pose for a side-by-side screenshot (the test driver's BODYPOSE): nothing moves on
 	if (a.frozen)

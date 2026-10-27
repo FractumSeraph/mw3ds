@@ -68,7 +68,7 @@ LDFLAGS	=	-specs=3dsx.specs -g -O3 -flto=auto $(ARCH) -Wl,-Map,$(notdir $*.map) 
 			-Wl,--wrap=linearAlloc,--wrap=linearMemAlign,--wrap=linearFree
 # (the linear heap kept from running dry and used under one lock: source/platform/linear.cpp)
 
-LIBS	:= -lcitro2d -lcitro3d -lctru -lz -lm
+LIBS	:= -lcitro2d -lcitro3d -lmbedtls -lmbedx509 -lmbedcrypto -lctru -lz -lm
 
 #---------------------------------------------------------------------------------
 # list of directories containing libraries, this must be the top level containing

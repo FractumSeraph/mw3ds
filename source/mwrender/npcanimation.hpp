@@ -34,6 +34,17 @@ struct ActorDef;
 struct LoadedCell;
 bool npcDress(World& w, LoadedCell& l, Actor& a, const ActorDef& d, const std::vector<std::string>& items);
 
+// What a body looks like and wears: the player's (playerLook: World::stats and the equipped inventory) or another
+// player's in the online mode (mwmp/puppets.cpp, from their PlayerAppearance and PlayerEquipment)
+struct BodyLook
+{
+	std::string race, head, hair;                 // lowercase race id; head / hair: body part ids ("" = the race's first)
+	bool female = false;
+	std::vector<std::string> worn;                // equipped clothing and armor (lowercase item ids)
+	std::string weapon;                           // the weapon in hand (lowercase id; "" none)
+};
+BodyLook playerLook(const World& w);
+
 // The player seen from outside (third-person view, character creation's face preview): the NPC skeleton
 // of their race and sex, dressed from the "third" pieces (tools/convert/firstperson.py third_person): the bare
 // body, the chosen head and hair, then clothes, armor, skirts and robes as an NPC's are put together
@@ -57,6 +68,10 @@ struct PlayerBody
 	bool swimOut = false;                         // ... and in the water (actorPlay's swimming groups)
 
 	void rebuild(World& w, bool weaponOut);      // (re)dress when race, head, hair or equipment changed
+	void rebuildLook(World& w, const BodyLook& look, bool weaponOut);   // ... dressed as `look` (another player)
+	// Where it stands: the player's feet and turn unless placed here (another player's body)
+	bool placed = false;
+	float placeFeet[3] = {}, placeYaw = 0.0f;
 	// Animation from what the player does; place at feet, facing yaw
 	void update(World& w, float dt, float speed, bool swimming, bool sneaking, bool weaponOut, const BodyAct& act);
 	const char* playing() const;                  // the group being played ("" when none)
