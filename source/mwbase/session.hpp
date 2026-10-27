@@ -506,6 +506,8 @@ struct Session : ScriptHost, WindowManagerState, MechanicsState, RenderState, So
 	void onlineCellState(const std::string& cellKey, const struct LValue& body);
 	void onlineObjects(float now);
 	bool onlineObjectEvent(const std::string& name, const struct LValue& body);
+	void onlineContainers(float now);
+	bool onlineContainerEvent(const std::string& name, const struct LValue& body);
 	void onlineTick(float dt);
 	void onlineDrawPlayers(bool deform);
 	void onlineFree();

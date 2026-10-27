@@ -70,6 +70,12 @@ struct OnlineGame
 	bool objectsHidden = false;          // something was hidden or shown: World::refreshHidden
 	float objectsAt = 0;
 	int opId = 0;
+	// The container open here (a level reference; -1 none), its contents as last told, and our operations on each
+	// container the server has not yet echoed (ContainerUpdate comes back to us too): wire key -> item -> count
+	int contRef = -1;
+	float contAt = 0;
+	std::map<std::string, int> contSaid;
+	std::map<uint64_t, std::map<std::string, int>> contPending;
 	bool clockAdopted = false;
 	float clockHour = -1;                // gameHour after the last frame (a jump past it is a rest or a wait)
 };
@@ -767,7 +773,7 @@ void Session::onlineTick(float dt)
 			w.bounty = std::max(0, w.bounty + add);
 			logf("online: a crime in the world (%s): bounty %+d, now %d", e.body.stringAt("kind").c_str(), add, w.bounty);
 		}
-		else if (onlineStoryEvent(e.name, e.body) || onlineObjectEvent(e.name, e.body))
+		else if (onlineStoryEvent(e.name, e.body) || onlineObjectEvent(e.name, e.body) || onlineContainerEvent(e.name, e.body))
 			;
 		else if (e.name == "WorldKillCount")
 			w.deadCounts[lowerCase(e.body.stringAt("refId"))] = (int)e.body.numberAt("count");
@@ -775,6 +781,7 @@ void Session::onlineTick(float dt)
 	onlinePuppets(now);
 	onlineStory(now);
 	onlineObjects(now);
+	onlineContainers(now);
 	// The other players' bodies: dressed as they are, where they stand (a tenth of a second behind, between the last
 	// two poses), walking or running as fast as they go
 	for (auto it = og->bodies.begin(); it != og->bodies.end();)
@@ -1328,6 +1335,169 @@ bool Session::onlineObjectEvent(const std::string& name, const LValue& b)
 		onlineObjectApply(ri, "lock", b.numberAt("lockLevel", 0));
 	else
 		onlineObjectApply(ri, "enabled", b.boolAt("enabled", true) ? 1 : 0);
+	return true;
+}
+
+// ---- containers (PROTOCOL.md M3): one chest, one corpse, one plant for everyone. The first to open it tells the server
+// what it holds (our roll of its leveled lists); from then on the server's copy is the truth and every take or put is
+// an operation on it
+
+namespace
+{
+std::map<std::string, int> contentsOf(const Ref& r)
+{
+	std::map<std::string, int> m;
+	for (auto& c : r.contents)
+		m[lowerCase(c.second)] += stockCount(c.first);
+	for (auto it = m.begin(); it != m.end();)
+		it = it->second > 0 ? std::next(it) : m.erase(it);
+	return m;
+}
+
+// The server's items put in place of ours: what we had of an id keeps its wear, charge and soul as far as it goes
+void putContents(Ref& r, const LValue* items)
+{
+	std::map<std::string, int> want;
+	if (items)
+		for (int i = 1; i <= items->arraySize(); i++)
+		{
+			const LValue* e = items->at(i);
+			int n = (int)e->numberAt("n");
+			if (n > 0)
+				want[lowerCase(e->stringAt("id"))] += n;
+		}
+	std::vector<ContentItem> kept;
+	for (auto& c : r.contents)
+	{
+		auto it = want.find(lowerCase(c.second));
+		if (it == want.end() || it->second <= 0)
+			continue;
+		int n = std::min(stockCount(c.first), it->second);
+		ContentItem k = c;
+		k.first = n;
+		kept.push_back(k);
+		it->second -= n;
+	}
+	for (auto& wv : want)
+		if (wv.second > 0)
+			kept.emplace_back(wv.second, wv.first);
+	r.contents.swap(kept);
+}
+}
+
+void Session::onlineContainers(float now)
+{
+	Online& on = *g_online;
+	int cr = screen == SCR_CONTAINER && containerRef >= 0 && containerRef < (int)w.refs.size() ? containerRef : -1;
+	if (cr >= 0)
+	{
+		const Ref& r = w.refs[cr];
+		if (r.rnFile < 0 || r.rnFile >= (int)og->contentFiles.size() || og->contentFiles[r.rnFile] < 0
+			|| (r.actor >= 0 && !r.dead))
+			cr = -1;                  // (a spawned one, or someone's pockets: ours alone)
+	}
+	auto body = [&](const Ref& r) {
+		LValue b = LValue::newTable();
+		b.set("ref", LValue::refNum(r.rnIndex, og->contentFiles[r.rnFile]));
+		b.set("cellKey", og->cellKeys.size() > (size_t)r.cell ? og->cellKeys[r.cell] : "");
+		return b;
+	};
+	if (cr != og->contRef)
+	{
+		og->contRef = cr;
+		if (cr < 0)
+			return;
+		const Ref& r = w.refs[cr];
+		og->contSaid = contentsOf(r);
+		LValue items = LValue::newTable();
+		for (auto& c : og->contSaid)
+		{
+			LValue e = LValue::newTable();
+			e.set("id", c.first);
+			e.set("n", (double)c.second);
+			items.push(e);
+		}
+		LValue b = body(r);
+		b.set("contents", items);
+		on.sendEvent("ContainerOpen", b);
+		og->contAt = now + 0.25f;
+		return;
+	}
+	if (cr < 0 || now < og->contAt)
+		return;
+	og->contAt = now + 0.25f;
+	// what the player took out or put in since: one operation each on the server's copy
+	const Ref& r = w.refs[cr];
+	std::map<std::string, int> have = contentsOf(r);
+	std::set<std::string> ids;
+	for (auto& c : have)
+		ids.insert(c.first);
+	for (auto& c : og->contSaid)
+		ids.insert(c.first);
+	for (auto& id : ids)
+	{
+		int dn = (have.count(id) ? have[id] : 0) - (og->contSaid.count(id) ? og->contSaid[id] : 0);
+		if (!dn)
+			continue;
+		LValue b = body(r);
+		b.set("opId", (double)++og->opId);
+		b.set("op", dn < 0 ? "take" : "put");
+		b.set("itemId", id);
+		b.set("n", (double)abs(dn));
+		on.sendEvent("ContainerOpRequest", b);
+		og->contPending[netRefKey(og->contentFiles[r.rnFile], r.rnIndex)][id] += dn;
+	}
+	og->contSaid = have;
+}
+
+bool Session::onlineContainerEvent(const std::string& name, const LValue& b)
+{
+	if (name != "ContainerState" && name != "ContainerUpdate" && name != "ContainerOpResult")
+		return false;
+	if (name == "ContainerOpResult")
+	{
+		if (!b.boolAt("ok", true))
+			logf("online: the world refused a container operation (%s)", b.stringAt("reason").c_str());
+		return true;
+	}
+	const LValue* ref = b.get("ref");
+	if (!ref || ref->type != LValue::REFNUM)
+		return true;
+	int ri = onlineRefOf(netRefKey(ref->refFile, ref->refIndex), b.stringAt("cellKey"));
+	if (ri < 0)
+		return true;
+	Ref& r = w.refs[ri];
+	if (name == "ContainerState")
+	{
+		putContents(r, b.get("items"));
+		logf("online: %s holds what the world says (%d stacks)", r.id.c_str(), (int)r.contents.size());
+	}
+	else if (const LValue* d = b.get("delta"))
+	{
+		// a take or a put; ours come back too (the server's one way of applying them), already done here
+		std::string id = lowerCase(d->stringAt("itemId"));
+		int dn = (int)d->numberAt("dn");
+		int& mine = og->contPending[netRefKey(ref->refFile, ref->refIndex)][id];
+		if (mine != 0 && (mine > 0) == (dn > 0) && abs(mine) >= abs(dn))
+		{
+			mine -= dn;
+			return true;
+		}
+		std::map<std::string, int> m = contentsOf(r);
+		m[id] = std::max(0, m[id] + dn);
+		LValue items = LValue::newTable();
+		for (auto& c : m)
+		{
+			LValue e = LValue::newTable();
+			e.set("id", c.first);
+			e.set("n", (double)c.second);
+			items.push(e);
+		}
+		putContents(r, &items);
+		logf("online: %s changed by another player (%s %+d)", r.id.c_str(), id.c_str(), dn);
+	}
+	if (ri == og->contRef)
+		og->contSaid = contentsOf(r);
 	return true;
 }
 
