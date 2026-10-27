@@ -29,8 +29,9 @@ What the engine runs for Bloodmoon (`source/mwmechanics/werewolf.cpp` and the sc
 | GetScale, SetScale, ModScale | An actor drawn at the new size (0.5 to 2) |
 | TurnMoonRed, TurnMoonWhite | Secunda in Morrowind.ini's `[Moons] Script Color` |
 
-**Not yet:** the werewolf's own body. Its form needs Bloodmoon's wolf skeleton and animations converted, so for now
-the change shows only in the stats and refusals.
+The werewolf is drawn as Bloodmoon draws its werewolf NPCs: the beast-legged skeleton under the werewolf robe, with
+the werewolf head and hair. That covers the player in third person and other online players who are werewolves.
+**Not yet:** the beast's first-person claws (the first-person view shows bare hands).
 
 ## The online mode
 
@@ -106,7 +107,12 @@ sh tools/build/docker/run.sh python3 tools/build/make.py
 sh tools/build/docker/run.sh python3 tools/convert/level.py --tribunal --bloodmoon --world
 ```
 
-The first builds `mw3ds.3dsx`. The second converts the data. Set `MW3DS_MORROWIND_DIR` in `.env`, and
+```sh
+sh tools/build/docker/run.sh python3 tools/build/build_cia.py --bloodmoon --skip-convert
+```
+
+The first builds `mw3ds.3dsx`. The second converts the data. The third packs both into `build/mw3ds-bloodmoon.cia`
+(the image has makerom, built from Project_CTR's tagged source). Set `MW3DS_MORROWIND_DIR` in `.env`, and
 `MW3DS_DOCKER_FLAGS="-e MW3DS_OUT=out/data-bloodmoon"` to choose where the data goes.
 
 ### Testing
