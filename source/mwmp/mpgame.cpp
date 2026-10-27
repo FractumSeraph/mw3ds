@@ -19,6 +19,7 @@
 #include "mwmp/online.hpp"
 #include "mwrender/npcanimation.hpp"
 #include "mwworld/worldhelpers.hpp"
+#include "components/interpreter/interpreterhelpers.hpp"
 
 // What the online mode watches of a placed object (PROTOCOL.md M3): taken, a swing door open, its lock (0 open), shown
 struct ObjSeen
@@ -78,6 +79,9 @@ struct OnlineGame
 	std::map<uint64_t, std::map<std::string, int>> contPending;
 	struct ContOp { uint64_t key; std::string id; int dn; int ref; };
 	std::map<int, ContOp> contOps;       // by opId, until the server answers
+	// The player's spells on the server's people this frame (PROTOCOL.md M5 CombatSpellHit), by target: sent whole
+	struct SpellHit { std::string spellId; LValue effects = LValue::newTable(); LValue indexes = LValue::newTable(); };
+	std::map<int, SpellHit> spellHits;
 	bool clockAdopted = false;
 	float clockHour = -1;                // gameHour after the last frame (a jump past it is a rest or a wait)
 };
@@ -781,6 +785,7 @@ void Session::onlineTick(float dt)
 			w.deadCounts[lowerCase(e.body.stringAt("refId"))] = (int)e.body.numberAt("count");
 	}
 	onlinePuppets(now);
+	onlineSpellHits();
 	onlineStory(now);
 	onlineObjects(now);
 	onlineContainers(now);
@@ -1559,8 +1564,83 @@ bool Session::onlineContainerEvent(const std::string& name, const LValue& b)
 	return true;
 }
 
+// ---- the player's spells on the server's people (PROTOCOL.md M5): the cast goes to the target's owner, which applies
+// the spell record by its id and the effects that hit, with its own reflect, absorption and resistances
+
+bool Session::onlineSpellHit(int ri, const SpellEffect& e)
+{
+	if (!netSpell || netSpellId.empty() || !onlinePuppet(ri))
+		return false;
+	OnlineGame::SpellHit& h = og->spellHits[ri];
+	h.spellId = lowerCase(netSpellId);
+	const SpellEffect* first = netSpell->effects.data();
+	int index = &e >= first && &e < first + netSpell->effects.size() ? (int)(&e - first) : -1;
+	std::string id = magicEffectId(e.effect);
+	if (!id.empty())
+	{
+		LValue fx = LValue::newTable();
+		fx.set("id", id);
+		fx.set("magnitude", (double)((e.min + e.max) / 2));
+		fx.set("duration", (double)e.duration);
+		if (index >= 0)
+			fx.set("index", (double)index);
+		h.effects.push(fx);
+	}
+	if (index >= 0)
+		h.indexes.push(LValue(index));
+	return true;
+}
+
+void Session::onlineSpellHits()
+{
+	for (auto& kv : og->spellHits)
+	{
+		int ri = kv.first;
+		OnlineGame::SpellHit& h = kv.second;
+		if (h.effects.arraySize() == 0 || ri < 0 || ri >= (int)w.refs.size())
+			continue;
+		const Ref& r = w.refs[ri];
+		if (r.rnFile < 0 || r.rnFile >= (int)og->contentFiles.size() || og->contentFiles[r.rnFile] < 0)
+			continue;
+		std::string cellKey = onlineActorCell(ri);
+		LValue target = LValue::newTable();
+		target.set("ref", LValue::refNum(r.rnIndex, og->contentFiles[r.rnFile]));
+		target.set("cellKey", cellKey);
+		auto ep = g_online->epochOf.find(cellKey);
+		if (ep != g_online->epochOf.end())
+			target.set("epoch", (double)ep->second);
+		LValue b = LValue::newTable();
+		b.set("target", target);
+		b.set("spellId", h.spellId);
+		b.set("effects", h.effects);
+		b.set("casterId", (double)g_online->playerId);
+		if (h.indexes.arraySize() == h.effects.arraySize())
+			b.set("indexes", h.indexes);
+		g_online->sendEvent("CombatSpellHit", b);
+		logf("online: %s at %s goes to the world (%d effects)", h.spellId.c_str(), r.id.c_str(), h.effects.arraySize());
+	}
+	og->spellHits.clear();
+}
+
 // ---- the world's people and creatures the server simulates (PROTOCOL.md M4): whoever holds their cell (the sim peer)
 // streams them; here they stand, walk, swing and die as it says (openmw-web's puppet.lua)
+
+// The cell an actor stands in now, as the server keys it: outdoors the grid square under it (the stream walks people
+// across squares; their reference still names the one the level placed them in), indoors its cell
+std::string Session::onlineActorCell(int ri)
+{
+	const Ref& r = w.refs[ri];
+	int c = r.at >= 0 ? r.at : r.cell;
+	if (c < 0 || c >= (int)w.cells.size())
+		return "";
+	if (!w.cells[c].interior)
+	{
+		char k[32];
+		snprintf(k, sizeof(k), "%d,%d", (int)floorf(r.pos[0] / 8192.0f), (int)floorf(r.pos[1] / 8192.0f));
+		return k;
+	}
+	return c < (int)og->cellKeys.size() ? og->cellKeys[c] : cellKeyAt(w, c);
+}
 
 bool Session::onlinePuppet(int ri)
 {
@@ -1575,10 +1655,7 @@ bool Session::onlinePuppet(int ri)
 		return true;
 	if (on.holderOf.empty())
 		return false;
-	int c = r.at >= 0 ? r.at : r.cell;
-	if (c < 0 || c >= (int)og->cellKeys.size())
-		return false;
-	auto h = on.holderOf.find(og->cellKeys[c]);
+	auto h = on.holderOf.find(onlineActorCell(ri));
 	return h != on.holderOf.end() && h->second != (uint16_t)on.playerId;
 }
 

@@ -30,6 +30,7 @@ std::string argStr(Ctx& c, const Node& call, size_t i);
 std::string displayCellName(World& w);
 void messageBox(Ctx& c, const Node& n);
 int magicEffectIndex(const std::string& arg);
+std::string magicEffectId(int index);        // and back, as OpenMW names it ("firedamage", "drainmagicka")
 bool statFunction(Ctx& c, const Node& n, bool onPlayer, Ref* r, int ref, float* out);
 std::string gmstFormat(const std::string& fmt, int count, const std::string& name);
 void localToWorld(const float rot[3], bool turnOnly, float v[3]);

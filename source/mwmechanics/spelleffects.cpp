@@ -389,6 +389,10 @@ void Session::applyEffectToActor(int ri, const SpellEffect& e, bool byPlayer, fl
 	Ref& r = w.refs[ri];
 	if (r.dead || r.actor < 0)
 		return;
+	// Online, one of the server's people: the whole cast goes there, where its owner applies it (reflect, absorb and
+	// resistances too)
+	if (byPlayer && netSpell && onlineSpellHit(ri, e))
+		return;
 	const ActorDef& def = w.game.actors[r.actor];
 	auto me = w.game.magicEffects.find(e.effect);
 	int flags = me != w.game.magicEffects.end() ? me->second.flags : 0;

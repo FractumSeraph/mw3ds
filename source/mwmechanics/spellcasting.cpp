@@ -56,6 +56,7 @@ void Session::castItem(const std::string& itemId)
 		useSkill(9, 1);                   // Enchant: using a magic item (SKDT use 1)
 	SpellDef named = sp;
 	named.name = o ? o->name.str() : sp.id;
+	castSource = itemId;                  // (the server knows the item, not its enchantment)
 	logf("magic: %s cast from %s", sp.id.c_str(), itemId.c_str());
 	beginCast(named, spellSchool(sp), false);     // (OpenMW plays no animation for an enchanted item)
 }
@@ -69,6 +70,7 @@ void Session::castSpell()
 		castItem(w.stats.selectedSpell.substr(5));
 		return;
 	}
+	castSource.clear();
 	auto it = w.game.spells.find(w.stats.selectedSpell);
 	if (it == w.game.spells.end())
 	{
@@ -206,6 +208,14 @@ std::string Session::spellSound(const SpellDef& sp, int kind)
 
 // The cast itself: self effects on the player, touch on who's in front, target as a bolt
 void Session::releaseSpell(const SpellDef& sp, int school)
+{
+	netSpell = &sp;
+	netSpellId = castSource.empty() ? sp.id : castSource;
+	releaseSpellEffects(sp, school);
+	netSpell = nullptr;
+}
+
+void Session::releaseSpellEffects(const SpellDef& sp, int school)
 {
 	bool anyTarget = false, anyTouch = false;
 	for (auto& e : sp.effects)

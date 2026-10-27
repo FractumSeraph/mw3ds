@@ -244,7 +244,44 @@ static int targetRef(Ctx& c, const Node& n, bool* isPlayer)
 // (recomputeStats keeps current values); an NPC's attributes and skills read from its record.
 
 // GetEffect's argument: an effect's GMST name (sEffectWaterWalking) -> its index
+static const char* const* effectNames(size_t& count, size_t& moreCount, const char* const*& more);
 int magicEffectIndex(const std::string& arg)
+{
+	size_t count, moreCount;
+	const char* const* more;
+	const char* const* names = effectNames(count, moreCount, more);
+	std::string a = lower(arg);
+	if (a.compare(0, 7, "seffect") == 0)
+		a = a.substr(7);
+	if (!a.empty() && isdigit((unsigned char)a[0]))
+		return atoi(a.c_str()) <= 137 ? atoi(a.c_str()) : -1;
+	for (size_t i = 0; i < count; i++)
+		if (a == names[i])
+			return i;
+	for (size_t i = 0; i < moreCount; i++)
+		if (a == more[i])
+			return 100 + i;
+	return -1;
+}
+
+// An effect's id as OpenMW names it, lowercase (ESM::MagicEffect::indexToRefId: its GMST name but for magicka's,
+// which OpenMW calls Magicka where the GMSTs say SpellPoints, and Fortify Maximum Magicka); "" past the table
+std::string magicEffectId(int index)
+{
+	size_t count, moreCount;
+	const char* const* more;
+	const char* const* names = effectNames(count, moreCount, more);
+	std::string n = index >= 0 && index < (int)count ? names[index]
+		: index >= 100 && index < 100 + (int)moreCount ? more[index - 100] : "";
+	if (n == "fortifymagickamultiplier")
+		return "fortifymaximummagicka";
+	size_t sp = n.find("spellpoints");
+	if (sp != std::string::npos)
+		n.replace(sp, 11, "magicka");
+	return n;
+}
+
+static const char* const* effectNames(size_t& count, size_t& moreCount, const char* const*& moreOut)
 {
 	static const char* names[] = { "waterbreathing", "swiftswim", "waterwalking", "shield", "fireshield",
 		"lightningshield", "frostshield", "burden", "feather", "jump", "levitate", "slowfall", "lock", "open",
@@ -271,18 +308,10 @@ int magicEffectIndex(const std::string& arg)
 		"commandhumanoid", "bounddagger", "boundlongsword", "boundmace", "boundbattleaxe", "boundspear", "boundlongbow",
 		"extraspell", "boundcuirass", "boundhelm", "boundboots", "boundshield", "boundgloves", "corprus", "vampirism",
 		"summoncenturionsphere", "sundamage", "stuntedmagicka", "summonfabricant" };    // effects 100 on (137: Tribunal's)
-	std::string a = lower(arg);
-	if (a.compare(0, 7, "seffect") == 0)
-		a = a.substr(7);
-	if (!a.empty() && isdigit((unsigned char)a[0]))
-		return atoi(a.c_str()) <= 137 ? atoi(a.c_str()) : -1;
-	for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
-		if (a == names[i])
-			return i;
-	for (size_t i = 0; i < sizeof(more) / sizeof(more[0]); i++)
-		if (a == more[i])
-			return 100 + i;
-	return -1;
+	count = sizeof(names) / sizeof(names[0]);
+	moreCount = sizeof(more) / sizeof(more[0]);
+	moreOut = more;
+	return names;
 }
 
 // A notify GMST ("%s has been added ...", "%d %s has been added ..."): the count, then the name

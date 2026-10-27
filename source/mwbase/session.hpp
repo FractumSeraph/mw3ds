@@ -403,6 +403,7 @@ struct Session : ScriptHost, WindowManagerState, MechanicsState, RenderState, So
 	int crimeBounty(int kind, int arg);            // iCrime...: what a crime adds to the bounty (arg: the stolen value)
 	void castItem(const std::string& itemId);
 	void releaseSpell(const SpellDef& sp, int school);
+	void releaseSpellEffects(const SpellDef& sp, int school);
 	void beginCast(const SpellDef& sp, int school, bool animate);   // the cast's sound, hands and animation; the spell lands at its release
 	void finishCast();                                // the release: the chance roll, then the spell lands
 	void castUpdate(float dt);                        // lands a pending spell when its animation gets to the release
@@ -497,6 +498,7 @@ struct Session : ScriptHost, WindowManagerState, MechanicsState, RenderState, So
 	// each frame, the other players drawn, the Online screen
 	struct OnlineGame* og = nullptr;
 	void onlineApplyRecord();
+	std::string onlineActorCell(int ri);
 	bool onlinePuppet(int ri);        // online: one of the world's people the server simulates (drawn off its stream)
 	void onlinePuppets(float now);
 	void onlineStory(float now);
@@ -508,6 +510,8 @@ struct Session : ScriptHost, WindowManagerState, MechanicsState, RenderState, So
 	bool onlineObjectEvent(const std::string& name, const struct LValue& body);
 	void onlineContainers(float now);
 	void onlineContainerFlush(int ri);
+	bool onlineSpellHit(int ri, const struct SpellEffect& e);
+	void onlineSpellHits();
 	bool onlineContainerEvent(const std::string& name, const struct LValue& body);
 	void onlineTick(float dt);
 	void onlineDrawPlayers(bool deform);

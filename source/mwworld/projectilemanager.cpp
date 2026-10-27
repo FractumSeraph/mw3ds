@@ -100,6 +100,11 @@ void Session::projectileHits(Projectile& p, int victim)
 		if (it == w.game.spells.end())
 			return;
 		const SpellDef& sp = it->second;
+		if (p.owner < 0)
+		{
+			netSpell = &sp;               // (the player's bolt: a hit on the server's people goes there)
+			netSpellId = sp.id;
+		}
 		for (auto& e : sp.effects)
 		{
 			if (e.range != 2)
@@ -119,6 +124,7 @@ void Session::projectileHits(Projectile& p, int victim)
 			areaBurst(sp, 2, at, victim, p.owner);
 		}
 		logf("combat: %s hits %s", sp.name.c_str(), victim < 0 ? "the player" : w.refs[victim].id.c_str());
+		netSpell = nullptr;
 		return;
 	}
 	const Object* ammo = w.game.object(p.item);
