@@ -2376,7 +2376,8 @@ bool Session::onlineSelfEvent(const std::string& name, const LValue& b)
 		}
 		og->dynamicSaid.clear();
 		notify("You are back among the living.");
-		logf("online: resurrected (%s)", key.empty() ? "where we lie" : key.c_str());
+		logf("online: resurrected (%s), health %.0f of %.0f", key.empty() ? "where we lie" : key.c_str(), w.stats.health,
+			w.stats.healthMax);
 		return true;
 	}
 	if (name == "SelfSkillUse")
