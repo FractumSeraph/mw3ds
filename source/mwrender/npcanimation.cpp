@@ -41,9 +41,26 @@ const std::vector<std::pair<std::string, std::string>>* playerHeadChoices(const 
 	return headChoices(w, w.stats.race, w.stats.female, hair);
 }
 
+// A werewolf's body as Bloodmoon draws its werewolf NPCs: the beast-legged (Argonian) skeleton under the werewolf
+// robe, whose WerewolfSkin covers the body, with the WerewolfHead and WerewolfHair parts
+void werewolfLook(BodyLook& look)
+{
+	look.race = "argonian";
+	look.female = false;
+	look.head = "werewolfhead";
+	look.hair = "werewolfhair";
+	look.worn = { "werewolfrobe" };
+	look.weapon.clear();
+}
+
 BodyLook playerLook(const World& w)
 {
 	BodyLook look;
+	if (w.werewolf)
+	{
+		werewolfLook(look);
+		return look;
+	}
 	look.race = lower(w.stats.race);
 	look.female = w.stats.female;
 	look.head = w.stats.head;

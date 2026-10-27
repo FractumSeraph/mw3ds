@@ -870,6 +870,7 @@ void Online::onEvent(const std::string& name, const LValue& b)
 		r.hair = lowerCase(b.stringAt("hair"));
 		r.cls = b.stringAt("class");
 		r.male = b.boolAt("isMale", true);
+		r.werewolf = b.boolAt("isWerewolf", false);
 		if (!b.stringAt("name").empty())
 			r.name = b.stringAt("name");
 		r.appearanceKnown = true;

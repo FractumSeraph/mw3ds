@@ -44,6 +44,7 @@ struct BodyLook
 	std::string weapon;                           // the weapon in hand (lowercase id; "" none)
 };
 BodyLook playerLook(const World& w);
+void werewolfLook(BodyLook& look);             // Bloodmoon's werewolf, as its werewolf NPCs are drawn
 
 // The player seen from outside (third-person view, character creation's face preview): the NPC skeleton
 // of their race and sex, dressed from the "third" pieces (tools/convert/firstperson.py third_person): the bare

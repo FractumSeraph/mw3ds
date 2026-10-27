@@ -57,6 +57,7 @@ struct RemotePlayer
 	bool appearanceKnown = false;
 	std::string race, head, hair, cls;
 	bool male = true;
+	bool werewolf = false;               // PlayerAppearance isWerewolf: drawn in the beast's form
 	std::vector<std::string> equipment;  // worn ids (lowercase), from PlayerEquipment
 	std::string cellKey;
 	bool inView = false;                 // poses arriving (PlayerMoveBatch); false after PlayerLeaveView

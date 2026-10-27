@@ -715,6 +715,8 @@ void Session::onlineTick(float dt)
 				else if (o->recType == REC_WEAP && o->subtype < WEAP_ARROW)
 					look.weapon = id;
 			}
+		if (r.werewolf)
+			werewolfLook(look);
 		bool weaponOut = r.last.flags & 16;
 		if (og->bodyRevision[r.id] != r.lookRevision * 2 + (weaponOut ? 1 : 0) || !b.ready)
 		{
