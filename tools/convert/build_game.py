@@ -749,8 +749,9 @@ def build(db, cells, actor_records, actor_cells):
         if rec is not None:
             objects[item.lower()] = object_entry(rec)
 
-    # Bound weapons and armor (summoned by spells)
-    for bid in BOUND_ITEMS:
+    # Bound weapons and armor (summoned by spells), and the werewolf robe BecomeWerewolf puts on (Bloodmoon: the
+    # engine hands it out, so nothing in the level reaches it; mwmechanics/werewolf.cpp)
+    for bid in list(BOUND_ITEMS) + ["werewolfrobe"]:
         rec = db["objects"].get(bid)
         if rec is not None:
             objects[bid] = object_entry(rec)
