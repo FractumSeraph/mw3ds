@@ -1,5 +1,15 @@
 # MW3DS: Morrowind for the 3DS
 
+> [!NOTE]
+> **This is FractumSeraph's fork.** It adds two things to MW3DS, both described in [docs/ONLINE.md](docs/ONLINE.md):
+> - **Bloodmoon:** `python tools/build/build_cia.py --bloodmoon` converts Morrowind, Tribunal and Bloodmoon, and the
+>   engine runs Bloodmoon's script functions, the werewolf's stats included.
+> - **Online play:** the title's **Online** button signs in to an [openmw-web](https://github.com/FractumSeraph/openmw-web)
+>   multiplayer server (morrowind.fractumseraph.net by default), to play beside people in the browser. You see each
+>   other move, dress and chat, and can join friends' worlds.
+>
+> Everything also builds without MSYS2 in a Linux image: `sh tools/build/docker/run.sh python3 tools/build/make.py`.
+
 Play *The Elder Scrolls III: Morrowind* on a **Nintendo 3DS**. MW3DS is a from-scratch engine written in C++ for the 3DS.
 It runs the base game on real hardware and in the [Azahar](https://azahar-emu.org/) emulator.
 

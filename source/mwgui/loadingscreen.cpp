@@ -1,4 +1,5 @@
 // Loading screens, the logos and the title screen (mwgui/loadingscreen.hpp)
+#include "mwmp/online.hpp"
 #include <3ds.h>
 #include <citro2d.h>
 #include <citro3d.h>
@@ -123,6 +124,14 @@ static void loadingProgress(const char* line)
 		return;
 	s_progress.drawn = now;
 	drawLoading(s_progress.top, s_progress.bottom, s_progress.title.c_str(), line, (now - s_progress.start) / 1000.0f);
+	// Online, the world's connection is answered through the load (its pings; a long load would read as a lost player)
+	static bool pumping = false;
+	if (g_online && !pumping)
+	{
+		pumping = true;
+		g_online->update(0.0f);
+		pumping = false;
+	}
 }
 
 // The game's own font and frames for the logos and the title screen: game.json's "ui" alone, before the game loads
