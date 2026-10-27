@@ -169,6 +169,7 @@ void Session::drawBottom()
 	case SCR_CONSOLE: drawConsole(); break;
 	case SCR_REPAIR: drawRepair(); break;
 	case SCR_SAVES: drawSaves(); break;
+	case SCR_ONLINE: drawOnline(); break;
 	case SCR_GAMEMENU: drawGameMenu(); break;
 	default: break;
 	}

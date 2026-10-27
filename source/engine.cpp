@@ -28,6 +28,8 @@
 #include "testdrive/steprunner.hpp"
 #include "mwinput/inputmanagerimp.hpp"
 #include "mwgui/loadingscreen.hpp"
+#include "mwmp/online.hpp"
+#include "extern/cjson/cJSON.h"
 
 extern "C" u32 __ctru_heap_size, __ctru_linear_heap_size;
 
@@ -59,6 +61,7 @@ extern "C" void userAppExit(void)
 }
 
 static const char* const kSavePath = kAutosavePath;
+static const char* const kOnlineAutosavePath = "sdmc:/3ds/mw3ds/online_save.json";   // (the online mode's own)
 
 // The top screen's targets (the right eye drawn only while 3D is on): a pair with the 24-bit depth buffer and a pair
 // with the 16-bit one, both made at the start (Engine::topDepth16).
@@ -210,6 +213,7 @@ bool Engine::prepare()
 	// sdmc:/3ds/mw3ds/start.txt: name of the cell to start in (e.g. "Seyda Neen"), skipping chargen,
 	// or "save:<path>" to continue from that save (test runs skip the title screen)
 	std::string startCell, startSave;
+	bool online = false;              // signed in to an openmw-web server (mwmp/online.hpp)
 	if (FILE* sf = fopen("sdmc:/3ds/mw3ds/start.txt", "r"))
 	{
 		char line[128] = {};
@@ -229,6 +233,19 @@ bool Engine::prepare()
 	// Normal play: title screen to pick a save (autosave, own saves, bundled starting points) or a new
 	// game. Scripted test runs and start.txt skip it and start fresh.
 	testRun = session->autotest || stat("sdmc:/3ds/mw3ds/autocam.txt", &st) == 0;
+	// A scripted online run (online_test.json: a local test server's test account): signed in before loading
+	if (testRun && onlineAutoSignIn(dataDir))
+	{
+		online = true;
+		startSave.clear();
+		if (!g_online->newCharacter && g_online->playerRecord)
+		{
+			const cJSON* pos = cJSON_GetObjectItem(g_online->playerRecord, "position");
+			const cJSON* key = cJSON_GetObjectItem(pos, "cellKey");
+			if (cJSON_IsString(key) && *key->valuestring)
+				startCell = onlineStartCell(key->valuestring);
+		}
+	}
 	// MW3DS_INTRO (a recording of the start, tools/test/video.py): a scripted run first plays the logos and shows the
 	// title screen for five seconds, then carries on as it would
 	if (testRun && getenv("MW3DS_INTRO"))
@@ -247,6 +264,24 @@ bool Engine::prepare()
 		startTitleMusic(dataDir);
 		startupMovie(top, bottom, dataDir, "mw_logo", kMwLogoZoom, true);
 		startSave = titleScreen(top, bottom, dataDir);
+		// Online (FractumSeraph/mw3ds): signed in and welcomed, the server's character is loaded instead of a save: a new
+		// one through Morrowind's creation, a returning one where they were (Session::onlineApplyRecord after loading)
+		while (startSave == "online")
+		{
+			if (onlineTitleScreen(top, bottom, dataDir) == "play")
+			{
+				startSave.clear();
+				online = true;
+				if (!g_online->newCharacter && g_online->playerRecord)
+				{
+					const cJSON* pos = cJSON_GetObjectItem(g_online->playerRecord, "position");
+					const cJSON* key = cJSON_GetObjectItem(pos, "cellKey");
+					startCell = cJSON_IsString(key) && *key->valuestring ? onlineStartCell(key->valuestring) : "Seyda Neen";
+				}
+				break;
+			}
+			startSave = titleScreen(top, bottom, dataDir);
+		}
 		if (startSave == "quit")
 		{
 			delete session;
@@ -270,6 +305,16 @@ bool Engine::prepare()
 	{
 		LoadingProgress progress(top, bottom, "Loading...");
 		loaded = session->start(dataDir, startCell, startSave.empty() ? nullptr : startSave.c_str());
+		// a returning online character's cell not in this data: where a game starts without character creation
+		if (!loaded && online && !startCell.empty())
+		{
+			delete session;
+			session = new Session();
+			session->dataDir = dataDir;
+			loaded = session->start(dataDir, "Seyda Neen", nullptr);
+		}
+		if (loaded && online)
+			session->onlineApplyRecord();
 		if (loaded)
 		{
 			logf("heap: session %d KB", mallinfo().uordblks / 1024);
@@ -293,7 +338,9 @@ bool Engine::prepare()
 		gfxExit();
 		return false;
 	}
-	session->savePath = kSavePath;      // test runs still save (at the end of scripted input)
+	// test runs still save (at the end of scripted input); online, the server keeps the character, and the game's own
+	// autosave goes to a file of its own so it never takes the place of the offline one
+	session->savePath = online ? kOnlineAutosavePath : kSavePath;
 	memoryReserveTake();
 	logf("load %s in %llu ms, linear free %lu KB, heap used %d KB", loaded ? "ok" : "FAILED",
 		osGetTime() - loadStart, linearSpaceFree() / 1024, mallinfo().uordblks / 1024);
@@ -437,11 +484,14 @@ bool Engine::frame()
 			bool console = session->wantText == Session::TEXT_CONSOLE;      // a script line (Options > Console)
 			bool classDesc = session->wantText == Session::TEXT_CLASSDESC;  // the made class's description (may be empty)
 			bool offer = session->wantText == Session::TEXT_OFFER;          // the gold offered in a barter: the number pad
+			bool chat = session->wantText == Session::TEXT_CHAT;            // the online mode: a line to say
+			bool friendName = session->wantText == Session::TEXT_FRIEND;
 			if (offer)
 				swkbdInit(&kb, SWKBD_TYPE_NUMPAD, 2, 6);
 			else
-				swkbdInit(&kb, SWKBD_TYPE_NORMAL, 2, console || classDesc ? 200 : 31);
-			swkbdSetHintText(&kb, offer ? "Your offer (gold)" : console ? "Script line, e.g. Player->AddItem gold_001 100" : search ? "Search"
+				swkbdInit(&kb, SWKBD_TYPE_NORMAL, 2, console || classDesc || chat ? 200 : 31);
+			swkbdSetHintText(&kb, chat ? "Say (start with ! for everyone in the world)" : friendName ? "Your friend's username"
+				: offer ? "Your offer (gold)" : console ? "Script line, e.g. Player->AddItem gold_001 100" : search ? "Search"
 				: classDesc ? "Describe your class" : session->wantText == Session::TEXT_CLASSNAME ? "Name your class"
 				: session->screen == SCR_ENCHANT ? "Name the item" : "Name the spell");
 			swkbdSetInitialText(&kb, session->textNow().c_str());

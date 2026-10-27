@@ -1,4 +1,5 @@
 // Text typed on the system keyboard: names of made spells and items, the journal search, a barter offer
+#include "mwmp/online.hpp"
 #include <algorithm>
 #include <array>
 #include <functional>
@@ -51,6 +52,16 @@ void Session::setText(bool confirmed, const std::string& text)
 		logf("chargen: class description \"%s\"", classDraft.desc.c_str());
 	}
 	// a map note written (a new one, or one edited: emptied, it goes)
+	// The online mode: a line of chat, a friend's name (PROTOCOL.md ChatSend, FriendRequest)
+	else if (kind == TEXT_CHAT && !blank && g_online)
+		g_online->sendChat(text);
+	else if (kind == TEXT_FRIEND && !blank && g_online)
+	{
+		LValue b = LValue::newTable();
+		b.set("name", text);
+		g_online->sendEvent("FriendRequest", b);
+		notify("Friend request sent to " + text);
+	}
 	else if (kind == TEXT_MAPNOTE)
 	{
 		if (mapNoteEdit >= 0 && mapNoteEdit < (int)w.mapNotes.size())

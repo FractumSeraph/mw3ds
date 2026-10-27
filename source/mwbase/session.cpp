@@ -32,6 +32,7 @@ void Session::shutdown()
 	MARK("shutdown: hands and body");
 	vm.free(w);
 	body.free(w);
+	onlineFree();
 	u64 t1 = osGetTime();
 	MARK("shutdown: cells");
 	w.freeAll();
@@ -204,6 +205,7 @@ void Session::update(const PlayerInput& inRaw, float dt)
 	profAdd(PROF_SOUND, t);
 	updateSky();
 	updateDress(dt);
+	onlineTick(dt);                   // (the online mode: nothing without it)
 	profAdd(PROF_TAIL, t);
 	updateRegionSounds(dt);
 	profAdd(PROF_SOUND, t);

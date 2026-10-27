@@ -71,6 +71,7 @@ enum Screen
 	SCR_CONSOLE,
 	SCR_CLASS_CREATE,
 	SCR_AUDIO,
+	SCR_ONLINE,          // the online mode's players, chat and friends (mwmp/mpgame.cpp)
 };
 
 struct MessageState

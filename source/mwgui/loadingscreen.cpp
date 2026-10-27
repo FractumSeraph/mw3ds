@@ -281,8 +281,7 @@ std::string titleScreen(C3D_RenderTarget* top, C3D_RenderTarget* bottom, const c
 	const char* notice, int showFrames)
 {
 	std::vector<SaveInfo> saves = savesList(dataDir);
-	if (saves.empty() && showFrames <= 0)
-		return "";
+	// (no saves yet: the title is still shown, for its Online button; FractumSeraph/mw3ds)
 	UiList list;
 	int focus = 1;
 	bool wasTouching = false, dragged = false;
@@ -407,12 +406,16 @@ std::string titleScreen(C3D_RenderTarget* top, C3D_RenderTarget* bottom, const c
 		uiRect(0, 0, 320, 20, col::panelLight);
 		uiRect(0, 20, 320, 1, col::border);
 		uiText(6, 2, 0.55f, col::header, "Load game");
+		// The online mode (FractumSeraph/mw3ds, mwgui/onlinescreen.cpp): play on an openmw-web server
+		if (uiButton(232, 1, 86, 18, "Online") || (down & KEY_Y))
+			result = "online";
 		int pick = uiSaveList(list, saves, 4, 24, 312, 176);
 		if (down & KEY_RIGHT) focus = (focus + 1) % 2;
 		if (down & KEY_LEFT) focus = (focus + 1) % 2;
 		if (uiButton(4, 208, 154, 28, "New game", focus == 0))
 			result = "";
-		if (uiButton(162, 208, 154, 28, "Load", focus == 1) || (pick >= 0 && (down & KEY_A) && focus == 1))
+		if ((uiButton(162, 208, 154, 28, "Load", focus == 1, !saves.empty()) || (pick >= 0 && (down & KEY_A) && focus == 1))
+			&& !saves.empty())
 			result = saves[list.selected].path;
 		C3D_FrameEnd(0);
 		if (result != "\x01")

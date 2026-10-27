@@ -840,6 +840,7 @@ void Session::drawExtras(const float eye[3], bool secondEye, bool arms)
 			rendererDrawMeshGlow(m, &model, piece->textures[m.tex], glow);
 	}
 	drawPrecipitation(eye, secondEye);
+	onlineDrawPlayers(!secondEye);        // the online mode's other players
 	if (!arms && !thirdPerson)
 		return;
 	if (thirdPerson || previewFace)

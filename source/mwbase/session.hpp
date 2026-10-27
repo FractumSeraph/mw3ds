@@ -493,6 +493,14 @@ struct Session : ScriptHost, WindowManagerState, MechanicsState, RenderState, So
 	void persuade(int kind);                      // 0 admire, 1 intimidate, 2 taunt, 3..5 bribe 10 / 100 / 1000
 	bool serviceRefused();                        // the speaker's Service Refusal, when their disposition is too low
 	void drawSaves();
+	// The online mode (mwmp/mpgame.cpp, FractumSeraph/mw3ds): the stored character put on, the state told to the server
+	// each frame, the other players drawn, the Online screen
+	struct OnlineGame* og = nullptr;
+	void onlineApplyRecord();
+	void onlineTick(float dt);
+	void onlineDrawPlayers(bool deform);
+	void onlineFree();
+	void drawOnline();
 	void drawGameMenu();
 	void toggleGameMenu();            // START
 	bool wantQuit = false;            // Quit in the game menu: main loop exits

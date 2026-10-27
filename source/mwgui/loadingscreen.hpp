@@ -40,6 +40,10 @@ void startTitleMusic(const char* dataDir);
 void startupMovie(C3D_RenderTarget* top, C3D_RenderTarget* bottom, const char* dataDir, const char* name, float zoom = 1.0f,
 	bool keepLast = false);
 // Title screen: new game or any save. Returns the save path, "" for a new game, "quit" on START
+// The online mode's sign-in and character screens (mwgui/onlinescreen.cpp): "play" once welcomed, "" back to the title
+std::string onlineTitleScreen(C3D_RenderTarget* top, C3D_RenderTarget* bottom, const char* dataDir);
+// Scripted runs: sdmc:/3ds/mw3ds/online_test.json signs in without the screens (false: no file, or it failed)
+bool onlineAutoSignIn(const char* dataDir);
 std::string titleScreen(C3D_RenderTarget* top, C3D_RenderTarget* bottom, const char* dataDir, const char* notice = nullptr,
 	int showFrames = 0);
 // The largest texture edge the data was converted with (0: not recorded)

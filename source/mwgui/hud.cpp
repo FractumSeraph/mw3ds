@@ -1,4 +1,5 @@
 // The HUD: the top screen's overlay (bars, crosshair, notices), the bottom screen's quick strip, hit indicators
+#include "mwmp/online.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -446,7 +447,10 @@ void Session::drawHud()
 		openScreen(SCR_MAP);
 	if (uiButton(214, 208, 51, 28, w.game.gmstLabel("sstats", "Stats"), false, stats))
 		openScreen(SCR_STATS);
-	if (uiButton(267, 208, 51, 28, "Saves", false, !wantName))
+	// Online, the server keeps the character: the Saves button is the Online screen's (players, chat, friends)
+	if (g_online && uiButton(267, 208, 51, 28, "Online", false, !wantName))
+		openScreen(SCR_ONLINE);
+	else if (!g_online && uiButton(267, 208, 51, 28, "Saves", false, !wantName))
 	{
 		saveList = savesList(dataDir);
 		openScreen(SCR_SAVES);

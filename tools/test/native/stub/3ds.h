@@ -134,10 +134,11 @@ inline u32 ndspChnGetSamplePos(int ch) { return nativeDspPos(ch); }
 
 // The on-screen keyboard: never opened in a test (the name is set by the harness)
 struct SwkbdState { int unused; };
-enum { SWKBD_TYPE_NORMAL, SWKBD_TYPE_NUMPAD, SWKBD_NOTEMPTY_NOTBLANK, SWKBD_BUTTON_CONFIRM, SWKBD_BUTTON_NONE };
+enum { SWKBD_TYPE_NORMAL, SWKBD_TYPE_NUMPAD, SWKBD_NOTEMPTY_NOTBLANK, SWKBD_BUTTON_CONFIRM, SWKBD_BUTTON_NONE, SWKBD_PASSWORD_HIDE_DELAY };
 typedef int SwkbdButton;
 inline void swkbdInit(SwkbdState*, int, int, int) {}
 inline void swkbdSetHintText(SwkbdState*, const char*) {}
 inline void swkbdSetInitialText(SwkbdState*, const char*) {}
 inline void swkbdSetValidation(SwkbdState*, int, int, int) {}
+inline void swkbdSetPasswordMode(SwkbdState*, int) {}
 inline SwkbdButton swkbdInputText(SwkbdState*, char* buf, size_t) { strcpy(buf, "Tester"); return SWKBD_BUTTON_CONFIRM; }
