@@ -746,8 +746,10 @@ void Session::onlineDrawPlayers(bool deform)
 	if (!og)
 		return;
 	for (auto& kv : og->bodies)
+	{
 		if (kv.second.ready)
 			kv.second.draw(w, deform);
+	}
 }
 
 void Session::onlineFree()

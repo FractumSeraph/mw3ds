@@ -814,7 +814,8 @@ void Online::onEvent(const std::string& name, const LValue& b)
 	auto idOf = [&]() { return (uint16_t)b.numberAt("id", 0); };
 	if (name == "PlayerList")
 	{
-		players.clear();
+		// the roster: merged with what already came (the others' looks and gear arrive around it), the absent dropped
+		std::map<uint16_t, RemotePlayer> kept;
 		if (const LValue* list = b.get("players"))
 			for (int i = 1; i <= list->arraySize(); i++)
 			{
@@ -822,9 +823,12 @@ void Online::onEvent(const std::string& name, const LValue& b)
 				uint16_t id = (uint16_t)e->numberAt("id");
 				if (id == (uint16_t)playerId)
 					continue;
-				players[id].id = id;
-				players[id].name = e->stringAt("name");
+				RemotePlayer r = players.count(id) ? players[id] : RemotePlayer();
+				r.id = id;
+				r.name = e->stringAt("name");
+				kept[id] = r;
 			}
+		players.swap(kept);
 	}
 	else if (name == "PlayerJoinWorld")
 	{
