@@ -218,6 +218,8 @@ float Session::playerSwing(float charge, const PlayerInput& in)
 		if (wit && !(testGod && testGodBlows))
 			wearItem(wit, 0.0f);          // a miss still wears the weapon by 1 (OpenMW's reduceWeaponCondition)
 		bool wasPeaceful = t.ai != AI_COMBAT;
+		if (onlinePuppet(target))
+			return 0.0f;  // (online, one of the server's people: the swing there decides, the crime too)
 		makeHostile(target);
 		if (wasPeaceful && !def.creature && !t.aggressor)
 			crimeSeen(CRIME_ASSAULT, 0, target), reportCrime(target, kBountyAssault);

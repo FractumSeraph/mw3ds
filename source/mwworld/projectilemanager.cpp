@@ -70,6 +70,7 @@ void Session::fireProjectile(int owner, const float from[3], const float dir[3],
 	p.weapon = weapon;
 	p.charge = charge;
 	p.spell = spell;
+	p.source = owner < 0 ? castSource : "";
 	p.life = 4.0f;
 	if (!spell.empty())
 	{
@@ -103,7 +104,7 @@ void Session::projectileHits(Projectile& p, int victim)
 		if (p.owner < 0)
 		{
 			netSpell = &sp;               // (the player's bolt: a hit on the server's people goes there)
-			netSpellId = sp.id;
+			netSpellId = p.source.empty() ? sp.id : p.source;
 		}
 		for (auto& e : sp.effects)
 		{

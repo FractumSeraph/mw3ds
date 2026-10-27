@@ -292,6 +292,11 @@ struct World
 	// In front of a spot on the floor there (dist units along yaw)
 	int dropItemAt(const InventoryItem& it, const float base[3], float yaw, float dist);
 	std::vector<int> playerDrops;
+	// Online: the server's things the player picked up (net id, item, count), and the server's things and people whose
+	// cell left memory (net ids): they are the server's to show again, not ours to keep (mwmp)
+	struct NetTake { u32 net; std::string id; int count; };
+	std::vector<NetTake> playerTakes;
+	std::vector<u32> evictedNet;
 	// Online, with the world's people simulated by the server: people a script places (PlaceAtPC / PlaceAtMe) are the
 	// server's to spawn (it does, and they come back as its own); asked here, sent by mwmp
 	bool actorsElsewhere = false;

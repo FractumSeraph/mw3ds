@@ -29,6 +29,7 @@
 #include "mwinput/inputmanagerimp.hpp"
 #include "mwgui/loadingscreen.hpp"
 #include "mwmp/online.hpp"
+#include "mwmp/netsocket.hpp"
 #include "extern/cjson/cJSON.h"
 
 extern "C" u32 __ctru_heap_size, __ctru_linear_heap_size;
@@ -552,6 +553,12 @@ bool Engine::frame()
 		drawLoading(top, bottom, "Loading...");
 		std::string path = session->reloadPath.empty() ? kSavePath : session->reloadPath;
 		logf("reload from %s, heap used %d KB", path.c_str(), mallinfo().uordblks / 1024);
+		// (a save loaded while online: offline from here, the server keeps the online character)
+		if (g_online)
+		{
+			session->onlineFree();
+			onlineLeave();
+		}
 		session->shutdown();
 		logf("reload: after shutdown, heap used %d KB", mallinfo().uordblks / 1024);
 		delete session;
@@ -984,6 +991,11 @@ void Engine::shutdown()
 	session->shutdown();
 	exitStep("exit: session delete");
 	delete session;
+	exitStep("exit: network");
+	if (g_online)
+		onlineLeave();
+	else
+		netExit();                        // (the socket service, when the title's Online screen used it)
 	// (the distant land outlives a session; its file, open on romfs, has to close before romfs goes: userAppExit)
 	exitStep("exit: distant land");
 	distantFree();

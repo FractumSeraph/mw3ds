@@ -122,7 +122,7 @@ void Session::drawInventory()
 				w.inventory.erase(w.inventory.begin() + sel);
 			w.itemLeft(it.id);
 			int dropped = w.dropItemAt(it, w.player.feet, w.player.yaw, 50.0f);
-			if (dropped >= 0 && g_online)
+			if (dropped >= 0 && g_online && g_online->phase == Online::IN_WORLD)
 				w.playerDrops.push_back(dropped);         // (online: shown to everyone, mwmp/mpgame.cpp)
 			playSound(-1, "Item Misc Down");
 			grid.selected = -1;

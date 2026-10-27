@@ -353,7 +353,7 @@ void runScriptedStep(Session* session, ScriptedSteps& autoinput, size_t& inputIn
 		{
 			ww.removeItem(id, 1);
 			int dropped = ww.dropItemAt({ id, 1, false }, ww.player.feet, ww.player.yaw, 50.0f);
-			if (dropped >= 0 && g_online)
+			if (dropped >= 0 && g_online && g_online->phase == Online::IN_WORLD)
 				ww.playerDrops.push_back(dropped);
 		}
 		else

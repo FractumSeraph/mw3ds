@@ -17,6 +17,7 @@
 #include "mwinput/inputmanagerimp.hpp"
 #include "mwsound/soundmanagerimp.hpp"
 #include "mwmp/online.hpp"
+#include "mwmp/netsocket.hpp"
 #include "platform/linear.hpp"
 
 namespace
@@ -63,6 +64,14 @@ void readContent(const char* dataDir)
 		list += (list.empty() ? "" : ", ") + e;
 	logf("online: this data's content: %s", list.c_str());
 }
+}
+
+// Not online after all: the connection and the console's socket service go, so the game is the offline one again
+void onlineLeave()
+{
+	delete g_online;
+	g_online = nullptr;
+	netExit();
 }
 
 std::string onlineTitleScreen(C3D_RenderTarget* top, C3D_RenderTarget* bottom, const char* dataDir)
@@ -239,9 +248,11 @@ std::string onlineTitleScreen(C3D_RenderTarget* top, C3D_RenderTarget* bottom, c
 		{
 			if (on.phase != Online::IDLE)
 				on.cancel();
+			onlineLeave();
 			return result;
 		}
 	}
+	onlineLeave();
 	return "";
 }
 

@@ -533,6 +533,7 @@ struct Session : ScriptHost, WindowManagerState, MechanicsState, RenderState, So
 	void onlineWorldMisc(float now);
 	bool onlineCombatEvent(const std::string& name, const struct LValue& body);
 	void onlineReport(const std::string& reason);
+	void onlineForgetWorld();
 	bool onlineContainerEvent(const std::string& name, const struct LValue& body);
 	void onlineTick(float dt);
 	void onlineDrawPlayers(bool deform);

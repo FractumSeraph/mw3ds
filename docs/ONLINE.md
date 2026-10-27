@@ -48,6 +48,17 @@ its own skeleton: the converter writes it as the second first-person skeleton wh
    returning one is loaded as the server keeps it: looks, stats, pack, equipment, spells, quests, topics, factions,
    bounty and where they stood.
 
+Offline and online are separate games side by side. **New** and **Load** on the title screen are the offline game,
+with its own saves, exactly as without the online mode; nothing touches the network unless the **Online** button is
+used (backing out of it leaves the offline game as it was). Online, the server keeps the character, and the game's own
+autosave goes to `online_save.json` so it never replaces an offline save. Loading a save from the death screen while
+online leaves the online game for the offline one.
+
+A lost connection (no Wi-Fi for a moment, the server restarting) is retried by itself after 5 seconds, then less and
+less often, while the game plays on; the Online screen says so and has **Reconnect now**. A platform server signs back
+in with its session token, a single world server first resumes the session in place (SessionResume) and otherwise
+signs in again with the password, which is kept in memory only while that session lasts.
+
 In the game, the HUD's **Online** button (the Saves button offline) opens three tabs:
 
 - **Players:** who is in this world.

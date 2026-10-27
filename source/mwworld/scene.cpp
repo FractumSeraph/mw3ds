@@ -56,7 +56,9 @@ void World::evictCell(int c)
 			k++;
 			continue;
 		}
-		if (refs[i].dropped)
+		if (refs[i].netId || refs[i].rnFile == -2)
+			evictedNet.push_back(refs[i].netId ? refs[i].netId : refs[i].rnIndex);   // (online: the server's, back with its cell)
+		else if (refs[i].dropped)
 		{
 			if (!refs[i].pickedUp)
 			{

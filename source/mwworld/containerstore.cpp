@@ -25,6 +25,8 @@ void World::restockGold(int ri)
 void World::pickUp(int ri)
 {
 	Ref& ref = refs[ri];
+	if (ref.netId)
+		playerTakes.push_back({ ref.netId, ref.idLower.str(), ref.count > 0 ? ref.count : 1 });   // (online: asked of the server)
 	if (ref.dropped || !ref.dropState.soul.empty() || ref.dropState.charge >= 0.0f)
 	{
 		// Dropped items, and placed ones with a soul or a charge, come back whole

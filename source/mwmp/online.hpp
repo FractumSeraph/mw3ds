@@ -135,6 +135,9 @@ public:
 	// PlayerLeaving here, a fresh ticket, and the new world's welcome. The loaded game carries on; ready() again after
 	void switchWorld(const std::string& wsPath);
 	void goHome();
+	// The connection lost (FAILED) after playing: the same world again, without the password (the platform's session
+	// token; a single world server's login kept from signing in). False when there is nothing to go back with
+	bool reconnect();
 	bool switching = false;                               // between worlds: the game keeps going, nobody sees us
 	bool rejoined = false;                                // welcomed by a second world (the record is not put on again)
 	std::map<uint16_t, RemotePlayer> players;
@@ -180,6 +183,10 @@ private:
 	WebSocket ws;
 	uint32_t seq = 0, inputSeq = 0;
 	bool helloSent = false, manifestRetried = false;
+	// The welcome's session token (SessionResume puts a dropped session back in place while the server still holds it),
+	// and whether the next hello answer resumes with it
+	std::string resumeToken;
+	bool resuming = false;
 	std::vector<std::string> manifest;
 	float pingAt = 0;
 	void fail(const std::string& why);
@@ -195,6 +202,7 @@ private:
 };
 
 extern Online* g_online;                                  // while the online mode is on (else null)
+void onlineLeave();                                       // the online mode off: g_online freed, the sockets closed
 
 // The data's content files as the server names them, in load order (morrowind.esm, tribunal.esm, bloodmoon.esm)
 void onlineSetContent(const std::vector<std::string>& esmLowerNames);

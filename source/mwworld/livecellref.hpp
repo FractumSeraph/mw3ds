@@ -33,6 +33,7 @@ struct Ref
 	// playing, or data converted before it was kept)
 	int rnFile = -1;
 	u32 rnIndex = 0;
+	u32 netId = 0;                // online: a dropped thing the server named (its net id), 0 none
 	int cell = 0;                 // index into World::cells; -1: a free slot (its cell's objects left memory)
 	u32 baseHash = 0;             // refHash as read from the cell file: saves keep only what changed
 	int at = -1;                  // moved to another cell (PositionCell): the cell it stands in now

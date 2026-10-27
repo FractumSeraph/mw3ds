@@ -180,6 +180,11 @@ void Online::fail(const std::string& why)
 	err = why;
 	status = why;
 	phase = FAILED;
+	if (resuming)
+	{
+		resuming = false;
+		resumeToken.clear();          // (the server didn't take it: the next try signs in)
+	}
 	step = NONE;
 	logf("online: %s", why.c_str());
 	ws.close();
@@ -547,6 +552,15 @@ void Online::onText(const std::string& text)
 	{
 		logf("online: hello ok from %s (content %s)", str(j, "serverName"), str(j, "contentPolicy"));
 		cJSON* l = cJSON_CreateObject();
+		if (resuming && !resumeToken.empty())
+		{
+			// back in place after a drop (PROTOCOL.md M8 session resume); refused, the login after it
+			cJSON_AddStringToObject(l, "t", "SessionResume");
+			cJSON_AddStringToObject(l, "token", resumeToken.c_str());
+			sendJson(l);
+			cJSON_Delete(j);
+			return;
+		}
 		if (kind == GATEWAY)
 		{
 			cJSON_AddStringToObject(l, "t", "SessionLoginTicket");
@@ -589,13 +603,32 @@ void Online::onText(const std::string& text)
 			displayName = str(prof, "username");
 		phase = WELCOMED;
 		status = "In the world";
-		password.clear();
+		resumeToken = str(j, "sessionToken");
+		resuming = false;
+		// (a platform signs in again with its own session token; a single world server only with the password, so that one
+		// is kept in memory while the session lasts, never written anywhere, to get back in after a drop)
+		if (kind == GATEWAY)
+			password.clear();
 		logf("online: welcome, player %d, %s character", playerId, newCharacter ? "a new" : "a returning");
 		// (the message of the day comes again as a server ChatMessage: PROTOCOL.md, shown once from there)
 	}
 	else if (t == "SessionDisconnect")
 	{
 		std::string code = str(j, "code"), detail = str(j, "detail");
+		// A resume the server no longer knows (it restarted, or the window passed): the ordinary login instead
+		if (code == "AUTH_FAILED" && resuming)
+		{
+			resuming = false;
+			resumeToken.clear();
+			cJSON_Delete(j);
+			if (kind == WORLD && !password.empty())
+				openWorld();
+			else if (kind == GATEWAY && !characterId.empty() && !locker.empty())
+				chooseCharacter(characterId);
+			else
+				fail("The world no longer knows this session");
+			return;
+		}
 		// A world that runs other content files says which (BAD_CONTENT "... runs A + B + C"): when they are all ones this
 		// data has (or the multiplayer scripts the 3DS stands in for), try once more with its list and order
 		if (code == "BAD_CONTENT" && !manifestRetried)
@@ -776,6 +809,35 @@ void Online::switchWorld(const std::string& wsPath)
 	status = "Travelling to another world...";
 	logf("online: to the world at %s", wsPath.c_str());
 	request(TICKET, "POST", "/auth/ticket", "");
+}
+
+bool Online::reconnect()
+{
+	if (phase != FAILED)
+		return false;
+	if (kind == GATEWAY && !characterId.empty() && !locker.empty())
+	{
+		err.clear();
+		switching = rejoined = true;
+		manifestRetried = false;
+		chooseCharacter(characterId);
+		newCharacter = false;
+		status = "Reconnecting...";
+		logf("online: reconnecting to %s", characterId.c_str());
+		return true;
+	}
+	if (kind == WORLD && (!password.empty() || !resumeToken.empty()))
+	{
+		err.clear();
+		switching = rejoined = true;
+		manifestRetried = false;
+		resuming = !resumeToken.empty();
+		openWorld();
+		status = "Reconnecting...";
+		logf("online: reconnecting");
+		return true;
+	}
+	return false;
 }
 
 void Online::goHome()

@@ -53,7 +53,7 @@ struct OnlineGame
 	// for each file of the load order, and per puppet the pose flags last acted on
 	std::vector<std::string> cellKeys;
 	std::vector<int> contentFiles;
-	std::map<int, uint8_t> puppetFlags;
+	std::map<uint64_t, uint8_t> puppetFlags;   // by wire key
 	float inputAt = 0;                   // the next PlayerInput
 	float lastInputAt = -1;
 	float selfHp = -1;                   // the health SelfStats last set
@@ -113,7 +113,7 @@ struct OnlineGame
 	bool purseOpened = false;
 	// Our own body: death told when, the pack's counts and the Mark as last told, the magic we said is on us (key ->
 	// spell), and what shows on the other players (id -> cast key -> effects)
-	float deathSaidAt = -100, selfAt = 0, markAt = 0, activeAt = 0;
+	float deathSaidAt = -100, selfAt = 0, markAt = 0, activeAt = 0, diedAt = -1;
 	std::map<std::string, int> countsSaid;
 	bool countsSeeded = false;
 	std::string markSaid;
@@ -136,6 +136,11 @@ struct OnlineGame
 	std::string reportName;              // the player a report is being written about
 	bool isOwner = false;                // this world is ours (WorldMode isOwner): we may send guests home
 	int presence = 0;                    // who sees us: 0 everyone, 1 friends, 2 nobody (private), 3 appearing offline
+	bool wasInWorld = false;             // played in a world this session: a lost connection is tried again
+	bool worldCleared = false;           // between worlds: the last one's state already forgotten
+	float pruneAt = 60;
+	std::set<std::string> builtRecords;  // records built here from RecordsSync (gone with their world)
+	float reconnectAt = 0, reconnectDelay = 5;
 	// A friend's world's journal while we visit it (JournalSync borrowed): our own, set aside until we are home
 	bool journalBorrowed = false;
 	std::unordered_map<std::string, int> ownJournalIndex;
@@ -516,18 +521,46 @@ void Session::onlineTick(float dt)
 		last = osGetTime();
 	}
 	on.update(dt);
+	// (out of the world: nothing of ours waits for it, and placing people is ours again)
+	if (on.phase != Online::IN_WORLD)
+	{
+		w.actorsElsewhere = false;
+		w.playerDrops.clear();
+		w.playerTakes.clear();
+		w.spawnAsks.clear();
+	}
 	if (on.phase == Online::FAILED)
 	{
 		if (!og->appearanceSaid.empty() || og->readySent)
 		{
-			notify(on.error());
+			notify(on.error() + " (reconnecting)");
 			og->readySent = false;
 			og->appearanceSaid.clear();
+			for (auto& b : og->bodies)
+				b.second.free(w);
 			og->bodies.clear();
+			og->wasInWorld = true;
+			og->reconnectAt = on.now + 5.0f;
+			og->reconnectDelay = 5.0f;
+		}
+		// back in by itself: after 5 s, then less and less often (to a minute), while the game plays on here; the
+		// world's people are ours to run meanwhile (no holder is known)
+		on.holderOf.clear();
+		if (og->wasInWorld && on.now >= og->reconnectAt && on.reconnect())
+		{
+			og->reconnectDelay = fminf(60.0f, og->reconnectDelay * 2.0f);
+			og->reconnectAt = on.now + og->reconnectDelay;
 		}
 		return;
 	}
-	// between worlds (a friend's, or home): ready again in the next one
+	// between worlds (a friend's, or home): ready again in the next one, with nothing of the last one's state
+	if (on.switching && on.phase < Online::WELCOMED && !og->worldCleared)
+	{
+		og->worldCleared = true;
+		onlineForgetWorld();
+	}
+	if (on.phase >= Online::WELCOMED)
+		og->worldCleared = false;
 	if (on.switching && on.phase < Online::WELCOMED)
 	{
 		og->readySent = false;
@@ -850,6 +883,16 @@ void Session::onlineTick(float dt)
 			if (w.stats.health < hp - 0.5f && w.stats.health > 0.0f)
 				playSound(-1, "Health Damage");
 			og->dynamicSaid.clear();
+			og->dynamicHp = w.stats.health;   // (the server's own figures: no gain of ours to add to them)
+			og->dynamicFt = w.stats.fatigue;
+			// dead here, alive there (a death the world didn't confirm): standing again
+			if (playerDead && w.stats.health > 0.0f && on.now - og->diedAt > 2.0f)
+			{
+				playerDead = false;
+				if (screen == SCR_DEATH)
+					screen = SCR_NONE;
+				logf("online: the world says we live (health %.0f)", w.stats.health);
+			}
 		}
 		// A crime the server's copy of us did there (an assault on the world's people): its bounty here
 		else if (e.name == "PlayerCrime")
@@ -1652,7 +1695,8 @@ bool Session::onlineContainerEvent(const std::string& name, const LValue& b)
 			w.addItem(o.id, o.dn);
 		logf("online: the world refused %s %d %s (%s)", o.dn < 0 ? "taking" : "putting", abs(o.dn), o.id.c_str(),
 			b.stringAt("reason").c_str());
-		if (o.ref >= 0 && o.ref < (int)w.refs.size())
+		if (o.ref >= 0 && o.ref < (int)w.refs.size() && w.refs[o.ref].rnFile >= 0
+			&& w.refs[o.ref].rnFile < (int)og->contentFiles.size() && og->contentFiles[w.refs[o.ref].rnFile] >= 0)
 		{
 			const Ref& r = w.refs[o.ref];
 			LValue q = LValue::newTable();
@@ -1857,6 +1901,7 @@ void Session::onlinePlace(const LValue& b)
 			if (!taken)
 			{
 				og->netObjs[net] = OnlineGame::NetObj(k, b.stringAt("cellKey"));
+				w.refs[k].netId = net;
 				return;
 			}
 		}
@@ -1872,6 +1917,7 @@ void Session::onlinePlace(const LValue& b)
 	if (slot >= 0)
 	{
 		og->netObjs[net] = OnlineGame::NetObj(slot, b.stringAt("cellKey"));
+		w.refs[slot].netId = net;
 		logf("online: %d x %s placed by player %d", it.count, id.c_str(), (int)b.numberAt("byId", -1));
 	}
 }
@@ -1911,24 +1957,33 @@ void Session::onlineDrops()
 		on.sendEvent("ObjectSpawnRequest", b);
 	}
 	w.playerDrops.clear();
-	// the shared ones picked up here: a take, the server's to grant
+	// the shared ones picked up here (World::pickUp): a take, the server's to grant
+	for (auto& t : w.playerTakes)
+	{
+		auto it = og->netObjs.find(t.net);
+		LValue b = LValue::newTable();
+		b.set("net", (double)t.net);
+		b.set("cellKey", it != og->netObjs.end() ? it->second.cellKey : cellKeyAt(w, w.current));
+		b.set("opId", (double)++og->opId);
+		og->takeOps[og->opId] = { t.id, t.count };
+		on.sendEvent("ObjectTakeRequest", b);
+		if (it != og->netObjs.end())
+			og->netObjs.erase(it);
+	}
+	w.playerTakes.clear();
+	// the server's things and people whose cell left memory: forgotten here (its state puts them back when we return)
+	for (u32 net : w.evictedNet)
+	{
+		og->netObjs.erase(net);
+		og->netActors.erase(net);
+	}
+	w.evictedNet.clear();
+	// (a mapping whose slot went another way, a despawn: dropped without a word)
 	for (auto it = og->netObjs.begin(); it != og->netObjs.end();)
 	{
 		int slot = it->second.slot;
-		bool gone = slot < 0 || slot >= (int)w.refs.size() || w.refs[slot].cell < 0 || !w.refs[slot].spawnedRef
-			|| !w.refs[slot].dropped || w.refs[slot].idLower.str() != it->second.id;
-		if (!gone)
-		{
-			++it;
-			continue;
-		}
-		LValue b = LValue::newTable();
-		b.set("net", (double)it->first);
-		b.set("cellKey", it->second.cellKey);
-		b.set("opId", (double)++og->opId);
-		og->takeOps[og->opId] = { it->second.id, it->second.count };
-		on.sendEvent("ObjectTakeRequest", b);
-		it = og->netObjs.erase(it);
+		bool gone = slot < 0 || slot >= (int)w.refs.size() || w.refs[slot].cell < 0 || w.refs[slot].netId != it->first;
+		it = gone ? og->netObjs.erase(it) : std::next(it);
 	}
 }
 
@@ -1949,7 +2004,12 @@ bool Session::onlineDropEvent(const std::string& name, const LValue& b)
 		std::string cellKey = p->second.cellKey;
 		og->pendingDrops.erase(p);
 		if (name == "ObjectSpawnAck")
-			og->netObjs[(uint32_t)b.numberAt("netId")] = OnlineGame::NetObj(slot, cellKey);
+		{
+			uint32_t net = (uint32_t)b.numberAt("netId");
+			og->netObjs[net] = OnlineGame::NetObj(slot, cellKey);
+			if (slot < (int)w.refs.size() && w.refs[slot].cell >= 0 && w.refs[slot].dropped)
+				w.refs[slot].netId = net;
+		}
 		else if (slot < (int)w.refs.size() && w.refs[slot].cell >= 0 && w.refs[slot].dropped)
 		{
 			// refused (nothing to drop, too far, a full cell): back in the pack
@@ -1964,8 +2024,9 @@ bool Session::onlineDropEvent(const std::string& name, const LValue& b)
 		if (na != og->netActors.end())
 		{
 			int slot = na->second;
+			uint32_t net = na->first;
 			og->netActors.erase(na);
-			if (slot < (int)w.refs.size() && w.refs[slot].rnFile == kNetActorFile)
+			if (slot < (int)w.refs.size() && w.refs[slot].rnFile == kNetActorFile && w.refs[slot].rnIndex == net)
 				w.despawn(slot);
 			return true;
 		}
@@ -1974,7 +2035,8 @@ bool Session::onlineDropEvent(const std::string& name, const LValue& b)
 		{
 			int slot = n->second.slot;
 			og->netObjs.erase(n);
-			if (slot < (int)w.refs.size() && w.refs[slot].cell >= 0 && w.refs[slot].dropped)
+			if (slot < (int)w.refs.size() && w.refs[slot].cell >= 0 && w.refs[slot].dropped
+				&& w.refs[slot].netId == (uint32_t)b.numberAt("net"))
 				w.despawn(slot);
 		}
 		return true;
@@ -2000,6 +2062,8 @@ void Session::onlineTalkAndSky(float now)
 	{
 		auto lockBody = [&](int ri, bool want) {
 			const Ref& r = w.refs[ri];
+			if (r.rnFile < 0 || r.rnFile >= (int)og->contentFiles.size() || og->contentFiles[r.rnFile] < 0)
+				return;
 			LValue b = LValue::newTable();
 			b.set("ref", LValue::refNum(r.rnIndex, og->contentFiles[r.rnFile]));
 			b.set("cellKey", onlineActorCell(ri));
@@ -2051,9 +2115,12 @@ bool Session::onlineTalkAndSkyEvent(const std::string& name, const LValue& b)
 	if (name == "DialogueLockResult")
 	{
 		const LValue* ref = b.get("ref");
-		if (b.boolAt("granted") || !b.get("holderId") || !ref || ref->type != LValue::REFNUM || og->talkRef < 0)
+		if (b.boolAt("granted") || !b.get("holderId") || !ref || ref->type != LValue::REFNUM || og->talkRef < 0
+			|| og->talkRef >= (int)w.refs.size())
 			return true;
 		const Ref& r = w.refs[og->talkRef];
+		if (r.rnFile < 0 || r.rnFile >= (int)og->contentFiles.size() || og->contentFiles[r.rnFile] < 0)
+			return true;
 		if (netRefKey(og->contentFiles[r.rnFile], r.rnIndex) != netRefKey(ref->refFile, ref->refIndex))
 			return true;
 		// someone else is talking to them
@@ -2233,6 +2300,20 @@ void Session::onlineSelf(float now)
 	// Dead: told, and told again every five seconds until the world brings us back (PlayerResurrect)
 	if (playerDead)
 	{
+		if (og->diedAt < 0)
+			og->diedAt = now;
+		if (now - og->diedAt > 45.0f)
+		{
+			// (the world never answered: up again where we fell, a little hurt, rather than stuck on this screen)
+			playerDead = false;
+			w.stats.health = fmaxf(1.0f, w.stats.healthMax * 0.25f);
+			if (screen == SCR_DEATH)
+				screen = SCR_NONE;
+			og->diedAt = -1;
+			notify("The world did not answer: you stand up again.");
+			logf("online: no resurrection in 45 s; standing up here");
+			return;
+		}
 		if (now - og->deathSaidAt >= 5.0f)
 		{
 			og->deathSaidAt = now;
@@ -2241,7 +2322,10 @@ void Session::onlineSelf(float now)
 		}
 	}
 	else
+	{
 		og->deathSaidAt = -100.0f;
+		og->diedAt = -1;
+	}
 	if (now < og->selfAt)
 		return;
 	og->selfAt = now + 0.25f;
@@ -2257,7 +2341,7 @@ void Session::onlineSelf(float now)
 			if (c.second > before)
 			{
 				LValue b = LValue::newTable();
-				b.set("id", c.first);
+				b.set("id", netIdOf(c.first));
 				b.set("n", (double)(c.second - before));
 				on.sendEvent("PlayerItemAcquired", b);
 			}
@@ -2316,7 +2400,7 @@ void Session::onlineSelf(float now)
 			{
 				LValue e = LValue::newTable();
 				e.set("key", s.first);
-				e.set("id", s.second);
+				e.set("id", netIdOf(s.second));
 				remove.push(e);
 			}
 		if (add.arraySize() || remove.arraySize())
@@ -2965,6 +3049,7 @@ void Session::onlineRecord(const LValue& r)
 		sp.type = kind == "spell" ? (int)d->numberAt("type") : ENCH_ONCE + (int)d->numberAt("type");
 		sp.effects = effectsFrom(d->get("effects"));
 		w.game.spells[net] = sp;
+		og->builtRecords.insert(net);
 		return;
 	}
 	RecName want = kind == "potion" ? REC_ALCH : kind == "weapon" ? REC_WEAP : kind == "armor" ? REC_ARMO
@@ -3000,6 +3085,7 @@ void Session::onlineRecord(const LValue& r)
 			o.iconBase = base->id;
 	}
 	w.game.objects[net] = o;
+	og->builtRecords.insert(net);
 }
 
 bool Session::onlineRecordEvent(const std::string& name, const LValue& b)
@@ -3116,7 +3202,11 @@ void Session::onlineWorldMisc(float now)
 {
 	Online& on = *g_online;
 	// People a script placed: the server's world places them (PROTOCOL.md M3 ObjectSpawnRequest actor=true -> QuestSpawn)
-	w.actorsElsewhere = !on.holderOf.empty();
+	{
+		// (only where someone holds the cell we are in: elsewhere there is nobody to place them)
+		auto h = on.holderOf.find(cellKeyAt(w, w.current));
+		w.actorsElsewhere = h != on.holderOf.end() && h->second != (uint16_t)on.playerId;
+	}
 	for (auto& a : w.spawnAsks)
 	{
 		LValue b = LValue::newTable();
@@ -3308,6 +3398,23 @@ void puppetAnimate(World& w, Ref& r, Actor& a, ActorSet& set, uint8_t flags, uin
 void Session::onlinePuppets(float now)
 {
 	Online& on = *g_online;
+	// (once a minute: actors not heard from in two minutes and not dead go, and what was seen of objects when it
+	// grows past what a few towns hold: seen again quietly)
+	if (now >= og->pruneAt)
+	{
+		og->pruneAt = now + 60.0f;
+		for (auto it = on.actors.begin(); it != on.actors.end();)
+		{
+			bool stale = !it->second.dead && it->second.lastAt >= 0 && now - it->second.lastAt > 120.0f;
+			if (stale)
+				og->puppetFlags.erase(it->first);
+			it = stale ? on.actors.erase(it) : std::next(it);
+		}
+		if (og->objSeen.size() > 20000)
+			og->objSeen.clear();
+		for (auto it = og->playerMagic.begin(); it != og->playerMagic.end();)
+			it = on.players.count(it->first) ? std::next(it) : og->playerMagic.erase(it);
+	}
 	if (og->cellKeys.size() != w.cells.size())
 	{
 		og->cellKeys.resize(w.cells.size());
@@ -3367,9 +3474,9 @@ void Session::onlinePuppets(float now)
 		r.rot[2] = n.prev.yaw + yd * t;
 		r.ai = n.combat ? AI_COMBAT : AI_IDLE;
 		r.moved = true;
-		if (!og->puppetFlags.count(i))
+		if (!og->puppetFlags.count(it->first))
 			logf("online: %s follows the world's stream (%.0f %.0f %.0f)", r.id.c_str(), x, y, z);
-		uint8_t& was = og->puppetFlags[i];
+		uint8_t& was = og->puppetFlags[it->first];
 		if (Actor* a = w.actorOf(i))
 			puppetAnimate(w, r, *a, *w.actorsOf(i), n.last.flags, was, moving && n.last.animVel > 0.02f);
 		was = n.last.flags;
@@ -3401,8 +3508,55 @@ void Session::onlineReport(const std::string& reason)
 	og->reportName.clear();
 }
 
+// Leaving a world (another one's, home, or the same one again after a drop): what was its alone goes. Its people
+// and things the server spawned, the ids it gave our records and the ones it built here, who held which cell, the
+// operations waiting for its answers; the next world's welcome brings its own
+void Session::onlineForgetWorld()
+{
+	Online& on = *g_online;
+	for (auto& n : og->netActors)
+		if (n.second < (int)w.refs.size() && w.refs[n.second].rnFile == kNetActorFile && w.refs[n.second].rnIndex == n.first)
+			w.despawn(n.second);
+	for (auto& n : og->netObjs)
+		if (n.second.slot >= 0 && n.second.slot < (int)w.refs.size() && w.refs[n.second.slot].netId == n.first)
+			w.despawn(n.second.slot);
+	og->netActors.clear();
+	og->netObjs.clear();
+	og->pendingDrops.clear();
+	og->takeOps.clear();
+	og->contPending.clear();
+	og->contOps.clear();
+	og->cellStates.clear();
+	og->recordPending.clear();
+	og->recordRefused.clear();
+	og->weatherHolder.clear();
+	og->followers.clear();
+	og->travelSaid.clear();
+	og->memberWatch.clear();
+	og->memberSaid.clear();
+	og->puppetFlags.clear();
+	og->playerMagic.clear();
+	og->objSeen.clear();
+	og->spellHits.clear();
+	og->talkRef = og->contRef = og->purseRef = -1;
+	for (auto& id : og->builtRecords)
+	{
+		w.game.spells.erase(id);
+		w.game.objects.erase(id);
+	}
+	og->builtRecords.clear();
+	g_recNet.clear();
+	g_recLocal.clear();
+	on.holderOf.clear();
+	on.epochOf.clear();
+	on.actors.clear();
+	w.actorsElsewhere = false;
+	logf("online: the last world's state forgotten");
+}
+
 void Session::onlineFree()
 {
+	w.actorsElsewhere = false;
 	if (!og)
 		return;
 	for (auto& kv : og->bodies)
@@ -3424,6 +3578,21 @@ void Session::drawOnline()
 		og = new OnlineGame();
 	Online& on = *g_online;
 	uiCaption("Online", on.worldName.empty() ? on.config.server : on.worldName);
+	// (the connection lost: what is going on, and a way to try at once)
+	if (on.phase != Online::IN_WORLD)
+	{
+		uiRect(4, 50, 312, 150, 0xB0000000);
+		uiTextCentered(160, 100, 0.5f, col::text, on.phase == Online::FAILED ? "Disconnected: " + on.error()
+			: on.status.empty() ? std::string("Connecting...") : on.status);
+		if (on.phase == Online::FAILED && og->wasInWorld && uiButton(84, 150, 152, 28, "Reconnect now"))
+		{
+			on.reconnect();
+			og->reconnectDelay = 5.0f;
+		}
+		if (uiButton(216, 208, 100, 28, "Back") || (uiIn().down & KEY_B))
+			closeScreen();
+		return;
+	}
 	static const char* kTabs[3] = { "Players", "Chat", "Friends" };
 	for (int i = 0; i < 3; i++)
 		if (uiButton(4 + i * 80, 24, 76, 22, kTabs[i], og->tab == i))
