@@ -66,13 +66,12 @@ one. The server keeps the online character.
 | The players | Moves (15 a second), cell changes, looks, equipment, health / magicka / fatigue, attributes, skills, level, pack, spells, chat, friends, invites, party worlds. Character creation done (ChargenComplete), the stored character put back on |
 | The world's people and creatures | On a server with a sim peer (openmw-web's platform), the peer simulates them and streams them; the 3DS draws them where it says: standing, walking, running, weapon out, their blows, their health, deaths and revivals. They have no mind of their own on the 3DS. In a cell nobody holds (a server without a peer), the 3DS runs them itself, as offline |
 | Fights | The player's swings go to the server's copy of the player (the input tier's use bit), so blows land there, armor and all, and the server's copy takes the world's blows: its health, magicka and fatigue come back (SelfStats). The player's spells on the server's people go to it whole (CombatSpellHit: the spell, or the item it came from, and the effects that hit), and their owner applies them, reflect and resistances included; the server only takes spells the character knows. Crimes the server sees come back as bounty |
-| Objects | Items taken, doors opened, locks, objects scripts switch on or off, the dead: each cell's state from the server on arrival, and everyone's changes as they happen |
+| Objects | Items taken, doors opened, locks, objects scripts switch on or off, the dead: each cell's state from the server on arrival, and everyone's changes as they happen. Things dropped from the pack lie there for everyone (ObjectSpawnRequest / ObjectPlace), and picking one up is the server's to grant: someone who got there first keeps it |
 | Containers | Chests, corpses and plants hold the same for everyone: the first to open one fixes what is in it, then every take or put is the server's |
 | The story | Journal stages, dialogue topics, globals, faction ranks and reputation, the bounty (as the server's sharing settings say) |
 | The clock | The server's time and date; a rest or a wait asks the server to move everyone's clock on |
 
-**Not yet:** things dropped into
-the world (ObjectSpawnRequest) and other players' drops, merchants' purses, a conversation's lock on an NPC
+**Not yet:** merchants' purses, a conversation's lock on an NPC
 (DialogueLock), followers and escorts, the weather, and the werewolf's first-person claws.
 
 Each player sees the others walk and run where they are, dressed as they are.

@@ -9,6 +9,7 @@
 #include <string>
 #include <sys/stat.h>
 #include <vector>
+#include "mwmp/online.hpp"
 #include "components/debug/debuglog.hpp"
 #include "platform/platform.hpp"
 #include "mwinput/inputmanagerimp.hpp"
@@ -351,7 +352,9 @@ void runScriptedStep(Session* session, ScriptedSteps& autoinput, size_t& inputIn
 		if (ww.itemCount(id) > 0)
 		{
 			ww.removeItem(id, 1);
-			ww.dropItemAt({ id, 1, false }, ww.player.feet, ww.player.yaw, 50.0f);
+			int dropped = ww.dropItemAt({ id, 1, false }, ww.player.feet, ww.player.yaw, 50.0f);
+			if (dropped >= 0 && g_online)
+				ww.playerDrops.push_back(dropped);
 		}
 		else
 			logf("test: no %s to drop", id.c_str());

@@ -512,6 +512,9 @@ struct Session : ScriptHost, WindowManagerState, MechanicsState, RenderState, So
 	void onlineContainerFlush(int ri);
 	bool onlineSpellHit(int ri, const struct SpellEffect& e);
 	void onlineSpellHits();
+	void onlinePlace(const struct LValue& body);
+	void onlineDrops();
+	bool onlineDropEvent(const std::string& name, const struct LValue& body);
 	bool onlineContainerEvent(const std::string& name, const struct LValue& body);
 	void onlineTick(float dt);
 	void onlineDrawPlayers(bool deform);

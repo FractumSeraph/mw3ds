@@ -2,6 +2,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include "mwmp/online.hpp"
 #include "mwgui/windowmanagerimp.hpp"
 #include "mwbase/session.hpp"
 
@@ -120,7 +121,9 @@ void Session::drawInventory()
 			if ((w.inventory[sel].count -= n) <= 0)
 				w.inventory.erase(w.inventory.begin() + sel);
 			w.itemLeft(it.id);
-			w.dropItemAt(it, w.player.feet, w.player.yaw, 50.0f);
+			int dropped = w.dropItemAt(it, w.player.feet, w.player.yaw, 50.0f);
+			if (dropped >= 0 && g_online)
+				w.playerDrops.push_back(dropped);         // (online: shown to everyone, mwmp/mpgame.cpp)
 			playSound(-1, "Item Misc Down");
 			grid.selected = -1;
 		}

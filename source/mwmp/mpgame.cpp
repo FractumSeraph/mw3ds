@@ -82,6 +82,21 @@ struct OnlineGame
 	// The player's spells on the server's people this frame (PROTOCOL.md M5 CombatSpellHit), by target: sent whole
 	struct SpellHit { std::string spellId; LValue effects = LValue::newTable(); LValue indexes = LValue::newTable(); };
 	std::map<int, SpellHit> spellHits;
+	// Things dropped: the server's net id -> the slot here (what it is, how many, its cell); our drops waiting for their
+	// id; takes waiting for an answer (what leaves the pack again if the server says no)
+	struct NetObj
+	{
+		int slot = -1;
+		std::string cellKey, id;
+		int count = 1;
+		NetObj() {}
+		NetObj(int s, const std::string& c) : slot(s), cellKey(c) {}
+	};
+	std::map<uint32_t, NetObj> netObjs;
+	std::map<int, NetObj> pendingDrops;
+	int tempSeq = 0;
+	struct TakeOp { std::string id; int count; };
+	std::map<int, TakeOp> takeOps;
 	bool clockAdopted = false;
 	float clockHour = -1;                // gameHour after the last frame (a jump past it is a rest or a wait)
 };
@@ -779,7 +794,8 @@ void Session::onlineTick(float dt)
 			w.bounty = std::max(0, w.bounty + add);
 			logf("online: a crime in the world (%s): bounty %+d, now %d", e.body.stringAt("kind").c_str(), add, w.bounty);
 		}
-		else if (onlineStoryEvent(e.name, e.body) || onlineObjectEvent(e.name, e.body) || onlineContainerEvent(e.name, e.body))
+		else if (onlineStoryEvent(e.name, e.body) || onlineDropEvent(e.name, e.body) || onlineObjectEvent(e.name, e.body)
+			|| onlineContainerEvent(e.name, e.body))
 			;
 		else if (e.name == "WorldKillCount")
 			w.deadCounts[lowerCase(e.body.stringAt("refId"))] = (int)e.body.numberAt("count");
@@ -788,6 +804,7 @@ void Session::onlineTick(float dt)
 	onlineSpellHits();
 	onlineStory(now);
 	onlineObjects(now);
+	onlineDrops();
 	onlineContainers(now);
 	// The other players' bodies: dressed as they are, where they stand (a tenth of a second behind, between the last
 	// two poses), walking or running as fast as they go
@@ -1212,6 +1229,9 @@ void Session::onlineCellState(const std::string& cellKey, const LValue& b)
 	each("disabled", "enabled", 0);
 	each("enabled", "enabled", 1);
 	each("deaths", "dead", 1);
+	if (const LValue* placed = b.get("placed"))
+		for (int i = 1; i <= placed->arraySize(); i++)
+			onlinePlace(*placed->at(i));
 	if (const LValue* doors = b.get("doors"))
 		for (auto& kv : doors->table)
 		{
@@ -1281,6 +1301,7 @@ void Session::onlineObjects(float now)
 		{
 			LValue b = body();
 			b.set("opId", (double)++og->opId);
+			og->takeOps[og->opId] = { r.idLower.str(), std::max(1, r.count) };
 			on.sendEvent("ObjectTakeRequest", b);
 		}
 		if (s.open != was.open && r.recType == REC_DOOR)
@@ -1323,8 +1344,18 @@ bool Session::onlineObjectEvent(const std::string& name, const LValue& b)
 		return false;
 	if (name == "ObjectTakeResult")
 	{
+		auto op = og->takeOps.find((int)b.numberAt("opId", -1));
+		if (op == og->takeOps.end())
+			return true;
+		OnlineGame::TakeOp t = op->second;
+		og->takeOps.erase(op);
 		if (!b.boolAt("ok", true))
-			logf("online: the world refused a take (%s)", b.stringAt("reason").c_str());
+		{
+			// someone else had it first: it leaves the pack again
+			w.removeItem(t.id, t.count);
+			notify("Someone else took it first.");
+			logf("online: the world refused taking %d %s (%s)", t.count, t.id.c_str(), b.stringAt("reason").c_str());
+		}
 		return true;
 	}
 	const LValue* ref = b.get("ref");
@@ -1620,6 +1651,165 @@ void Session::onlineSpellHits()
 		logf("online: %s at %s goes to the world (%d effects)", h.spellId.c_str(), r.id.c_str(), h.effects.arraySize());
 	}
 	og->spellHits.clear();
+}
+
+// ---- things dropped (PROTOCOL.md M3): the player's drops go to the server, which names each (a net id) and shows it
+// to everyone; others' come here as ObjectPlace (and in a cell's state as `placed`), and a pick-up of one is asked of
+// the server as a take
+
+namespace
+{
+LValue dropState(const Ref& r)
+{
+	LValue st = LValue::newTable();
+	if (r.dropState.condition >= 0)
+		st.set("condition", (double)r.dropState.condition);
+	if (r.dropState.charge >= 0.0f)
+		st.set("charge", (double)r.dropState.charge);
+	if (!r.dropState.soul.empty())
+		st.set("soul", r.dropState.soul);
+	return st;
+}
+}
+
+// Someone's drop (an ObjectPlace-shaped body) put here, or one of ours already lying where it says adopted
+void Session::onlinePlace(const LValue& b)
+{
+	uint32_t net = (uint32_t)b.numberAt("netId", 0);
+	if (!net || b.boolAt("actor") || og->netObjs.count(net))
+		return;
+	std::string id = lowerCase(b.stringAt("recordId"));
+	float pos[3] = { (float)b.numberAt("x"), (float)b.numberAt("y"), (float)b.numberAt("z") };
+	int cell = cellOfKey(w, b.stringAt("cellKey"));
+	if (cell < 0 || !w.game.object(id))
+		return;
+	// (a drop of ours from before, kept by the save as well as by the server: the same thing, not a second one)
+	for (int k : w.spawned)
+	{
+		const Ref& r = w.refs[k];
+		if (r.cell >= 0 && r.dropped && r.idLower == id && fabsf(r.pos[0] - pos[0]) < 2.0f && fabsf(r.pos[1] - pos[1]) < 2.0f
+			&& fabsf(r.pos[2] - pos[2]) < 2.0f)
+		{
+			bool taken = false;
+			for (auto& n : og->netObjs)
+				taken |= n.second.slot == k;
+			if (!taken)
+			{
+				og->netObjs[net] = OnlineGame::NetObj(k, b.stringAt("cellKey"));
+				return;
+			}
+		}
+	}
+	InventoryItem it = { id, std::max(1, (int)b.numberAt("count", 1)), false };
+	if (const LValue* st = b.get("state"))
+	{
+		it.condition = (int)st->numberAt("condition", -1);
+		it.charge = (float)st->numberAt("charge", -1);
+		it.soul = st->stringAt("soul");
+	}
+	int slot = w.dropItem(it, pos, (float)b.numberAt("rotZ"), cell);
+	if (slot >= 0)
+	{
+		og->netObjs[net] = OnlineGame::NetObj(slot, b.stringAt("cellKey"));
+		logf("online: %d x %s placed by player %d", it.count, id.c_str(), (int)b.numberAt("byId", -1));
+	}
+}
+
+void Session::onlineDrops()
+{
+	Online& on = *g_online;
+	// (what each mapping is, from when it was made: a slot used again later is not the same thing)
+	for (auto& n : og->netObjs)
+		if (n.second.id.empty() && n.second.slot >= 0 && n.second.slot < (int)w.refs.size())
+		{
+			n.second.id = w.refs[n.second.slot].idLower.str();
+			n.second.count = std::max(1, w.refs[n.second.slot].count);
+		}
+	// the player's own drops since the last look: each asked of the server, put back if it says no
+	for (int slot : w.playerDrops)
+	{
+		if (slot < 0 || slot >= (int)w.refs.size() || w.refs[slot].cell < 0)
+			continue;
+		const Ref& r = w.refs[slot];
+		int tempId = ++og->tempSeq;
+		std::string cellKey = og->cellKeys.size() > (size_t)r.cell ? og->cellKeys[r.cell] : cellKeyAt(w, r.cell);
+		og->pendingDrops[tempId] = OnlineGame::NetObj(slot, cellKey);
+		LValue b = LValue::newTable();
+		b.set("tempId", (double)tempId);
+		b.set("recordId", r.idLower.str());
+		b.set("cellKey", cellKey);
+		b.set("x", (double)r.pos[0]);
+		b.set("y", (double)r.pos[1]);
+		b.set("z", (double)r.pos[2]);
+		b.set("rotZ", (double)r.rot[2]);
+		b.set("count", (double)std::max(1, r.count));
+		b.set("fromInventory", LValue::boolean(true));
+		LValue st = dropState(r);
+		if (!st.table.empty())
+			b.set("state", st);
+		on.sendEvent("ObjectSpawnRequest", b);
+	}
+	w.playerDrops.clear();
+	// the shared ones picked up here: a take, the server's to grant
+	for (auto it = og->netObjs.begin(); it != og->netObjs.end();)
+	{
+		int slot = it->second.slot;
+		bool gone = slot < 0 || slot >= (int)w.refs.size() || w.refs[slot].cell < 0 || !w.refs[slot].spawnedRef
+			|| !w.refs[slot].dropped || w.refs[slot].idLower.str() != it->second.id;
+		if (!gone)
+		{
+			++it;
+			continue;
+		}
+		LValue b = LValue::newTable();
+		b.set("net", (double)it->first);
+		b.set("cellKey", it->second.cellKey);
+		b.set("opId", (double)++og->opId);
+		og->takeOps[og->opId] = { it->second.id, it->second.count };
+		on.sendEvent("ObjectTakeRequest", b);
+		it = og->netObjs.erase(it);
+	}
+}
+
+bool Session::onlineDropEvent(const std::string& name, const LValue& b)
+{
+	if (name == "ObjectPlace")
+	{
+		if (b.numberAt("byId", -1) != g_online->playerId)
+			onlinePlace(b);
+		return true;
+	}
+	if (name == "ObjectSpawnAck" || name == "ObjectSpawnRefused")
+	{
+		auto p = og->pendingDrops.find((int)b.numberAt("tempId", -1));
+		if (p == og->pendingDrops.end())
+			return true;
+		int slot = p->second.slot;
+		std::string cellKey = p->second.cellKey;
+		og->pendingDrops.erase(p);
+		if (name == "ObjectSpawnAck")
+			og->netObjs[(uint32_t)b.numberAt("netId")] = OnlineGame::NetObj(slot, cellKey);
+		else if (slot < (int)w.refs.size() && w.refs[slot].cell >= 0 && w.refs[slot].dropped)
+		{
+			// refused (nothing to drop, too far, a full cell): back in the pack
+			logf("online: the world refused a drop of %s (%s)", w.refs[slot].id.c_str(), b.stringAt("reason").c_str());
+			w.pickUp(slot);
+		}
+		return true;
+	}
+	if (name == "ObjectDelete" && b.get("net"))
+	{
+		auto n = og->netObjs.find((uint32_t)b.numberAt("net"));
+		if (n != og->netObjs.end())
+		{
+			int slot = n->second.slot;
+			og->netObjs.erase(n);
+			if (slot < (int)w.refs.size() && w.refs[slot].cell >= 0 && w.refs[slot].dropped)
+				w.despawn(slot);
+		}
+		return true;
+	}
+	return false;
 }
 
 // ---- the world's people and creatures the server simulates (PROTOCOL.md M4): whoever holds their cell (the sim peer)
