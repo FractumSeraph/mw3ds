@@ -376,7 +376,10 @@ static void integrateLevelCell(World& w, int index, LoadedCell* l)
 			if (w.refs[l->actors.actors[k].ref].at >= 0)
 				l->actors.actors[k].ref = -1;
 			else
+			{
 				w.refs[l->actors.actors[k].ref].anim = k;
+				w.applyScriptScale(l->actors.actors[k].ref);       // (SetScale: Bloodmoon)
+			}
 		}
 	// Cell::actors lists the cell's NPCs in reference order
 	int cylinder = 0;

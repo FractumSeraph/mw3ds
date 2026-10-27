@@ -59,6 +59,34 @@ bool statFunction(Ctx& c, const Node& n, bool onPlayer, Ref* r, int ref, float* 
 		*out = (float)a.level;
 		return true;
 	}
+	// Get / Set / Mod + a magic effect (OpenMW's MagicEffect functions): the effect's magnitude less its weakness's, and
+	// for Get / Set Resist Fire, Frost and Shock the matching elemental shield's too; Set / Mod move a lasting modifier
+	// under it (Bloodmoon's ModResistFire 100), kept with the save (World::modEffectBase)
+	if (op <= 2)
+		for (const EffectFunc& f : kEffectFuncs)
+			if (statName == f.name)
+			{
+				*out = 0.0f;
+				if (!player && r->actor < 0)
+					return true;
+				auto magnitude = [&](int e) { return e < 0 ? 0.0f : player ? w.effectTotal(e) : w.actorEffect(ref, e); };
+				float cur = magnitude(f.positive) - magnitude(f.negative);
+				int shield = f.positive == EFF_RESIST_FIRE ? EFF_FIRE_SHIELD : f.positive == EFF_RESIST_SHOCK
+					? EFF_LIGHTNING_SHIELD : f.positive == EFF_RESIST_FROST ? EFF_FROST_SHIELD : -1;
+				if (op != 2)
+					cur += magnitude(shield);
+				if (op == 0)
+				{
+					*out = (float)(int)cur;
+					return true;
+				}
+				int delta = op == 1 ? (int)arg - (int)cur : (int)arg;
+				if (f.positive >= 0)
+					w.modEffectBase(player ? -1 : ref, f.positive, (float)delta);
+				else
+					w.modEffectBase(player ? -1 : ref, f.negative, (float)-delta);
+				return true;
+			}
 	// GetHealthGetRatio and its kin: current over maximum
 	bool ratio = statName.size() > 8 && statName.compare(statName.size() - 8, 8, "getratio") == 0;
 	if (ratio)
@@ -197,6 +225,28 @@ std::optional<float> statsExtensions(Ctx& c, const Node& n, World& w, bool onPla
 	{
 	// GetStat: a placeholder in the original game, always 0 (OpenMW's GetStat; Tribunal's Gedna Relvel asks it for Level)
 	case F_GETSTAT: return 0.0f;
+	// BecomeWerewolf / UndoWerewolf (Bloodmoon): the player changes form (Session::setPlayerWerewolf, OpenMW's
+	// MechanicsManager::setWerewolf); another NPC keeps only the flag so far
+	case F_BECOMEWEREWOLF: case F_UNDOWEREWOLF:
+		if (onPlayer || !r)
+			c.host.setPlayerWerewolf(n.func == F_BECOMEWEREWOLF);
+		else if (r->actor >= 0)
+			r->werewolf = n.func == F_BECOMEWEREWOLF;
+		return 0.0f;
+	case F_ISWEREWOLF:
+		return (onPlayer || !r ? w.werewolf : r->werewolf) ? 1.0f : 0.0f;
+	// GetWerewolfKills: the people and creatures the player killed in the beast's form
+	case F_GETWEREWOLFKILLS:
+		return (float)w.werewolfKills;
+	// SetWerewolfAcrobatics: the beast's Acrobatics too (OpenMW's applyWerewolfAcrobatics; Bloodmoon gives it once the
+	// player has hunted)
+	case F_SETWEREWOLFACROBATICS:
+		if ((onPlayer || !r) && !w.werewolfAcrobatics)
+		{
+			w.werewolfAcrobatics = true;
+			w.recomputeKeepingBars();
+		}
+		return 0.0f;
 	// GetChameleon / GetParalysis: the magnitude of that effect on the player or the reference (OpenMW's GetMagicEffect)
 	case F_GETCHAMELEON: case F_GETPARALYSIS:
 	{

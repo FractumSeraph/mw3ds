@@ -89,6 +89,7 @@ void World::attachSpawned(int ri)
 	float c = cosf(r.rot[2]), s = sinf(r.rot[2]);
 	float place[12] = { c, s, 0.0f, r.pos[0], -s, c, 0.0f, r.pos[1], 0.0f, 0.0f, 1.0f, r.pos[2] };
 	r.anim = actorsAddFromLibrary(l->actors, l->cell, textures, dataDir, lib, ri, skel, place);
+	applyScriptScale(ri);
 	CellActor ca = {};
 	strncpy(ca.id, r.id.c_str(), sizeof(ca.id) - 1);
 	strncpy(ca.name, game.actors[r.actor].name.c_str(), sizeof(ca.name) - 1);

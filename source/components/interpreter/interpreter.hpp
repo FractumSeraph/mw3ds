@@ -42,6 +42,7 @@ struct ScriptHost
 	virtual void hurtPlayer(float health) = 0;           // HurtStandingActor
 	virtual void sheathe() = 0;                          // PayFine: the weapon is put away
 	virtual void goToJail() = 0;                         // GotoJail
+	virtual void setPlayerWerewolf(bool werewolf) {}     // BecomeWerewolf / UndoWerewolf on the player (Bloodmoon)
 	virtual void castEffect(int ref, const SpellEffect& e, const std::string& source, int casterRef = -1, float spellCost = 0.0f) = 0;
 	virtual void objectCastShown(int casterRef, int targetRef, const std::string& spellId) {}   // Cast by an object: its cast and the hit, seen and heard   // ref -1: the player; casterRef: the actor that cast it (Cast), kCasterObject an object
 	virtual void loopSound(int ref, const std::string& soundId, bool start, float volume = 1.0f, float pitch = 1.0f) = 0;   // PlayLoopSound3D / StopSound

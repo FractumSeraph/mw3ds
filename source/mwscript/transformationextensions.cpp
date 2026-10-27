@@ -17,6 +17,14 @@ std::optional<float> transformationExtensions(Ctx& c, const Node& n, World& w, b
 {
 	switch (n.func)
 	{
+	// GetScale / SetScale / ModScale (OpenMW's: held to 0.5 .. 2, ModScale adds a hundredth of its argument): an
+	// actor is drawn and stands at the new size (World::setRefScale); a static keeps its baked one
+	case F_GETSCALE:
+		return r ? r->scale : 1.0f;
+	case F_SETSCALE: case F_MODSCALE:
+		if (r && !onPlayer)
+			w.setRefScale(ref, n.func == F_SETSCALE ? argNum(c, n, 0) : r->scale + argNum(c, n, 0) / 100.0f);
+		return 0.0f;
 	// PlaceAtPC / PlaceAtMe id count distance direction (0 front, 1 back, 2 left, 3 right)
 	// PlaceItem id x y z zRot: a new one at that spot in the player's cell (outdoors the cell under it); PlaceItemCell id
 	// cell x y z zRot: in that cell (OpenMW's PlaceItem / PlaceItemCell; the angle in degrees)

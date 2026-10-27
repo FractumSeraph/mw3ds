@@ -176,6 +176,9 @@ void Session::drawBottom()
 
 void Session::openScreen(Screen s)
 {
+	// A werewolf has no inventory and no magic (OpenMW hides those windows)
+	if (w.werewolf && (s == SCR_INVENTORY || s == SCR_MAGIC || s == SCR_SPELLS))
+		return;
 	screen = s;
 	list = UiList();
 	list2 = UiList();

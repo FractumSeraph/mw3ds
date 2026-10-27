@@ -167,6 +167,7 @@ bool Session::travelGo(int sel)
 	if (!w.cells[w.current].interior)
 	{
 		float hours = (float)(int)(sqrtf(dx * dx + dy * dy) / w.game.gmstf("ftraveltimemult", 16000.0f));
+		w.travelledAt = w.time;
 		w.gameHour += hours;
 		rechargeItems(hours * 3600.0f / w.timescale());
 	}

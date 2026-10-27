@@ -479,11 +479,15 @@ def main():
                     help="processes converting cells (0: by threads and free memory; 1: one, as before)")
     ap.add_argument("--tribunal", action="store_true",
                     help="the Tribunal add-on: Tribunal.esm after Morrowind.esm (or MW3DS_TRIBUNAL=1)")
+    ap.add_argument("--bloodmoon", action="store_true",
+                    help="the Bloodmoon add-on: Bloodmoon.esm after them (or MW3DS_BLOODMOON=1); with --world, Solstheim")
     ap.add_argument("--world", action="store_true",
                     help="the whole island: every interior, all land walkable (with MW3DS_OUT=out/world to try it)")
     args = ap.parse_args()
     if args.tribunal:
         os.environ["MW3DS_TRIBUNAL"] = "1"         # (the cell processes inherit it)
+    if args.bloodmoon:
+        os.environ["MW3DS_BLOODMOON"] = "1"
 
     t0 = time.time()
     db = load_db()
@@ -851,6 +855,8 @@ def main():
                        "Speed", "Daily Increment", "Fade Start Angle", "Fade End Angle", "Moon Shadow Early Fade Angle")}
                    for m in ("masser", "secunda")},
         "sunrise": float(wsec.get("Sunrise Time", "6")), "sunset": float(wsec.get("Sunset Time", "18")),
+        # Secunda's colour while Bloodmoon's TurnMoonRed holds (OpenMW's Moons_Script_Color)
+        "script_color": [int(v) for v in (moons.get("Script Color") or "255,20,20").split(",")[:3]],
     }
     # Distant land past the loaded cells (tools/convert/distant.py)
     wx = weather(ini, args.weather)

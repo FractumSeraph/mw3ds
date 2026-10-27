@@ -178,6 +178,14 @@ void Session::updateSky()
 		mb.tex = skyTex(m == 0 ? sky.masser[phase] : sky.secunda[phase]);
 		u8 lit = (u8)(textured * 255);
 		mb.rgba = lit | (lit << 8) | (lit << 16) | ((u32)a8 << 24);
+		// Bloodmoon's TurnMoonRed: Secunda's picture in the ini's Script Color (OpenMW's setMoonColour)
+		if (m == 1 && w.moonRed)
+		{
+			u32 c = 0;
+			for (int i = 0; i < 3; i++)
+				c |= (u32)(lit * sky.scriptColor[i]) << (8 * i);
+			mb.rgba = c | ((u32)a8 << 24);
+		}
 		mb.additive = true;
 		g_skyBillboards.push_back(mb);
 	}

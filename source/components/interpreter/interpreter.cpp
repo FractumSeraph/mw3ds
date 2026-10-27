@@ -541,6 +541,9 @@ bool scriptFunctionSupported(const std::string& name)
 		return false;
 	if (stat == "health" || stat == "magicka" || stat == "fatigue")
 		return true;
+	for (const EffectFunc& f : kEffectFuncs)
+		if (op <= 2 && stat == f.name)
+			return true;
 	for (const char* a : kAttrFuncs)
 		if (stat == a)
 			return true;

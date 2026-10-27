@@ -15,6 +15,10 @@ struct Ref
 	Atom id, idLower, type;
 	RecName recType = REC_OTHER;           // type as a number (components/esm/defs.hpp)
 	float pos[3], rot[3], scale = 1.0f;
+	float scaleOrig = 0.0f;       // the scale before a script's SetScale (0: none set; saved with scale)
+	bool werewolf = false;        // BecomeWerewolf on an NPC (Bloodmoon; saved)
+	// Lasting magic effect modifiers scripts set on the actor (ModResistFire ...): effect, magnitude (saved)
+	std::vector<std::pair<int, float>> effectBase;
 	int count = 1;
 	int lockLevel = 0;
 	// Owner: an NPC, or a faction (members from ownerRank up may take it); a set ownerGlobal lets the

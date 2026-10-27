@@ -593,6 +593,10 @@ def engine_functions():
             names |= {"get" + stat, "set" + stat, "mod" + stat}
     for stat in ("health", "magicka", "fatigue"):
         names |= {"get" + stat, "set" + stat, "mod" + stat, "modcurrent" + stat}
+    # Get / Set / Mod + a magic effect (kEffectFuncs: ResistFire, Chameleon, Flying ...)
+    m = re.search(r"kEffectFuncs\[\d+\] = \{(.*?)\};", src, re.S)
+    for stat in re.findall(r'\{ "(\w+)"', m.group(1)) if m else []:
+        names |= {"get" + stat, "set" + stat, "mod" + stat}
     return names
 
 

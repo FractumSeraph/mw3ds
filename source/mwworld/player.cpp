@@ -146,6 +146,22 @@ void World::recomputeStats()
 		stats.skills[k] = (stats.skills[k] + stats.skillBonus[k] > 100 ? 100 : stats.skills[k] + stats.skillBonus[k]) + skillMod[k];
 		stats.skills[k] = std::max(0, stats.skills[k] - (int)ceilf(stats.skillDamage[k] - 0.001f));
 	}
+	// A werewolf (Bloodmoon): the beast's attributes and skills, fWerewolf<Name> (OpenMW's applyWerewolfStats; Acrobatics
+	// only after SetWerewolfAcrobatics), its health times fWereWolfHealth below
+	if (werewolf)
+	{
+		static const char* const kAttr[8] = { "strength", "intelligence", "willpower", "agility", "speed", "endurance",
+			"personality", "luck" };
+		static const char* const kSkill[27] = { "block", "armorer", "mediumarmor", "heavyarmor", "bluntweapon",
+			"longblade", "axe", "spear", "athletics", "enchant", "destruction", "alteration", "illusion", "conjuration",
+			"mysticism", "restoration", "alchemy", "unarmored", "security", "sneak", "acrobatics", "lightarmor",
+			"shortblade", "marksman", "mercantile", "speechcraft", "handtohand" };
+		for (int i = 0; i < 8; i++)
+			stats.attributes[i] = (int)game.gmstf((std::string("fwerewolf") + kAttr[i]).c_str(), (float)stats.attributes[i]);
+		for (int k = 0; k < 27; k++)
+			if (k != 20 || werewolfAcrobatics)
+				stats.skills[k] = (int)game.gmstf((std::string("fwerewolf") + kSkill[k]).c_str(), (float)stats.skills[k]);
+	}
 	const int* a = stats.attributes;
 	// OpenMW: base health is fixed at creation (floor of half Strength + Endurance) and grows only by the level-up
 	// gains; raised, fortified or drained attributes do not move it (spec/derived.md)
@@ -156,6 +172,8 @@ void World::recomputeStats()
 	stats.magickaFlat = magickaMod;      // (reapplyEffects adds the active spells' back)
 	stats.magickaMax = a[ATTR_INTELLIGENCE] * magickaMult + magickaMod;
 	stats.fatigueMax = a[ATTR_STRENGTH] + a[ATTR_WILLPOWER] + a[ATTR_AGILITY] + a[ATTR_ENDURANCE] + fatigueMod;
+	if (werewolf)
+		stats.healthMax *= game.gmstf("fwerewolfhealth", 1.5f);
 	stats.health = stats.healthMax;
 	stats.magicka = stats.magickaMax;
 	stats.fatigue = stats.fatigueMax;
@@ -170,6 +188,8 @@ void Session::playerControls(PlayerInput& in, bool menu)
 		in.moveX = in.moveY = 0.0f;
 		in.jump = in.attack = in.cast = false;
 	}
+	if (w.werewolf)
+		in.cast = false;                 // the beast casts nothing (OpenMW: no spell stance for a werewolf)
 	if (w.forceSneak || testSneak)
 		in.sneak = true;
 	w.player.waterWalk = w.effectTotal(2) > 0.0f;

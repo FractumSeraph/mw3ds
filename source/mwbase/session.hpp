@@ -274,6 +274,7 @@ struct Session : ScriptHost, WindowManagerState, MechanicsState, RenderState, So
 	bool hurtFlashOngoing() { if (hurtFlash > 0.0f) return false; hurtFlash = 1.0f; return true; }
 	void sheathe() override { sheatheTimer = 99.0f; }
 	void goToJail() override;
+	void setPlayerWerewolf(bool werewolf) override;    // Bloodmoon's change of form (mwmechanics/werewolf.cpp)
 	void teleportPlayer(int cell, const float pos[3], float yaw) override
 	{
 		// (outdoors to outdoors only into a cell already loaded round the player: farther, Almsivi or Divine Intervention,
@@ -331,7 +332,6 @@ struct Session : ScriptHost, WindowManagerState, MechanicsState, RenderState, So
 	// Beast races and broken pieces: OpenMW's canBeEquipped: 0 refused (message in why), 1 ok, 2 a two-hander, 3 a shield with one
 	int canEquip(const InventoryItem& it, std::string* why);
 	bool testSneak = false;                       // SNEAK:1: the player sneaks (tests)
-	bool werewolf = false;                        // WEREWOLF:1: the player is a werewolf (refusals only: no other change of form)
 	void openScreen(Screen s);
 	void closeScreen();
 	void mix3d(const float* pos, float& volume, float& pan, float minDist, float maxDist, bool inverse = false);

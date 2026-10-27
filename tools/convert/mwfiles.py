@@ -34,15 +34,34 @@ MASTER = "Morrowind.esm"
 TRIBUNAL = "Tribunal.esm"
 
 
+# The Bloodmoon add-on (MW3DS_BLOODMOON=1, or a converter's --bloodmoon; FractumSeraph/mw3ds): Bloodmoon.esm loaded
+# after Tribunal.esm when that is on, as the Game of the Year edition and OpenMW load them, so the data's load order is
+# the one openmw-web's multiplayer servers ask for
+BLOODMOON = "Bloodmoon.esm"
+
+
+def _env_on(name):
+    return os.environ.get(name, "").strip().lower() in ("1", "on", "yes", "true")
+
+
 def tribunal():
     """The Tribunal add-on is on (read each time: a converter's --tribunal sets it after this module is loaded)."""
-    return os.environ.get("MW3DS_TRIBUNAL", "").strip().lower() in ("1", "on", "yes", "true")
+    return _env_on("MW3DS_TRIBUNAL")
+
+
+def bloodmoon():
+    """The Bloodmoon add-on is on (read each time, as tribunal())."""
+    return _env_on("MW3DS_BLOODMOON")
+
+
+def addons():
+    """The add-ons on, in load order, as the engine names them in game.json: "tribunal", "bloodmoon"."""
+    return (["tribunal"] if tribunal() else []) + (["bloodmoon"] if bloodmoon() else [])
 
 
 def out_of_scope():
-    """Masters this project leaves out: a plugin that needs one is refused. Bloodmoon always; Tribunal unless the
-    add-on is on."""
-    return {"bloodmoon.esm"} | (set() if tribunal() else {"tribunal.esm"})
+    """Masters this project leaves out: a plugin that needs one is refused. Each add-on unless it is on."""
+    return (set() if bloodmoon() else {"bloodmoon.esm"}) | (set() if tribunal() else {"tribunal.esm"})
 
 
 PLUGINS = [p.strip() for p in os.environ.get("MW3DS_PLUGINS", "").split(";") if p.strip()]
@@ -274,13 +293,18 @@ def masters(path):
 
 
 def load_order():
-    """[Morrowind.esm, plugins...] as paths, each plugin's masters checked: every one must be loaded before it,
-    and none may be Bloodmoon.esm, or Tribunal.esm unless the add-on is on (out of this project's scope)."""
+    """[Morrowind.esm, the add-ons on (Tribunal.esm, Bloodmoon.esm), plugins...] as paths, each plugin's masters
+    checked: every one must be loaded before it, and none may be an add-on that is off."""
     order = [game_path(DATA_FILES, MASTER)]
     if tribunal():
         path = game_path(DATA_FILES, TRIBUNAL)
         if not path.is_file():
             raise SystemExit(f"MW3DS_TRIBUNAL: {TRIBUNAL} is not in {DATA_FILES}")
+        order.append(path)
+    if bloodmoon():
+        path = game_path(DATA_FILES, BLOODMOON)
+        if not path.is_file():
+            raise SystemExit(f"MW3DS_BLOODMOON: {BLOODMOON} is not in {DATA_FILES}")
         order.append(path)
     for name in PLUGINS:
         path = game_path(DATA_FILES, name)
@@ -289,8 +313,8 @@ def load_order():
         loaded = {p.name.lower() for p in order}
         for m in masters(path):
             if m.lower() in out_of_scope():
-                raise SystemExit(f"MW3DS_PLUGINS: {name} needs {m}; only Morrowind.esm content (and Tribunal.esm with "
-                                 f"the add-on: MW3DS_TRIBUNAL=1) is supported")
+                raise SystemExit(f"MW3DS_PLUGINS: {name} needs {m}; turn its add-on on (MW3DS_TRIBUNAL=1, "
+                                 f"MW3DS_BLOODMOON=1) to convert it")
             if m.lower() not in loaded:
                 raise SystemExit(f"MW3DS_PLUGINS: {name} needs {m}, which is not loaded before it")
         order.append(path)
@@ -303,7 +327,7 @@ def content_key():
     # (off Windows, loose files are found since LooseFiles: caches made before it hold the BSA's textures where an
     # overlay or Data Files has its own, under the same overlay key)
     tag = "" if os.sep == "\\" else "+loose"
-    if not PLUGINS and not tribunal() and ENCODING == "win1252":
+    if not PLUGINS and not addons() and ENCODING == "win1252":
         return tag
     h = hashlib.sha1(ENCODING.encode())
     for path in load_order()[1:]:
@@ -583,7 +607,7 @@ def read_game(wanted=None):
     record of the same type and ID replaces the whole record and one with DELE removes it; cells merge their
     references by number (a plugin changes, deletes or adds some, MVRF moves one to another exterior cell);
     a topic's responses merge by INAM in the PNAM chain; LAND takes the later file's whole record."""
-    if not PLUGINS and not tribunal():
+    if not PLUGINS and not addons():
         yield from read_records(game_path(DATA_FILES, MASTER), wanted)
         return
     for r in _merge():

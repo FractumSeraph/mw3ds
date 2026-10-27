@@ -1049,6 +1049,9 @@ bool gameLoad(GameData& g, const char* path)
 				o.earlyFadeAngle = num(md, "Moon Shadow Early Fade Angle", 0.5f);
 			}
 		d.sunrise = num(sb, "sunrise", 6); d.sunset = num(sb, "sunset", 18);
+		for (int k = 0; k < 3; k++)
+			if (const cJSON* c = cJSON_GetArrayItem(cJSON_GetObjectItem(sb, "script_color"), k))
+				d.scriptColor[k] = (float)c->valuedouble / 255.0f;
 	}
 	if (const cJSON* fp = section(root, "firstperson"))
 	{

@@ -32,7 +32,7 @@ void Session::playerActivate(int ref)
 // A werewolf can't use things (OpenMW's sWerewolfRefusal)
 bool Session::werewolfRefused()
 {
-	if (!werewolf)
+	if (!w.werewolf)
 		return false;
 	notify(w.game.gmst("swerewolfrefusal", "You cannot use items while in werewolf form."));
 	return true;
@@ -51,7 +51,7 @@ bool Session::readRefused()
 // when someone saw it and reports it the sleep is refused too
 bool Session::bedRefused(int bed)
 {
-	if (werewolf)
+	if (w.werewolf)
 	{
 		notify(w.game.gmst("swerewolfrefusal", "You cannot use items while in werewolf form."));
 		return true;

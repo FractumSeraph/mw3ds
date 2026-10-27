@@ -33,6 +33,11 @@ std::optional<float> skyExtensions(Ctx& c, const Node& n, World& w, bool onPlaye
 	// the weather in effect: the new one only once the change to it is done
 	case F_GETCURRENTWEATHER:
 		return (float)w.weatherNow;
+	// TurnMoonRed / TurnMoonWhite (Bloodmoon): Secunda in Morrowind.ini's [Moons] Script Color, or back (OpenMW's
+	// SkyManager::setMoonColour)
+	case F_TURNMOONRED: case F_TURNMOONWHITE:
+		w.moonRed = n.func == F_TURNMOONRED;
+		return 0.0f;
 	default:
 		return std::nullopt;
 	}

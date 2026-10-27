@@ -14,6 +14,7 @@ struct SkyBodiesDef
 	std::string circle[2];            // Masser's and Secunda's disk (tx_mooncircle_full_m / _s), in the sky's colour
 	MoonDef moons[2];
 	float sunrise = 6, sunset = 18;
+	float scriptColor[3] = { 1.0f, 20 / 255.0f, 20 / 255.0f };   // Secunda after TurnMoonRed (Bloodmoon), 0..1
 };
 
 // A weather (Morrowind.ini [Weather X]): colours [sky, fog, ambient, sun][sunrise, day, sunset, night],

@@ -88,6 +88,8 @@ void Session::killNpc(int ri, bool byPlayer)
 	}
 	r.dead = r.died = true;
 	w.deadCounts[r.idLower]++;
+	if (byPlayer && w.werewolf)
+		w.werewolfKills++;             // GetWerewolfKills (Bloodmoon)
 	r.health = 0.0f;
 	r.ai = AI_IDLE;
 	r.hitAt = -1.0f;

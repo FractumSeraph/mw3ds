@@ -207,6 +207,21 @@ struct World
 	bool underWater(float z) const;               // below the water of a loaded cell
 	bool teleportDisabled = false;
 	bool levitationDisabled = false;  // DisableLevitation (Tribunal's Mournhold): Levitate ends at once, saved (OpenMW's LEVT)
+	// Bloodmoon (saved): the player is a werewolf, has the beast's Acrobatics (SetWerewolfAcrobatics), and has killed
+	// this many in that form; Secunda is red (TurnMoonRed)
+	bool werewolf = false, werewolfAcrobatics = false;
+	int werewolfKills = 0;
+	bool moonRed = false;
+	// When the player was last jailed / last travelled with a guide (World::time): GetPCInJail / GetPCTraveling
+	float jailedAt = -1e9f, travelledAt = -1e9f;
+	// The player's lasting magic effect modifiers (SetResistFire, ModResistParalysis ...): effect -> magnitude, saved;
+	// effectTotal counts them (an actor's are on its Ref)
+	std::unordered_map<int, float> effectBase;
+	void modEffectBase(int ref, int effect, float delta);   // ref -1: the player
+	int weaponTypeOf(int ref) const;                         // GetWeaponType (ref -1: the player)
+	void setRefScale(int ref, float scale);                  // SetScale: held to 0.5 .. 2, an actor redrawn at it
+	void applyScriptScale(int ref);                          // a script's scale on an actor just placed from its cell
+	void recomputeKeepingBars();                             // recomputeStats keeping health / magicka / fatigue
 	// SetWaterLevel / ModWaterLevel: an interior's water moved by a script (lowercase cell name -> height), saved and
 	// laid on the cell each time it is read (Tribunal's sewers)
 	std::unordered_map<std::string, float> waterLevels;

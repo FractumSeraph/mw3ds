@@ -94,7 +94,7 @@ std::optional<bool> opsWorld(Session& s, const std::vector<std::string>& a)
 	}
 	if (verb == "WEREWOLF" && a.size() >= 2)
 	{
-		s.werewolf = atoi(a[1].c_str()) != 0;
+		s.w.werewolf = atoi(a[1].c_str()) != 0;
 		return true;
 	}
 	// KNOCKDOWN:<npc>: they lie knocked down for a long while (their pockets open to anyone)

@@ -43,6 +43,25 @@ cJSON* World::refState(int i) const
 		cJSON_AddNumberToObject(o, "talked", 1);
 	if (r.at >= 0)
 		cJSON_AddStringToObject(o, "at", cells[r.at].file.c_str());
+	// SetScale (Bloodmoon): the scale and the one it had before
+	if (r.scaleOrig > 0.0f)
+	{
+		cJSON_AddNumberToObject(o, "scale", r.scale);
+		cJSON_AddNumberToObject(o, "scale0", r.scaleOrig);
+	}
+	if (r.werewolf)
+		cJSON_AddNumberToObject(o, "werewolf", 1);
+	if (!r.effectBase.empty())
+	{
+		cJSON* eb = cJSON_AddArrayToObject(o, "effect_base");
+		for (auto& e : r.effectBase)
+		{
+			cJSON* pair = cJSON_CreateArray();
+			cJSON_AddItemToArray(pair, cJSON_CreateNumber(e.first));
+			cJSON_AddItemToArray(pair, cJSON_CreateNumber(e.second));
+			cJSON_AddItemToArray(eb, pair);
+		}
+	}
 	// Objects scripts moved or turned (a raised portcullis, an opened Dwemer door)
 	if (r.actor < 0 && r.moved)
 	{
@@ -152,6 +171,15 @@ u32 World::refHash(int i) const
 	mixi(r.disposition);
 	mixi(r.talkedToPC);
 	mixi(r.at);
+	mixf(r.scaleOrig);
+	if (r.scaleOrig > 0.0f)
+		mixf(r.scale);
+	mixi(r.werewolf);
+	for (auto& e : r.effectBase)
+	{
+		mixi(e.first);
+		mixf(e.second);
+	}
 	if (r.actor < 0 && r.moved)
 	{
 		mix(r.pos, sizeof(r.pos));
@@ -213,6 +241,19 @@ void World::applyRefState(Ref& r, const cJSON* it)
 	}
 	r.enabled = num(it, "enabled", 1) != 0;
 	r.pickedUp = num(it, "taken") != 0;
+	if (num(it, "scale0") > 0.0f)
+	{
+		r.scale = (float)num(it, "scale", r.scale);
+		r.scaleOrig = (float)num(it, "scale0");
+	}
+	r.werewolf = num(it, "werewolf") != 0;
+	r.effectBase.clear();
+	{
+		const cJSON* e;
+		cJSON_ArrayForEach(e, cJSON_GetObjectItem(it, "effect_base"))
+			if (cJSON_GetArraySize(e) == 2)
+				r.effectBase.emplace_back(cJSON_GetArrayItem(e, 0)->valueint, (float)cJSON_GetArrayItem(e, 1)->valuedouble);
+	}
 	r.colGone = num(it, "colgone") != 0;
 	r.lockLevel = (int)num(it, "lock");
 	r.disarmed = num(it, "disarmed") != 0;

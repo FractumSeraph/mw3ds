@@ -336,6 +336,17 @@ std::optional<float> miscExtensions(Ctx& c, const Node& n, World& w, bool onPlay
 		});
 		return 0.0f;
 	}
+	// GetPCInJail / GetPCTraveling: the player is being jailed, or travelling with a guide, right now (OpenMW's
+	// isPlayerInJail / isPlayerTraveling: true only while it happens; here the moment just after, which is when
+	// scripts see it). Bloodmoon's werewolf scripts don't change the player then
+	case F_GETPCINJAIL:
+		return w.time - w.jailedAt < 1.0f ? 1.0f : 0.0f;
+	case F_GETPCTRAVELING:
+		return w.time - w.travelledAt < 1.0f ? 1.0f : 0.0f;
+	// GetWeaponType: the type of the weapon in hand (WPDT), -1 for none, -2 a lockpick, -3 a probe (OpenMW's)
+	case F_GETWEAPONTYPE:
+		return (float)w.weaponTypeOf(onPlayer || !r ? -1 : ref);
+
 	// The player's or a person's weapon (or fists) out and ready (OpenMW: the draw state is Weapon)
 	case F_GETWEAPONDRAWN:
 		return c.host.isWeaponDrawn(onPlayer || !r ? -1 : ref) ? 1.0f : 0.0f;

@@ -18,6 +18,9 @@ float World::actorEffect(int ri, int effect) const
 	for (auto& t : r.effects)
 		if (t.effect == effect)
 			total += t.magnitude;
+	for (auto& b : r.effectBase)
+		if (b.first == effect)
+			total += b.second;
 	return total;
 }
 
@@ -30,7 +33,34 @@ float World::effectTotal(int effect) const
 	for (auto& a : abilities)
 		if (a.effect == effect)
 			total += a.magnitude;
+	auto b = effectBase.find(effect);
+	if (b != effectBase.end())
+		total += b->second;
 	return total;
+}
+
+void World::modEffectBase(int ref, int effect, float delta)
+{
+	if (delta == 0.0f)
+		return;
+	if (ref < 0)
+	{
+		float& v = effectBase[effect];
+		v += delta;
+		if (v == 0.0f)
+			effectBase.erase(effect);
+		return;
+	}
+	std::vector<std::pair<int, float>>& list = refs[ref].effectBase;
+	for (size_t i = 0; i < list.size(); i++)
+		if (list[i].first == effect)
+		{
+			list[i].second += delta;
+			if (list[i].second == 0.0f)
+				list.erase(list.begin() + i);
+			return;
+		}
+	list.emplace_back(effect, delta);
 }
 
 void World::reapplyEffects()

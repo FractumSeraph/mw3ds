@@ -9,6 +9,7 @@ modified, and nothing from the mods is part of this repository (a submodule is o
     python tools/build/build_cia_mods.py --skip-convert  reuse the converted data (it must have been converted with the mods)
     python tools/build/build_cia_mods.py --fetch-only    just download the mods and print the overlay folders
     python tools/build/build_cia_mods.py --tribunal      with the Tribunal add-on (out/data-tribunal, build/mw3ds-tribunal.cia)
+    python tools/build/build_cia_mods.py --bloodmoon     with Tribunal and Bloodmoon (out/data-bloodmoon, build/mw3ds-bloodmoon.cia)
 The plain build (build_cia.py) writes the same folders: switching between the two means converting again.
 """
 import sys
