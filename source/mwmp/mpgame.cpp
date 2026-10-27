@@ -406,6 +406,18 @@ void Session::onlineTick(float dt)
 		}
 		return;
 	}
+	// between worlds (a friend's, or home): ready again in the next one
+	if (on.switching && on.phase < Online::WELCOMED)
+	{
+		og->readySent = false;
+		og->appearanceSaid.clear();
+		og->equipmentSaid.clear();
+		og->dynamicSaid.clear();
+		og->attributesSaid.clear();
+		og->skillsSaid.clear();
+		og->levelSaid.clear();
+		og->inventorySaid.clear();
+	}
 	if (on.phase == Online::WELCOMED && !og->readySent && w.current >= 0)
 	{
 		og->cellKey = cellKeyOf(w);
@@ -611,7 +623,34 @@ void Session::onlineTick(float dt)
 		Online::Event e = std::move(on.events.front());
 		on.events.pop_front();
 		if (e.name == "FriendList")
+		{
 			og->friends = e.body;
+			// a scripted run's friend: their request accepted, then their world joined (once)
+			if (!on.testJoin.empty())
+			{
+				auto lowerName = [](std::string s) { for (char& ch : s) ch = (char)tolower((unsigned char)ch); return s; };
+				std::string want = lowerName(on.testJoin);
+				if (const LValue* req = e.body.get("requests"))
+					for (int i = 1; i <= req->arraySize(); i++)
+						if (lowerName(req->at(i)->stringAt("name")) == want)
+						{
+							LValue b = LValue::newTable();
+							b.set("name", req->at(i)->stringAt("name"));
+							on.sendEvent("FriendAccept", b);
+						}
+				if (const LValue* fr = e.body.get("friends"))
+					for (int i = 1; i <= fr->arraySize(); i++)
+						if (lowerName(fr->at(i)->stringAt("name")) == want && fr->at(i)->boolAt("online"))
+						{
+							LValue b = LValue::newTable();
+							b.set("acct", fr->at(i)->stringAt("acct"));
+							on.sendEvent("JoinFriend", b);
+							on.testJoin.clear();
+							logf("online test: joining %s", want.c_str());
+							break;
+						}
+			}
+		}
 		else if (e.name == "WorldMode")
 			og->party = e.body.stringAt("mode") == "party";
 		else if (e.name == "InviteAccepted")
@@ -620,6 +659,22 @@ void Session::onlineTick(float dt)
 			float pos[3] = { (float)e.body.numberAt("x"), (float)e.body.numberAt("y"), (float)e.body.numberAt("z") };
 			if (cell >= 0)
 				teleportPlayer(cell, pos, w.player.yaw);
+		}
+		// JoinFriend's answer: their world's address (or why not); WorldClosed: the host went solo, home again
+		else if (e.name == "JoinFriend")
+		{
+			if (e.body.boolAt("ok"))
+			{
+				notify("Joining " + e.body.stringAt("friendName") + "...");
+				on.switchWorld(e.body.stringAt("wsPath"));
+			}
+			else
+				notify("Can't join: " + e.body.stringAt("error"));
+		}
+		else if (e.name == "WorldClosed")
+		{
+			notify("The host closed their world: going home");
+			on.goHome();
 		}
 		else if (e.name == "FriendRequestReceived")
 			notify(e.body.stringAt("fromName") + " asks to be your friend (Online screen)");
@@ -788,6 +843,12 @@ void Session::drawOnline()
 			LValue b = LValue::newTable();
 			b.set("acct", fr[sel].acct);
 			on.sendEvent("InviteAccept", b);
+		}
+		if (has && fr[sel].kind == "friend" && fr[sel].online && uiButton(212, 174, 100, 26, "Join"))
+		{
+			LValue b = LValue::newTable();
+			b.set("acct", fr[sel].acct);
+			on.sendEvent("JoinFriend", b);
 		}
 		if (has && fr[sel].kind == "friend" && uiButton(4, 174, 100, 26, "Invite here"))
 		{

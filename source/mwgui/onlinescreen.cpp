@@ -262,14 +262,29 @@ bool onlineAutoSignIn(const char* dataDir)
 		return std::string(cJSON_IsString(v) ? v->valuestring : "");
 	};
 	std::string server = get("server"), account = get("account"), password = get("password"), character = get("character");
-	std::string say = get("say");
+	std::string say = get("say"), probe = get("probe"), join = get("join");
 	cJSON_Delete(j);
 	if (!g_online)
 		g_online = new Online();
 	readContent(dataDir);
+	// "probe": one HTTPS (or HTTP) GET of a public address first, its answer logged: the console's TLS checked against
+	// a real server without signing in anywhere
+	if (!probe.empty())
+	{
+		HttpRequest h;
+		h.start("GET", probe, {}, "");
+		u64 t0 = osGetTime();
+		while (h.update() == HttpRequest::RUNNING && osGetTime() - t0 < 20000)
+			svcSleepThread(10 * 1000 * 1000);
+		logf("online test: probe %s -> %s %d %s", probe.c_str(), h.state() == HttpRequest::DONE ? "answer" : "FAILED",
+			h.status, h.state() == HttpRequest::DONE ? h.body.substr(0, 160).c_str() : h.error().c_str());
+	}
+	if (server.empty())
+		return false;
 	Online& on = *g_online;
 	on.signIn(server, account, password);
 	on.testSay = say;
+	on.testJoin = join;
 	on.testSayAt = 5.0f;
 	logf("online test: signing in to %s as %s", server.c_str(), account.c_str());
 	u64 start = osGetTime(), last = svcGetSystemTick();

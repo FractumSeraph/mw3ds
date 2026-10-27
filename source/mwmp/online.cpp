@@ -564,6 +564,7 @@ void Online::onText(const std::string& text)
 	}
 	else if (t == "SessionWelcome")
 	{
+		worldName = wsUrl.substr(wsUrl.rfind('/') + 1);
 		playerId = (int)num(j, "playerId", -1);
 		motd = str(j, "motd");
 		if (*str(j, "characterId"))
@@ -574,10 +575,14 @@ void Online::onText(const std::string& text)
 		const cJSON* ca = cJSON_GetObjectItem(flags, "clientAuthority");
 		clientAuthority = !ca || cJSON_IsTrue(ca);
 		const cJSON* rec = cJSON_GetObjectItem(j, "playerRecord");
-		if (playerRecord)
-			cJSON_Delete(playerRecord);
-		playerRecord = rec && cJSON_IsObject(rec) ? cJSON_Duplicate(rec, true) : nullptr;
-		newCharacter = playerRecord == nullptr;
+		if (!rejoined)
+		{
+			if (playerRecord)
+				cJSON_Delete(playerRecord);
+			playerRecord = rec && cJSON_IsObject(rec) ? cJSON_Duplicate(rec, true) : nullptr;
+			newCharacter = playerRecord == nullptr;
+		}
+		switching = false;
 		const cJSON* prof = cJSON_GetObjectItem(j, "profile");
 		if (*str(prof, "username"))
 			displayName = str(prof, "username");
@@ -701,6 +706,43 @@ void Online::sendCellChange(const std::string& cellKey, const float pos[3])
 	b.set("y", (double)pos[1]);
 	b.set("z", (double)pos[2]);
 	sendEvent("PlayerCellChange", b);
+}
+
+void Online::switchWorld(const std::string& wsPath)
+{
+	if (kind != GATEWAY || wsPath.empty())
+		return;
+	if (phase == IN_WORLD || phase == WELCOMED)
+	{
+		sendEvent("PlayerLeaving", LValue::newTable());
+		ws.update();
+	}
+	ws.close();
+	NetUrl u;
+	u.parse(base);
+	wsUrl = std::string(u.tls ? "wss://" : "ws://") + u.host + (u.port != (u.tls ? 443 : 80)
+		? ":" + std::to_string(u.port) : "") + wsPath;
+	switching = rejoined = true;
+	manifestRetried = false;
+	phase = OPENING_WORLD;
+	status = "Travelling to another world...";
+	logf("online: to the world at %s", wsPath.c_str());
+	request(TICKET, "POST", "/auth/ticket", "");
+}
+
+void Online::goHome()
+{
+	if (kind != GATEWAY || characterId.empty())
+		return;
+	if (phase == IN_WORLD || phase == WELCOMED)
+	{
+		sendEvent("PlayerLeaving", LValue::newTable());
+		ws.update();
+	}
+	ws.close();
+	switching = rejoined = true;
+	chooseCharacter(characterId);
+	status = "Going home...";
 }
 
 void Online::sendChat(const std::string& text)

@@ -116,6 +116,12 @@ public:
 	void sendMove(const NetPose& p);
 	void sendCellChange(const std::string& cellKey, const float pos[3]);
 	void sendChat(const std::string& text);
+	// Another world of this platform (a friend's party: the JoinFriend answer's wsPath; home: this character's own):
+	// PlayerLeaving here, a fresh ticket, and the new world's welcome. The loaded game carries on; ready() again after
+	void switchWorld(const std::string& wsPath);
+	void goHome();
+	bool switching = false;                               // between worlds: the game keeps going, nobody sees us
+	bool rejoined = false;                                // welcomed by a second world (the record is not put on again)
 	std::map<uint16_t, RemotePlayer> players;
 	std::deque<ChatLine> chat;                            // the newest last, a few dozen kept
 	int chatRevision = 0;
@@ -126,6 +132,7 @@ public:
 	unsigned long long clockStart = 0;
 	float rttMs = -1;
 	std::string testSay;                                  // scripted runs: a line said once in the world
+	std::string testJoin;                                 // ... a friend (username) whose request is accepted and world joined
 	float testSayAt = 0;
 
 	~Online();
