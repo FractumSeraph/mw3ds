@@ -97,6 +97,17 @@ struct OnlineGame
 	int tempSeq = 0;
 	struct TakeOp { std::string id; int count; };
 	std::map<int, TakeOp> takeOps;
+	// The person we are talking to (DialogueLock asked for), and the sky: the region we said we are in, each region's
+	// weather holder, what we last said of ours
+	int talkRef = -1;
+	float skyAt = 0, weatherSaidAt = -100;
+	std::string regionSaid, weatherSaid;
+	std::map<std::string, uint16_t> weatherHolder;
+	// The server's people following us (claimed), and the merchant whose purse is open (its gold as last told)
+	float followAt = 0;
+	std::set<int> followers;
+	int purseRef = -1, purseSaid = 0;
+	bool purseOpened = false;
 	bool clockAdopted = false;
 	float clockHour = -1;                // gameHour after the last frame (a jump past it is a rest or a wait)
 };
@@ -795,7 +806,7 @@ void Session::onlineTick(float dt)
 			logf("online: a crime in the world (%s): bounty %+d, now %d", e.body.stringAt("kind").c_str(), add, w.bounty);
 		}
 		else if (onlineStoryEvent(e.name, e.body) || onlineDropEvent(e.name, e.body) || onlineObjectEvent(e.name, e.body)
-			|| onlineContainerEvent(e.name, e.body))
+			|| onlineContainerEvent(e.name, e.body) || onlineTalkAndSkyEvent(e.name, e.body))
 			;
 		else if (e.name == "WorldKillCount")
 			w.deadCounts[lowerCase(e.body.stringAt("refId"))] = (int)e.body.numberAt("count");
@@ -806,6 +817,8 @@ void Session::onlineTick(float dt)
 	onlineObjects(now);
 	onlineDrops();
 	onlineContainers(now);
+	onlineTalkAndSky(now);
+	onlineFollowersAndPurses(now);
 	// The other players' bodies: dressed as they are, where they stand (a tenth of a second behind, between the last
 	// two poses), walking or running as fast as they go
 	for (auto it = og->bodies.begin(); it != og->bodies.end();)
@@ -1541,6 +1554,15 @@ bool Session::onlineContainerEvent(const std::string& name, const LValue& b)
 	if (ri < 0)
 		return true;
 	Ref& r = w.refs[ri];
+	if (const LValue* g = b.get("gold"))
+		if (g->type == LValue::NUMBER && r.actor >= 0 && !r.dead)
+		{
+			r.gold = std::max(0, (int)g->num);
+			if (ri == og->purseRef)
+				og->purseSaid = r.gold;
+		}
+	if (r.actor >= 0 && !r.dead)
+		return true;
 	if (name == "ContainerState")
 	{
 		// the server's copy, with our operations it hasn't answered yet on top (taken before its answer came)
@@ -1810,6 +1832,226 @@ bool Session::onlineDropEvent(const std::string& name, const LValue& b)
 		return true;
 	}
 	return false;
+}
+
+// ---- one conversation with a person at a time (PROTOCOL.md M6 DialogueLock), and the sky (M7): each region's weather
+// is simulated by one of the players there (WorldWeatherAuthority) and shown to the rest
+
+void Session::onlineTalkAndSky(float now)
+{
+	Online& on = *g_online;
+	// The person we talk to: the server lends them to one player at a time
+	int talk = dlg.open && dlg.ref >= 0 && dlg.ref < (int)w.refs.size() ? dlg.ref : -1;
+	if (talk >= 0)
+	{
+		const Ref& r = w.refs[talk];
+		if (r.rnFile < 0 || r.rnFile >= (int)og->contentFiles.size() || og->contentFiles[r.rnFile] < 0)
+			talk = -1;
+	}
+	if (talk != og->talkRef)
+	{
+		auto lockBody = [&](int ri, bool want) {
+			const Ref& r = w.refs[ri];
+			LValue b = LValue::newTable();
+			b.set("ref", LValue::refNum(r.rnIndex, og->contentFiles[r.rnFile]));
+			b.set("cellKey", onlineActorCell(ri));
+			b.set("want", LValue::boolean(want));
+			on.sendEvent("DialogueLock", b);
+		};
+		if (og->talkRef >= 0 && og->talkRef < (int)w.refs.size())
+			lockBody(og->talkRef, false);
+		og->talkRef = talk;
+		if (talk >= 0)
+			lockBody(talk, true);
+	}
+	if (now < og->skyAt)
+		return;
+	og->skyAt = now + 2.0f;
+	// The region we are in (outdoors; indoors the last one stands), told on each change: the server gives each region's
+	// weather to one of the players in it
+	if (w.current >= 0 && w.cells[w.current].underSky() && !w.weatherRegion.empty() && w.weatherRegion != og->regionSaid)
+	{
+		og->regionSaid = w.weatherRegion;
+		og->weatherSaid.clear();
+		LValue b = LValue::newTable();
+		b.set("region", og->regionSaid);
+		on.sendEvent("WorldRegionChange", b);
+	}
+	auto h = og->weatherHolder.find(og->regionSaid);
+	if (og->regionSaid.empty() || h == og->weatherHolder.end() || h->second != (uint16_t)on.playerId)
+		return;
+	// ours to simulate: our sky as it is, on each change and once a minute
+	LValue b = LValue::newTable();
+	b.set("region", og->regionSaid);
+	b.set("current", (double)w.weatherNow);
+	if (w.weatherNext != w.weatherNow)
+	{
+		b.set("next", (double)w.weatherNext);
+		b.set("transition", (double)fmaxf(0.0f, fminf(1.0f, w.weatherBlend)));
+	}
+	char fp[96];
+	snprintf(fp, sizeof(fp), "%s|%d|%d", og->regionSaid.c_str(), w.weatherNow, w.weatherNext);
+	if (og->weatherSaid == fp && now - og->weatherSaidAt < 60.0f)
+		return;
+	og->weatherSaid = fp;
+	og->weatherSaidAt = now;
+	on.sendEvent("WorldWeather", b);
+}
+
+bool Session::onlineTalkAndSkyEvent(const std::string& name, const LValue& b)
+{
+	if (name == "DialogueLockResult")
+	{
+		const LValue* ref = b.get("ref");
+		if (b.boolAt("granted") || !b.get("holderId") || !ref || ref->type != LValue::REFNUM || og->talkRef < 0)
+			return true;
+		const Ref& r = w.refs[og->talkRef];
+		if (netRefKey(og->contentFiles[r.rnFile], r.rnIndex) != netRefKey(ref->refFile, ref->refIndex))
+			return true;
+		// someone else is talking to them
+		std::string who = "Someone else";
+		auto p = g_online->players.find((uint16_t)b.numberAt("holderId"));
+		if (p != g_online->players.end() && !p->second.name.empty())
+			who = p->second.name;
+		if (screen != SCR_NONE)
+			closeScreen();
+		og->talkRef = -1;
+		notify(who + " is talking with " + (r.obj ? r.obj->name.str() : r.id.str()) + ".");
+		return true;
+	}
+	if (name == "WorldWeatherAuthority")
+	{
+		std::string region = lowerCase(b.stringAt("region"));
+		int holder = (int)b.numberAt("holderId", 0);
+		if (holder)
+			og->weatherHolder[region] = (uint16_t)holder;
+		else
+			og->weatherHolder.erase(region);
+		if (region == og->regionSaid)
+			og->weatherSaid.clear();
+		return true;
+	}
+	if (name == "WorldWeather")
+	{
+		std::string region = lowerCase(b.stringAt("region"));
+		auto h = og->weatherHolder.find(region);
+		if (h != og->weatherHolder.end() && h->second == (uint16_t)g_online->playerId && !b.boolAt("restore"))
+			return true;              // (our own, echoed)
+		int current = (int)b.numberAt("current", -1), next = (int)b.numberAt("next", current);
+		int target = next >= 0 && next != current ? next : current;
+		if (target < 0 || target > 9)
+			return true;
+		w.forcedWeather[region] = target;
+		// the region we are in: the same change of sky, begun the moment the holder's begins
+		if (region == lowerCase(w.weatherRegion) && target != w.weatherNext)
+			w.addWeatherTransition(target);
+		return true;
+	}
+	return false;
+}
+
+// ---- followers and merchants' purses: a person the conversation sent after us (AIFollow, AIEscort) follows the server's
+// copy of us there (PROTOCOL.md M4's follow claim); a merchant's gold is one purse for everyone (M3's op "gold")
+
+void Session::onlineFollowersAndPurses(float now)
+{
+	Online& on = *g_online;
+	if (now >= og->followAt)
+	{
+		og->followAt = now + 0.5f;
+		// Whom the people the server simulates follow here: our own puppets' packages, set by a result script
+		std::set<int> following;
+		for (int i : w.loadedActors)
+		{
+			const Ref& r = w.refs[i];
+			if (r.dead || (r.aiPackage != AIPKG_FOLLOW && r.aiPackage != AIPKG_ESCORT) || r.aiTarget != "player"
+				|| !onlinePuppet(i))
+				continue;
+			following.insert(i);
+		}
+		auto claim = [&](int ri, bool follow) {
+			const Ref& r = w.refs[ri];
+			if (r.rnFile < 0 || r.rnFile >= (int)og->contentFiles.size() || og->contentFiles[r.rnFile] < 0)
+				return;
+			std::string cellKey = onlineActorCell(ri);
+			LValue b = LValue::newTable();
+			b.set("cellKey", cellKey);
+			auto ep = on.epochOf.find(cellKey);
+			b.set("epoch", (double)(ep != on.epochOf.end() ? ep->second : 0));
+			b.set("ref", LValue::refNum(r.rnIndex, og->contentFiles[r.rnFile]));
+			if (follow)
+				b.set("follow", (double)on.playerId);
+			if (follow && r.aiPackage == AIPKG_ESCORT)
+			{
+				LValue esc = LValue::newTable();
+				esc.set("x", (double)r.aiDest[0]);
+				esc.set("y", (double)r.aiDest[1]);
+				esc.set("z", (double)r.aiDest[2]);
+				esc.set("duration", (double)r.aiDuration);
+				b.set("escort", esc);
+			}
+			on.sendEvent("ActorAI", b);
+			logf("online: %s %s us there", r.id.c_str(), follow ? "follows" : "no longer follows");
+		};
+		for (int i : following)
+			if (!og->followers.count(i))
+				claim(i, true);
+		for (int i : og->followers)
+			if (!following.count(i) && i < (int)w.refs.size() && w.refs[i].actor >= 0)
+				claim(i, false);
+		og->followers.swap(following);
+	}
+	// The merchant we trade with: their purse, as the server keeps it for everyone
+	int m = (screen == SCR_BARTER && barterRef >= 0 && barterRef < (int)w.refs.size()) ? barterRef : -1;
+	if (m >= 0)
+	{
+		const Ref& r = w.refs[m];
+		if (r.rnFile < 0 || r.rnFile >= (int)og->contentFiles.size() || og->contentFiles[r.rnFile] < 0)
+			m = -1;
+	}
+	auto body = [&](const Ref& r) {
+		LValue b = LValue::newTable();
+		b.set("ref", LValue::refNum(r.rnIndex, og->contentFiles[r.rnFile]));
+		b.set("cellKey", og->cellKeys.size() > (size_t)r.cell ? og->cellKeys[r.cell] : "");
+		return b;
+	};
+	if (m != og->purseRef)
+	{
+		og->purseRef = m;
+		if (m < 0)
+			return;
+		const Ref& r = w.refs[m];
+		og->purseSaid = r.gold;
+		// (opened the way a container is: their stock as rolled here, and the purse, for a server that has neither yet)
+		LValue items = LValue::newTable();
+		for (auto& c : r.contents)
+		{
+			if (stockCount(c.first) <= 0)
+				continue;
+			LValue e = LValue::newTable();
+			e.set("id", lowerCase(c.second));
+			e.set("n", (double)std::min(100, stockCount(c.first)));
+			items.push(e);
+		}
+		LValue b = body(r);
+		b.set("contents", items);
+		b.set("gold", (double)std::max(0, r.gold));
+		og->purseOpened = true;
+		on.sendEvent("ContainerOpen", b);
+		return;
+	}
+	if (m < 0)
+		return;
+	const Ref& r = w.refs[m];
+	if (r.gold != og->purseSaid)
+	{
+		LValue b = body(r);
+		b.set("opId", (double)++og->opId);
+		b.set("op", "gold");
+		b.set("goldDelta", (double)(r.gold - og->purseSaid));
+		on.sendEvent("ContainerOpRequest", b);
+		og->purseSaid = r.gold;
+	}
 }
 
 // ---- the world's people and creatures the server simulates (PROTOCOL.md M4): whoever holds their cell (the sim peer)

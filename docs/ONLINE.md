@@ -70,9 +70,12 @@ one. The server keeps the online character.
 | Containers | Chests, corpses and plants hold the same for everyone: the first to open one fixes what is in it, then every take or put is the server's |
 | The story | Journal stages, dialogue topics, globals, faction ranks and reputation, the bounty (as the server's sharing settings say) |
 | The clock | The server's time and date; a rest or a wait asks the server to move everyone's clock on |
+| The sky | Each region's weather is simulated by one player there (the server picks), and everyone else in it gets the same sky and its changes |
+| Conversations | One player talks to a person at a time (DialogueLock): someone who is already talking to them keeps them, and the 3DS says who |
+| Followers | Someone a conversation sends after the player (AIFollow, AIEscort) follows the server's copy of the player there (ActorAI follow claim). Not yet tried against a server with a sim peer |
+| Merchants' gold | A merchant's purse is one for everyone: trading changes it on the server (op "gold"). Not yet tried in a trade |
 
-**Not yet:** merchants' purses, a conversation's lock on an NPC
-(DialogueLock), followers and escorts, the weather, and the werewolf's first-person claws.
+**Not yet:** the werewolf's first-person claws.
 
 Each player sees the others walk and run where they are, dressed as they are.
 

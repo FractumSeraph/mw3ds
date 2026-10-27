@@ -515,6 +515,9 @@ struct Session : ScriptHost, WindowManagerState, MechanicsState, RenderState, So
 	void onlinePlace(const struct LValue& body);
 	void onlineDrops();
 	bool onlineDropEvent(const std::string& name, const struct LValue& body);
+	void onlineTalkAndSky(float now);
+	bool onlineTalkAndSkyEvent(const std::string& name, const struct LValue& body);
+	void onlineFollowersAndPurses(float now);
 	bool onlineContainerEvent(const std::string& name, const struct LValue& body);
 	void onlineTick(float dt);
 	void onlineDrawPlayers(bool deform);
