@@ -126,6 +126,13 @@ static const float kBloodScale = 1.5f;
 void Session::damageNpc(int ri, float dmg, bool fatigueOnly, bool spell)
 {
 	Ref& r = w.refs[ri];
+	// Online, someone the server's world simulates takes its blows there (its health and death come back on the wire)
+	if (onlinePuppet(ri))
+	{
+		if (!spell)
+			playSound(ri, fatigueOnly ? "Hand To Hand Hit" : "Health Damage");
+		return;
+	}
 	if (spell)
 	{
 		r.health -= dmg;
@@ -480,6 +487,13 @@ void Session::playerHitsNpc(int target, float damage, int skill, bool fatigueOnl
 		w.refs[target].hitBy = wpn ? lower(wpn->id) : std::string();
 		w.refs[target].attacked = true;
 	}
+	// Online, someone the server's world simulates: the swing is the server's copy of the player's (PlayerInput's use),
+	// and the blow lands there, armor, block and the guards' view of it all (PROTOCOL.md Phase 4C)
+	if (onlinePuppet(target))
+	{
+		playSound(target, fatigueOnly ? "Hand To Hand Hit" : "Health Damage");
+		return;
+	}
 	Ref& t = w.refs[target];
 	const ActorDef& def = w.game.actors[t.actor];
 	const PlayerStats& s = w.stats;
@@ -832,6 +846,9 @@ void Session::combatUpdate(const PlayerInput& in, float dt, bool menu)
 		if (!r.effects.empty() && !menu)
 			updateActorEffects(i, dt);
 		if (r.dead)
+			return;
+		// Online, someone the server's world simulates: drawn where it says (mwmp/mpgame.cpp), no mind of its own here
+		if (onlinePuppet(i))
 			return;
 		if (w.bounty <= 0)
 			r.alarmed = false;            // the crime is paid for: calm again (OpenMW's crime id)

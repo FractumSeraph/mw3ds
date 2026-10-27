@@ -28,6 +28,11 @@ struct Ref
 	Atom trap;                    // trap spell (doors / containers): cast on whoever opens it, until disarmed
 	bool disarmed = false;        // the trap went off or a probe disarmed it (saved)
 	Atom key;
+	// Its number in the content files as OpenMW's RefNum has it (cells/<cell>.json "rn": the file in the load order and
+	// the index): online servers address the world's objects and people by it (mwmp). rnFile -1: none (placed while
+	// playing, or data converted before it was kept)
+	int rnFile = -1;
+	u32 rnIndex = 0;
 	int cell = 0;                 // index into World::cells; -1: a free slot (its cell's objects left memory)
 	u32 baseHash = 0;             // refHash as read from the cell file: saves keep only what changed
 	int at = -1;                  // moved to another cell (PositionCell): the cell it stands in now

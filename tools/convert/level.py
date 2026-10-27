@@ -156,6 +156,18 @@ def ref_owners(cell, leveled=()):
             for r in refs if r["pos"] and not r["deleted"]]
 
 
+def add_refnums(refs, rec):
+    """Each of a cell's references (its .json "refs") gets "rn": [file in the load order, index] from its CELL record,
+    when the two lists agree. False when they don't."""
+    nums = [r for r in cell_refs(rec)]
+    if len(nums) != len(refs) or any(a["id"].lower() != (b["id"] or "").lower() and not a.get("lev")
+                                     for a, b in zip(refs, nums)):
+        return False
+    for ref, r in zip(refs, nums):
+        ref["rn"] = list(r["rn"])
+    return True
+
+
 def compress_file(path):
     """Lossless: 'MWZ1', u32 original size, zlib stream (source/components/files/zfile.cpp inflates on load)."""
     data = path.read_bytes()
@@ -664,6 +676,9 @@ def main():
                 owned_refs += bool(own)
         elif c["refs"] and owners:
             owner_mismatch.append(c["name"])
+        # Reference numbers (OpenMW's RefNum: file in the load order, index), which online servers address objects by
+        if rec is not None:
+            add_refnums(c["refs"], rec)
         with open(OUT / "cells" / (c["file"] + ".json"), "w", encoding="utf-8") as f:
             json.dump(dict({"name": c["name"], "refs": c["refs"]}, **({"pathgrid": path} if path else {})), f,
                       separators=(",", ":"), ensure_ascii=False)

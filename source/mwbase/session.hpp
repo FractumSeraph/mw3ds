@@ -497,6 +497,8 @@ struct Session : ScriptHost, WindowManagerState, MechanicsState, RenderState, So
 	// each frame, the other players drawn, the Online screen
 	struct OnlineGame* og = nullptr;
 	void onlineApplyRecord();
+	bool onlinePuppet(int ri);        // online: one of the world's people the server simulates (drawn off its stream)
+	void onlinePuppets(float now);
 	void onlineTick(float dt);
 	void onlineDrawPlayers(bool deform);
 	void onlineFree();

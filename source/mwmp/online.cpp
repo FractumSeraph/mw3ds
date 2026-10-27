@@ -1,6 +1,7 @@
 // The online mode's connection to an openmw-web server (mwmp/online.hpp)
 #include "mwmp/online.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -19,7 +20,7 @@ const char* kSubprotocol = "omw-mp.2";
 std::vector<std::string> g_content = { "morrowind.esm" };
 
 // Binary frame types (PROTOCOL.md "Binary type registry")
-const uint16_t T_EVENT = 0x0002, T_PLAYER_MOVE = 0x0100, T_MOVE_BATCH = 0x0101, T_STATE_BATCH = 0x0103,
+const uint16_t T_EVENT = 0x0002, T_PLAYER_MOVE = 0x0100, T_MOVE_BATCH = 0x0101, T_INPUT = 0x0102, T_STATE_BATCH = 0x0103,
 	T_ACTOR_BATCH = 0x0200;
 
 const char* str(const cJSON* o, const char* key, const char* fallback = "")
@@ -698,6 +699,53 @@ void Online::sendMove(const NetPose& p)
 	ws.sendBinary(f);
 }
 
+// PlayerInput (0x0102, 12 bytes): u32 input seq, i8 move and side axes (-127..127), u16 yaw, u8 pitch (PlayerMove's
+// quantizing), flags (bit0 run, 1 sneak, 2 jump edge, 3 use: the attack held, 4 weapon out, 5 spell ready), u16 the
+// milliseconds since the last one. Under the server's player authority (clientAuthority) our own PlayerMove places our
+// body in its world; this aims it and swings its weapon, so its blows land there, armor and all (PROTOCOL.md Phase 4C)
+void Online::sendInput(float moveAxis, float sideAxis, float yaw, float pitch, uint8_t flags, int simMs)
+{
+	if (phase != IN_WORLD)
+		return;
+	std::string f;
+	putU16(f, T_INPUT);
+	putU32(f, ++seq);
+	putU32(f, ++inputSeq);
+	auto axis = [](float a) { return (char)(int8_t)lroundf(fmaxf(-1.0f, fminf(1.0f, a)) * 127.0f); };
+	f.push_back(axis(moveAxis));
+	f.push_back(axis(sideAxis));
+	float y = fmodf(yaw, kTau);
+	if (y < 0)
+		y += kTau;
+	putU16(f, (uint16_t)((int)lroundf(y / kTau * 65536.0f) & 0xFFFF));
+	float pc = fmaxf(-1.5707963f, fminf(1.5707963f, pitch));
+	f.push_back((char)(uint8_t)lroundf((pc + 1.5707963f) / 3.14159265f * 255.0f));
+	f.push_back((char)flags);
+	putU16(f, (uint16_t)std::max(0, std::min(65535, simMs)));
+	ws.sendBinary(f);
+}
+
+int Online::contentFileOf(int loadOrderIndex) const
+{
+	if (loadOrderIndex < 0 || loadOrderIndex >= (int)g_content.size())
+		return -1;
+	for (size_t i = 0; i < manifest.size(); i++)
+		if (lowerCase(manifest[i]) == g_content[loadOrderIndex])
+			return (int)i;
+	return -1;
+}
+
+int Online::loadOrderOf(int contentFile) const
+{
+	if (contentFile < 0 || contentFile >= (int)manifest.size())
+		return -1;
+	std::string name = lowerCase(manifest[contentFile]);
+	for (size_t i = 0; i < g_content.size(); i++)
+		if (g_content[i] == name)
+			return (int)i;
+	return -1;
+}
+
 void Online::sendCellChange(const std::string& cellKey, const float pos[3])
 {
 	LValue b = LValue::newTable();
@@ -803,9 +851,25 @@ void Online::onBinary(const std::string& data)
 			r.inView = true;
 		}
 	}
-	// 0x0103 (our own state: only under the server's input model) and 0x0200 (the sim peer's NPCs) are for later
+	else if (type == T_ACTOR_BATCH)
+	{
+		// [u32 epoch][u8 count] count x (u32 index, i32 content file, 20-byte pose): the world's people and creatures
+		// where their cell's holder has them (its sample stamp in the pose's last bytes is left: arrival time serves)
+		if (n < 5)
+			return;
+		int count = body[4];
+		for (int i = 0; i < count && 5 + (size_t)(i + 1) * 28 <= n; i++)
+		{
+			const uint8_t* e = body + 5 + i * 28;
+			NetActor& a = actors[netRefKey((int32_t)getU32(e + 4), getU32(e))];
+			a.prev = a.lastAt >= 0 ? a.last : getPose(e + 8);
+			a.prevAt = a.lastAt >= 0 ? a.lastAt : now;
+			a.last = getPose(e + 8);
+			a.lastAt = now;
+		}
+	}
+	// 0x0103 (our own pose corrected: only under the server's input-replay model, which is off with clientAuthority)
 	(void)T_STATE_BATCH;
-	(void)T_ACTOR_BATCH;
 }
 
 // The events this client acts on (PROTOCOL.md event tier); the rest wait in `events` for the game, or are dropped
@@ -910,6 +974,54 @@ void Online::onEvent(const std::string& name, const LValue& b)
 				it->second.hp = (float)hp->numberAt("c", it->second.hp);
 				it->second.hpMax = (float)hp->numberAt("b", it->second.hpMax);
 			}
+	}
+	else if (name == "ActorAuthorityInfo" || name == "ActorAuthorityGrant")
+	{
+		// who simulates a cell's people (Grant: us; only a sim peer is granted on today's servers). No holder at all:
+		// the peer is gone, every cell is simulated here again until a holder streams (the server's degraded mode)
+		std::string key = b.stringAt("cellKey");
+		if (name == "ActorAuthorityGrant")
+			holderOf[key] = (uint16_t)playerId;
+		else if (!b.get("holderId"))
+		{
+			holderOf.clear();
+			for (auto& a : actors)
+				a.second.lastAt = a.second.prevAt = -1;
+		}
+		else
+			holderOf[key] = (uint16_t)b.numberAt("holderId");
+		if (b.get("epoch"))
+			epochOf[key] = (uint32_t)b.numberAt("epoch");
+	}
+	else if (name == "ActorAuthorityRevoke")
+		holderOf.erase(b.stringAt("cellKey"));
+	else if (name == "ActorStatsDynamic" || name == "ActorDeath" || name == "ActorRevive" || name == "ActorAI")
+	{
+		const LValue* ref = b.get("ref");
+		if (!ref || ref->type != LValue::REFNUM)
+			return;
+		NetActor& a = actors[netRefKey(ref->refFile, ref->refIndex)];
+		if (name == "ActorStatsDynamic")
+		{
+			if (const LValue* hp = b.get("hp"))
+			{
+				a.hp = (float)hp->numberAt("c", a.hp);
+				a.hpMax = (float)hp->numberAt("b", a.hpMax);
+			}
+		}
+		else if (name == "ActorAI")
+		{
+			if (const LValue* c = b.get("combat"))
+				a.combat = c->type == LValue::NUMBER ? (int)c->num : 0;
+		}
+		else
+			a.dead = name == "ActorDeath";
+	}
+	else if (name == "SelfStats")
+	{
+		// the bars the server's copy of us has (it takes the blows): applied by the game
+		selfStatsAt = now;
+		events.push_back({ name, b });
 	}
 	else if (name == "ChatMessage")
 		addChat(b.stringAt("channel", "say"), b.stringAt("from"), b.stringAt("text"));

@@ -14,6 +14,7 @@
 #include "extern/cjson/cJSON.h"
 #include "mwbase/session.hpp"
 #include "mwgui/widgets.hpp"
+#include "mwmechanics/combathelpers.hpp"
 #include "mwmp/online.hpp"
 #include "mwrender/npcanimation.hpp"
 
@@ -36,6 +37,14 @@ struct OnlineGame
 	UiList list;
 	LValue friends;                      // the last FriendList
 	bool party = false;
+	// the world's people the server simulates: each cell's key (by World::cells index), the wire's content file index
+	// for each file of the load order, and per puppet the pose flags last acted on
+	std::vector<std::string> cellKeys;
+	std::vector<int> contentFiles;
+	std::map<int, uint8_t> puppetFlags;
+	float inputAt = 0;                   // the next PlayerInput
+	float lastInputAt = -1;
+	float selfHp = -1;                   // the health SelfStats last set
 };
 
 namespace
@@ -106,11 +115,11 @@ int slotOf(const Object* o, int& ringsSeen, bool& gloveLeftUsed)
 	(void)gloveLeftUsed;
 }
 
-std::string cellKeyOf(const World& w)
+std::string cellKeyAt(const World& w, int cell)
 {
-	if (w.current < 0)
+	if (cell < 0 || cell >= (int)w.cells.size())
 		return "";
-	const LevelCell& c = w.cells[w.current];
+	const LevelCell& c = w.cells[cell];
 	if (!c.interior)
 	{
 		char k[32];
@@ -118,6 +127,11 @@ std::string cellKeyOf(const World& w)
 		return k;
 	}
 	return lowerCase(c.name.str());
+}
+
+std::string cellKeyOf(const World& w)
+{
+	return cellKeyAt(w, w.current);
 }
 
 // A cellKey back to one of the level's cells (-1: not in this data)
@@ -480,6 +494,25 @@ void Session::onlineTick(float dt)
 		og->wasMoving = moving;
 		og->wasAir = air;
 	}
+	// The input tier, 30 a second while a holder (the sim peer) runs the world: aims the server's copy of us, holds and
+	// lets go its attack as ours (so its blows land there, PROTOCOL.md Phase 4C), readies its weapon. Our own PlayerMove
+	// still places it. Movement as the axes of how we went, against where we look
+	if (!on.holderOf.empty() && now >= og->inputAt)
+	{
+		og->inputAt = now + 1.0f / 30.0f;
+		float fwd = 0, side = 0;
+		if (stepSpeed > 1.0f && moved > 0.0f)
+		{
+			float sy = sinf(p.yaw), cy = cosf(p.yaw), d = sqrtf(dx * dx + dy * dy);
+			fwd = (dx * sy + dy * cy) / fmaxf(d, 1e-3f);
+			side = (dx * cy - dy * sy) / fmaxf(d, 1e-3f);
+		}
+		uint8_t f = (p.flags & 1) | (w.player.sneaking ? 2 : 0) | (air && !og->wasAir ? 4 : 0)
+			| (weaponDrawn && attackCharge >= 0.0f ? 8 : 0) | (weaponDrawn ? 16 : 0);
+		int ms = og->lastInputAt < 0 ? 33 : (int)((now - og->lastInputAt) * 1000.0f);
+		on.sendInput(fwd, side, p.yaw, p.pitch, f, ms);
+		og->lastInputAt = now;
+	}
 	// Appearance (1 s), equipment (0.5 s), the bars (0.25 s), attributes / skills / level (1 s), the pack (2 s),
 	// spells (1 s): each sent when it changed
 	if (now >= og->appearanceAt && og->chargenSaid)
@@ -682,7 +715,35 @@ void Session::onlineTick(float dt)
 			notify(e.body.stringAt("fromName") + " invites you (Online screen)");
 		else if (e.name == "StateRefused")
 			logf("online: the server refused our %s", e.body.stringAt("kind").c_str());
+		// The bars the server's copy of us has: it takes the world's blows (Phase 4A), we show them
+		else if (e.name == "SelfStats")
+		{
+			auto bar = [&](const char* k, float& cur, float& base) {
+				if (const LValue* v = e.body.get(k))
+				{
+					cur = (float)v->numberAt("c", cur);
+					base = (float)v->numberAt("b", base);
+				}
+			};
+			float hp = w.stats.health;
+			bar("hp", w.stats.health, w.stats.healthMax);
+			bar("mp", w.stats.magicka, w.stats.magickaMax);
+			bar("ft", w.stats.fatigue, w.stats.fatigueMax);
+			if (w.stats.health < hp - 0.5f && w.stats.health > 0.0f)
+				playSound(-1, "Health Damage");
+			og->dynamicSaid.clear();
+		}
+		// A crime the server's copy of us did there (an assault on the world's people): its bounty here
+		else if (e.name == "PlayerCrime")
+		{
+			int add = (int)e.body.numberAt("bounty");
+			w.bounty = std::max(0, w.bounty + add);
+			logf("online: a crime in the world (%s): bounty %+d, now %d", e.body.stringAt("kind").c_str(), add, w.bounty);
+		}
+		else if (e.name == "WorldKillCount")
+			w.deadCounts[lowerCase(e.body.stringAt("refId"))] = (int)e.body.numberAt("count");
 	}
+	onlinePuppets(now);
 	// The other players' bodies: dressed as they are, where they stand (a tenth of a second behind, between the last
 	// two poses), walking or running as fast as they go
 	for (auto it = og->bodies.begin(); it != og->bodies.end();)
@@ -740,6 +801,130 @@ void Session::onlineTick(float dt)
 		act.airborne = r.last.flags & 8;
 		float speed = r.last.animVel * w.player.runSpeed * 0.5f;
 		b.update(w, dt, speed, false, r.last.flags & 2, weaponOut, act);
+	}
+}
+
+// ---- the world's people and creatures the server simulates (PROTOCOL.md M4): whoever holds their cell (the sim peer)
+// streams them; here they stand, walk, swing and die as it says (openmw-web's puppet.lua)
+
+bool Session::onlinePuppet(int ri)
+{
+	if (!g_online || !og || g_online->phase != Online::IN_WORLD || ri < 0 || ri >= (int)w.refs.size())
+		return false;
+	const Ref& r = w.refs[ri];
+	if (r.rnFile < 0 || r.actor < 0 || r.rnFile >= (int)og->contentFiles.size() || og->contentFiles[r.rnFile] < 0)
+		return false;
+	Online& on = *g_online;
+	auto a = on.actors.find(netRefKey(og->contentFiles[r.rnFile], r.rnIndex));
+	if (a != on.actors.end() && a->second.lastAt >= 0)
+		return true;
+	if (on.holderOf.empty())
+		return false;
+	int c = r.at >= 0 ? r.at : r.cell;
+	if (c < 0 || c >= (int)og->cellKeys.size())
+		return false;
+	auto h = on.holderOf.find(og->cellKeys[c]);
+	return h != on.holderOf.end() && h->second != (uint16_t)on.playerId;
+}
+
+namespace
+{
+// The animation for a streamed pose: a blow when its attack starts, else standing, walking or running, in the ready
+// stance with its weapon out
+void puppetAnimate(World& w, Ref& r, Actor& a, ActorSet& set, uint8_t flags, uint8_t was, bool moving)
+{
+	const ActorDef& def = w.game.actors[r.actor];
+	const Object* wpn = def.creature ? nullptr : w.game.object(def.weapon);
+	bool drawn = flags & 16;
+	a.showWeapon = drawn;
+	const Skeleton& sk = actorSkeleton(set, a.skeleton);
+	if ((flags & 8) && !(was & 8))
+	{
+		actorPlay(set, a, blowGroup(set, a, r, wpn).c_str(), ANIM_ONCE);
+		return;
+	}
+	if (a.mode == ANIM_ONCE && !moving)
+		return;                       // (a blow, a hit, a block: played through)
+	const char* base = moving ? (flags & 1 ? "RunForward" : "WalkForward") : "Idle";
+	std::string g = drawn || def.creature ? stanceGroup(set, a, base, wpn) : std::string(base);
+	int gi = actorFindGroup(sk, g.c_str());
+	if (gi < 0)
+		g = base, gi = actorFindGroup(sk, base);
+	if (!moving && !drawn && a.mode == ANIM_IDLE)
+		return;                       // (its idles play on)
+	if (gi >= 0 && a.group != gi)
+		actorPlay(set, a, g.c_str(), moving ? ANIM_LOOP : ANIM_IDLE);
+}
+}
+
+void Session::onlinePuppets(float now)
+{
+	Online& on = *g_online;
+	if (og->cellKeys.size() != w.cells.size())
+	{
+		og->cellKeys.resize(w.cells.size());
+		for (size_t c = 0; c < w.cells.size(); c++)
+			og->cellKeys[c] = cellKeyAt(w, (int)c);
+	}
+	og->contentFiles.clear();
+	for (int k = 0; k < 8; k++)
+		og->contentFiles.push_back(on.contentFileOf(k));
+	for (int i : w.loadedActors)
+	{
+		Ref& r = w.refs[i];
+		if (r.actor < 0 || !r.visible() || !onlinePuppet(i))
+			continue;
+		auto it = on.actors.find(netRefKey(og->contentFiles[r.rnFile], r.rnIndex));
+		if (it == on.actors.end())
+			continue;
+		NetActor& n = it->second;
+		if (n.hp >= 0)
+		{
+			if (n.hpMax > 0)
+				r.healthMax = n.hpMax;
+			if (!r.dead)
+				r.health = fmaxf(n.dead ? 0.0f : 1.0f, n.hp);
+		}
+		if (n.dead && !r.dead)
+		{
+			killNpc(i, false);            // (the world's death: no crime, no witness here; the server keeps the tally)
+			continue;
+		}
+		if (!n.dead && r.dead && n.hp > 0)
+		{
+			r.dead = r.died = false;      // ActorRevive (a script's Resurrect there)
+			r.health = n.hp;
+			logf("online: %s revived by the world", r.id.c_str());
+			r.ai = AI_IDLE;
+			if (Actor* a = w.actorOf(i))
+				actorPlay(*w.actorsOf(i), *a, "Idle", ANIM_IDLE);
+		}
+		if (r.dead || n.lastAt < 0)
+			continue;
+		// between the last two poses, a tenth of a second behind (they come 10 to 20 a second)
+		float t = n.lastAt > n.prevAt ? (now - 0.1f - n.prevAt) / (n.lastAt - n.prevAt) : 1.0f;
+		t = fmaxf(0.0f, fminf(1.0f, t));
+		float yd = n.last.yaw - n.prev.yaw;
+		if (yd > kTau / 2)
+			yd -= kTau;
+		if (yd < -kTau / 2)
+			yd += kTau;
+		float x = n.prev.x + (n.last.x - n.prev.x) * t, y = n.prev.y + (n.last.y - n.prev.y) * t;
+		float z = n.prev.z + (n.last.z - n.prev.z) * t;
+		bool moving = n.last.animVel > 0.05f || fabsf(x - r.pos[0]) + fabsf(y - r.pos[1]) > 0.5f;
+		r.pos[0] = x;
+		r.pos[1] = y;
+		r.pos[2] = z;
+		r.rot[2] = n.prev.yaw + yd * t;
+		r.ai = n.combat ? AI_COMBAT : AI_IDLE;
+		r.moved = true;
+		if (!og->puppetFlags.count(i))
+			logf("online: %s follows the world's stream (%.0f %.0f %.0f)", r.id.c_str(), x, y, z);
+		uint8_t& was = og->puppetFlags[i];
+		if (Actor* a = w.actorOf(i))
+			puppetAnimate(w, r, *a, *w.actorsOf(i), n.last.flags, was, moving && n.last.animVel > 0.02f);
+		was = n.last.flags;
+		w.syncActor(i);
 	}
 }
 

@@ -244,10 +244,13 @@ class Archives:
 
 
 class Record:
-    __slots__ = ("tag", "flags", "subs")
+    __slots__ = ("tag", "flags", "subs", "refnums")
 
-    def __init__(self, tag, flags, subs):
+    def __init__(self, tag, flags, subs, refnums=None):
         self.tag, self.flags, self.subs = tag, flags, subs
+        # A merged CELL: each FRMR's reference number as OpenMW's RefNum has it, (file in the load order, index), in
+        # the order of its FRMRs (None: one file's record as read, whose FRMRs are the numbers)
+        self.refnums = refnums
 
     def get(self, tag):
         for t, d in self.subs:
@@ -559,15 +562,18 @@ def _merge():
             if deleted:
                 continue
             subs = list(header.items())
+            nums = []
             for rkey, (rsubs, rdel) in refs.items():
                 if not rdel and rkey not in moved:
                     subs.extend(rsubs)
+                    nums.append(rkey)
             # References other cells' plugins moved into this one (OpenMW's leased references)
             if key[1][0] == "ext":
-                for target, rsubs, rdel in moved.values():
+                for rkey, (target, rsubs, rdel) in moved.items():
                     if not rdel and tuple(target) == key[1][1]:
                         subs.extend(rsubs)
-            out.append(Record("CELL", 0, subs))
+                        nums.append(rkey)
+            out.append(Record("CELL", 0, subs, nums))
         elif t == "LTEX":
             lr = ltex_paths[key[1]]
             subs = [(tag, struct.pack("<i", gindex[key[1]]) if tag == "INTV" else d) for tag, d in lr.subs]
@@ -578,11 +584,11 @@ def _merge():
         else:
             out.append(r)
     # Exterior cells that only a moved reference names
-    for target, rsubs, rdel in moved.values():
+    for rkey, (target, rsubs, rdel) in moved.items():
         if not rdel and ("ext", tuple(target)) not in cells:
             cells[("ext", tuple(target))] = None
             data = struct.pack("<Iii", 2, *target)
-            out.append(Record("CELL", 0, [("NAME", b"\0"), ("DATA", data)] + list(rsubs)))
+            out.append(Record("CELL", 0, [("NAME", b"\0"), ("DATA", data)] + list(rsubs), [rkey]))
     _merged = out
     return out
 
@@ -621,11 +627,15 @@ MODEL_TYPES = {"STAT", "DOOR", "ACTI", "CONT", "LIGH", "MISC", "WEAP", "ARMO", "
 
 
 def cell_refs(cell):
-    """Splits a CELL record's subrecords into placed references."""
+    """Splits a CELL record's subrecords into placed references. Each has "rn": its number as OpenMW's RefNum has
+    it, (file in the load order, index), which online servers address it by."""
     refs, cur = [], None
+    nums = getattr(cell, "refnums", None)
     for tag, d in cell.subs:
         if tag == "FRMR":
-            cur = {"id": None, "scale": 1.0, "pos": None, "rot": None, "deleted": False}
+            num = struct.unpack("<I", d[:4])[0]
+            rn = nums[len(refs)] if nums is not None and len(refs) < len(nums) else (0, num & 0xFFFFFF)
+            cur = {"id": None, "scale": 1.0, "pos": None, "rot": None, "deleted": False, "rn": rn}
             refs.append(cur)
         elif cur is None:
             continue

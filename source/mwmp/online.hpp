@@ -68,6 +68,20 @@ struct RemotePlayer
 	float hp = -1, hpMax = -1;
 };
 
+// One of the world's people or creatures as the server streams it (PROTOCOL.md M4): the cell's holder (on a platform,
+// always its sim peer) simulates it, everyone else draws it where the stream says
+struct NetActor
+{
+	NetPose prev, last;                  // the last two poses (ActorMoveBatch) and when they came (Online::now)
+	float prevAt = -1, lastAt = -1;
+	float hp = -1, hpMax = -1;           // ActorStatsDynamic (-1: not heard)
+	bool dead = false;                   // ActorDeath (true) / ActorRevive (false), as the world has it
+	int combat = 0;                      // ActorAI: the player id it fights, 0 none
+};
+
+// A reference number as the wire carries it (RefNum: content file index, index): one 64-bit key
+inline uint64_t netRefKey(int32_t file, uint32_t index) { return ((uint64_t)(uint32_t)file << 32) | index; }
+
 struct ChatLine
 {
 	std::string channel, from, text;
@@ -124,6 +138,19 @@ public:
 	bool switching = false;                               // between worlds: the game keeps going, nobody sees us
 	bool rejoined = false;                                // welcomed by a second world (the record is not put on again)
 	std::map<uint16_t, RemotePlayer> players;
+	// ---- the world's people and creatures (M4): each cell's holder (ActorAuthorityInfo: a player id, the sim peer's on
+	// a platform) and what the stream says of each actor, by netRefKey. A cell nobody holds is simulated here, as
+	// offline (the server's degraded mode)
+	std::map<std::string, uint16_t> holderOf;
+	std::map<std::string, uint32_t> epochOf;
+	std::map<uint64_t, NetActor> actors;
+	// The content file index the wire uses for a file of this data's load order (0 Morrowind.esm, 1 Tribunal.esm ...):
+	// its place in the session's content list, -1 when the list hasn't it
+	int contentFileOf(int loadOrderIndex) const;
+	int loadOrderOf(int contentFile) const;        // and back (-1: not one of this data's files)
+	// ---- the input tier (0x0102): what the player does, for the server's copy of them to swing, block and ready
+	void sendInput(float moveAxis, float sideAxis, float yaw, float pitch, uint8_t flags, int simMs);
+	float selfStatsAt = -100;                     // when the server last reported our bars (SelfStats: its copy of us takes the blows)
 	std::deque<ChatLine> chat;                            // the newest last, a few dozen kept
 	int chatRevision = 0;
 	// Events the game itself acts on (InviteAccepted, StateRefused ...): name and body, oldest first
@@ -148,7 +175,7 @@ private:
 	float retryAt = -1;
 	int worldTries = 0;
 	WebSocket ws;
-	uint32_t seq = 0;
+	uint32_t seq = 0, inputSeq = 0;
 	bool helloSent = false, manifestRetried = false;
 	std::vector<std::string> manifest;
 	float pingAt = 0;

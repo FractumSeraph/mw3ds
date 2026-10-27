@@ -293,6 +293,8 @@ void Session::actorGravity(float dt)
 		Ref& r = w.refs[i];
 		if ((r.recType != REC_NPC_ && r.recType != REC_CREA) || !r.visible() || r.actor < 0)
 			continue;
+		if (onlinePuppet(i))
+			continue;                   // (online: where the world's copy stands, its height too)
 		// Creatures fall like anyone, but not the ones that fly, nor the ones that swim while they're in water
 		// (as in OpenMW, where every actor falls unless it flies or is held up by water)
 		bool creature = r.recType == REC_CREA;

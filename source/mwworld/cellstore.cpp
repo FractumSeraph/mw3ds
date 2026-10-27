@@ -193,6 +193,11 @@ bool parseRefs(const World& w, int cellIndex, ParsedRefs& out)
 		if ((v = cJSON_GetObjectItem(r, "trap"))) ref.trap = v->valuestring;
 		if ((v = cJSON_GetObjectItem(r, "lev"))) ref.levList = v->valuestring;
 		if ((v = cJSON_GetObjectItem(r, "actor"))) ref.actor = v->valueint;
+		if ((v = cJSON_GetObjectItem(r, "rn")) && cJSON_GetArraySize(v) == 2)
+		{
+			ref.rnFile = cJSON_GetArrayItem(v, 0)->valueint;
+			ref.rnIndex = (u32)cJSON_GetArrayItem(v, 1)->valuedouble;
+		}
 		if ((v = cJSON_GetObjectItem(r, "door_mesh"))) ref.doorMesh = v->valueint;
 		if ((v = cJSON_GetObjectItem(r, "dest")))
 		{

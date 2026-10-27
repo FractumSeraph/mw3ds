@@ -782,7 +782,9 @@ class Converter:
         file = env.get("file") or cell_file_name(cell_name)
         base = OUT / "cells" / file
         plain = {k: v for k, v in env.items() if k not in ("terrain", "weather")}
-        key = hashlib.sha1(json.dumps([self.code_hash, cell_name, refs, plain, env.get("weather"), spawn],
+        # (without the reference numbers, which level.py writes into the cell's .json itself)
+        hashed = [{k: v for k, v in r.items() if k != "rn"} for r in refs]
+        key = hashlib.sha1(json.dumps([self.code_hash, cell_name, hashed, plain, env.get("weather"), spawn],
                                       default=str, sort_keys=True).encode()).hexdigest()
         meta_path = self.cache_dir / (file + ".json")
         if meta_path.exists() and base.with_suffix(".cel").exists() and base.with_suffix(".act").exists():
