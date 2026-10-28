@@ -1,6 +1,7 @@
 # Online play and Bloodmoon (FractumSeraph/mw3ds)
 
-This fork of [MW3DS](https://github.com/3ds-conspiracy/mw3ds) adds two things:
+This fork of [MW3DS](https://github.com/3ds-conspiracy/mw3ds) adds these (and updates itself, and can download its
+game data: see [Updating](#updating) and [The game data download](#the-game-data-download)):
 
 - **Bloodmoon.** The converter takes the add-on and the engine runs the script functions its quests need.
 - **An online mode.** The 3DS plays as a player on an [openmw-web](https://github.com/FractumSeraph/openmw-web)
@@ -149,12 +150,37 @@ music).
 
 Data and program go together: the converter writes `data_version.txt` (the format, `kDataVersion` in
 `source/components/files/dataversion.hpp`), and a release's `update.json` says which it needs. When a release needs
-newer data than the console has, the screen says so and installs nothing: convert again with that release's converter.
+newer data than the console has, the updater asks the data's server (below) for that format: if it has it, the update
+installs and the new program downloads its data when it next starts; if not, the screen says so and installs nothing
+(convert again with that release's converter).
 
 *Releasing:* tag the commit `mp-X.Y.Z` and push the tag to the fork. `.github/workflows/release.yml` builds a draft
 release with the converter, `mw3ds-program.cia`, `mw3ds.3dsx` and `update.json`; publishing the draft is what consoles
 see (GitHub's "latest" skips drafts and pre-releases). Raise `kDataVersion` in the same commit as a converter change the
 program needs.
+
+### The game data download
+
+The program-only CIA and the .3dsx carry nothing of Morrowind's. When the console has no data of the program's format
+(no data in the CIA, none in `sdmc:/3ds/mw3ds/data`, or older data there), a screen at the start offers to download it
+(`source/mwmp/datadownload.cpp`) from `https://morrowind.fractumseraph.net/mw3ds/data-v<format>/index.json`, hosted
+beside the browser game's own files. It shows the size and the SD card's free space; **Download** fetches packs of about
+32 MB, each checked against its SHA-256 in `index.json` and unpacked into `sdmc:/3ds/mw3ds/data.part` as it streams in.
+The packs done are noted there, so a download cut off (Wi-Fi lost, the console shut, **Stop**) carries on from the pack
+it was in. With every pack in, `data.part` becomes `sdmc:/3ds/mw3ds/data` (older data there is replaced; saves are in
+`sdmc:/3ds/mw3ds/saves`). Without Wi-Fi the screen says so; with older data on the card, **Not now** plays on with it.
+Over a 3DS's Wi-Fi the whole island takes some time (the emulator managed about 0.5 MB/s): keep the console open and
+charging.
+
+The hosted data is the New 3DS's (textures up to 256 texels); an Old 3DS is told to convert its own on a PC.
+`sdmc:/3ds/mw3ds/data_url.txt` points the screen at another `index.json` (a test server's); `data_answer.txt` ("yes"
+or "no") answers it for a scripted run.
+
+*Hosting it:* `python tools/release/make_datapacks.py out/data-bloodmoon build/datapacks/data-v1` writes `index.json`
+and the packs (`NNN-<sha256>.mwp`; the pack format is in the script). Copy the folder to the server so that
+`/mw3ds/data-v1/index.json` is served beside them: the packs may be cached for good (their names change with their
+content), `index.json` never. A new data format is a new folder (`data-v2`), so consoles on the older program keep
+theirs. The data is Morrowind's, converted: host it only where you may.
 
 ### Building
 

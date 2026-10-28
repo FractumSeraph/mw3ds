@@ -22,7 +22,10 @@
 #include "mwgui/widgets.hpp"
 #include "mwinput/inputmanagerimp.hpp"
 #include "mwmp/netsocket.hpp"
+#include "mwmp/datadownload.hpp"
+#include "mwmp/fetch.hpp"
 #include "mwmp/online.hpp"
+#include "mwmp/sha256.hpp"
 #include "mwmp/websocket.hpp"
 #include "mwsound/soundmanagerimp.hpp"
 #include "platform/linear.hpp"
@@ -71,77 +74,6 @@ const char* const kCiaAsset = "mw3ds-program.cia";
 const char* const kHbAsset = "mw3ds.3dsx";
 std::string g_answer;                    // the test hook's answer to the screen ("" a player's)
 
-// ---- SHA-256 (FIPS 180-4), for the downloads' check against GitHub's digest
-struct Sha256
-{
-	uint32_t h[8] = { 0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19 };
-	uint8_t block[64];
-	size_t used = 0;
-	uint64_t total = 0;
-	static uint32_t ror(uint32_t x, int n) { return (x >> n) | (x << (32 - n)); }
-	void compress(const uint8_t* p)
-	{
-		static const uint32_t k[64] = {
-			0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-			0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-			0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-			0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-			0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-			0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-			0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-			0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2 };
-		uint32_t w[64];
-		for (int i = 0; i < 16; i++)
-			w[i] = (uint32_t)p[i * 4] << 24 | (uint32_t)p[i * 4 + 1] << 16 | (uint32_t)p[i * 4 + 2] << 8 | p[i * 4 + 3];
-		for (int i = 16; i < 64; i++)
-			w[i] = w[i - 16] + (ror(w[i - 15], 7) ^ ror(w[i - 15], 18) ^ (w[i - 15] >> 3)) + w[i - 7]
-				+ (ror(w[i - 2], 17) ^ ror(w[i - 2], 19) ^ (w[i - 2] >> 10));
-		uint32_t a = h[0], b = h[1], c = h[2], d = h[3], e = h[4], f = h[5], g = h[6], hh = h[7];
-		for (int i = 0; i < 64; i++)
-		{
-			uint32_t t1 = hh + (ror(e, 6) ^ ror(e, 11) ^ ror(e, 25)) + ((e & f) ^ (~e & g)) + k[i] + w[i];
-			uint32_t t2 = (ror(a, 2) ^ ror(a, 13) ^ ror(a, 22)) + ((a & b) ^ (a & c) ^ (b & c));
-			hh = g; g = f; f = e; e = d + t1; d = c; c = b; b = a; a = t1 + t2;
-		}
-		h[0] += a; h[1] += b; h[2] += c; h[3] += d; h[4] += e; h[5] += f; h[6] += g; h[7] += hh;
-	}
-	void add(const void* data, size_t n)
-	{
-		const uint8_t* p = (const uint8_t*)data;
-		total += n;
-		while (n)
-		{
-			size_t take = 64 - used < n ? 64 - used : n;
-			memcpy(block + used, p, take);
-			used += take;
-			p += take;
-			n -= take;
-			if (used == 64)
-			{
-				compress(block);
-				used = 0;
-			}
-		}
-	}
-	std::string hex()
-	{
-		uint64_t bits = total * 8;
-		uint8_t pad = 0x80;
-		add(&pad, 1);
-		pad = 0;
-		while (used != 56)
-			add(&pad, 1);
-		uint8_t len[8];
-		for (int i = 0; i < 8; i++)
-			len[i] = (uint8_t)(bits >> (56 - i * 8));
-		add(len, 8);
-		char out[65];
-		for (int i = 0; i < 8; i++)
-			snprintf(out + i * 8, 9, "%08lx", (unsigned long)h[i]);
-		return out;
-	}
-};
-
 std::string lowerText(std::string s)
 {
 	for (auto& c : s)
@@ -184,85 +116,6 @@ struct Version
 			if (n[i] != o.n[i])
 				return n[i] > o.n[i];
 		return ahead > o.ahead;
-	}
-};
-
-// One GET, its redirects followed (GitHub's release files are served from another host)
-struct Fetch
-{
-	HttpRequest req;
-	std::string url;
-	int redirects = 0;
-	bool failed = false, done = false;
-	std::string err;
-	void start(const std::string& u, bool api)
-	{
-		url = u;
-		redirects = 0;
-		failed = done = false;
-		err.clear();
-		begin(api);
-	}
-	void begin(bool api)
-	{
-		req.sendOrigin = false;
-		std::vector<std::string> h;
-		if (api)
-		{
-			h.push_back("Accept: application/vnd.github+json");
-			h.push_back("X-GitHub-Api-Version: 2022-11-28");
-		}
-		else
-			h.push_back("Accept: application/octet-stream");
-		if (!req.start("GET", url, h, ""))
-		{
-			failed = true;
-			err = req.error();
-		}
-	}
-	void update()
-	{
-		if (failed || done)
-			return;
-		HttpRequest::State s = req.update();
-		if (s == HttpRequest::FAILED)
-		{
-			failed = true;
-			err = req.error();
-		}
-		else if (s == HttpRequest::DONE)
-		{
-			int st = req.status;
-			if ((st == 301 || st == 302 || st == 303 || st == 307 || st == 308) && redirects < 5)
-			{
-				std::string loc = req.header("location");
-				if (loc.empty())
-				{
-					failed = true;
-					err = "a redirect without a Location";
-					return;
-				}
-				if (loc[0] == '/')
-				{
-					NetUrl u;
-					u.parse(url);
-					loc = (u.tls ? "https://" : "http://") + u.host
-						+ (u.port != (u.tls ? 443 : 80) ? ":" + std::to_string(u.port) : "") + loc;
-				}
-				url = loc;
-				redirects++;
-				begin(false);
-			}
-			else if (st != 200)
-			{
-				failed = true;
-				char b[48];
-				snprintf(b, sizeof(b), "the server answered %d", st);
-				err = b;
-			}
-			else
-				done = true;
-		}
 	}
 };
 
@@ -310,20 +163,6 @@ std::string latestUrl()
 			return u;
 	}
 	return kLatest;
-}
-
-bool onWifi()
-{
-#ifdef __3DS__
-	u32 wifi = 0;
-	if (R_FAILED(acInit()))
-		return false;
-	Result rc = ACU_GetWifiStatus(&wifi);
-	acExit();
-	return R_SUCCEEDED(rc) && wifi != 0;
-#else
-	return getenv("MW3DS_UPDATE_OFFLINE") == nullptr;
-#endif
 }
 
 void readAsset(const cJSON* a, Asset& out)
@@ -475,10 +314,58 @@ void selfUpdateStop()
 	checkFinished();
 }
 
+// (shared with the data download, mwmp/datadownload.cpp)
+bool onWifi()
+{
+#ifdef __3DS__
+	u32 wifi = 0;
+	if (R_FAILED(acInit()))
+		return false;
+	Result rc = ACU_GetWifiStatus(&wifi);
+	acExit();
+	return R_SUCCEEDED(rc) && wifi != 0;
+#else
+	return getenv("MW3DS_UPDATE_OFFLINE") == nullptr;
+#endif
+}
+
+void removeTree(const std::string& path)
+{
+	if (DIR* d = opendir(path.c_str()))
+	{
+		std::vector<std::string> names;
+		while (dirent* e = readdir(d))
+			if (strcmp(e->d_name, ".") && strcmp(e->d_name, ".."))
+				names.push_back(e->d_name);
+		closedir(d);
+		for (auto& n : names)
+		{
+			std::string p = path + "/" + n;
+			struct stat st;
+			if (stat(p.c_str(), &st) == 0 && S_ISDIR(st.st_mode))
+				removeTree(p);
+			else
+				remove(p.c_str());
+		}
+	}
+	rmdir(path.c_str());
+}
+
+// Free space on the SD card (bytes; a large number when the console can't say)
+unsigned long long sdFree()
+{
+#ifdef __3DS__
+	FS_ArchiveResource r;
+	if (R_SUCCEEDED(FSUSER_GetArchiveResource(&r, SYSTEM_MEDIATYPE_SD)))
+		return (unsigned long long)r.freeClusters * r.clusterSize;
+#endif
+	return ~0ull;
+}
+
 // ---- the update itself
 namespace
 {
-enum Step { ASK, BLOCKED, DOWNLOAD, COPY_LIST, COPY, INSTALL, DONE, FAILED };
+enum Step { ASK, BLOCKED, CHECK_DATA, DOWNLOAD, COPY_LIST, COPY, INSTALL, DONE, FAILED };
 
 struct CopyJob
 {
@@ -518,39 +405,6 @@ void listTree(const std::string& root, const std::string& rel, CopyJob& job)
 		job.dirs.push_back(s);
 		listTree(root, s, job);
 	}
-}
-
-void removeTree(const std::string& path)
-{
-	if (DIR* d = opendir(path.c_str()))
-	{
-		std::vector<std::string> names;
-		while (dirent* e = readdir(d))
-			if (strcmp(e->d_name, ".") && strcmp(e->d_name, ".."))
-				names.push_back(e->d_name);
-		closedir(d);
-		for (auto& n : names)
-		{
-			std::string p = path + "/" + n;
-			struct stat st;
-			if (stat(p.c_str(), &st) == 0 && S_ISDIR(st.st_mode))
-				removeTree(p);
-			else
-				remove(p.c_str());
-		}
-	}
-	rmdir(path.c_str());
-}
-
-// Free space on the SD card (bytes; a large number when the console can't say)
-unsigned long long sdFree()
-{
-#ifdef __3DS__
-	FS_ArchiveResource r;
-	if (R_SUCCEEDED(FSUSER_GetArchiveResource(&r, SYSTEM_MEDIATYPE_SD)))
-		return (unsigned long long)r.freeClusters * r.clusterSize;
-#endif
-	return ~0ull;
 }
 
 // Where this copy runs from: a CIA (installed), or a .3dsx the Homebrew Launcher started (its path)
@@ -601,6 +455,7 @@ struct Updater
 	CopyJob copy;
 	std::string copyFrom;
 	size_t installed = 0;
+	bool newData = false;                 // the release needs newer data, which the new program downloads at its start
 #ifdef __3DS__
 	Handle cia = 0;
 #endif
@@ -641,19 +496,43 @@ struct Updater
 			block("GitHub lists no SHA-256 for this release's files, so it can't be checked. Not installed.");
 			return;
 		}
-		int have = dataVersionOf(dataDir);
-		if (r.dataNeeded > have)
-		{
-			block("MW3DS " + r.version + " needs game data from a newer converter (data format "
-				+ std::to_string(r.dataNeeded) + "; this console's is " + std::to_string(have) + "). Convert your "
-				"Morrowind again with the MW3DS Converter " + r.version + " on your PC and install the CIA it makes.");
-			return;
-		}
 		if (!netInit())
 		{
 			fail("The network couldn't be started.");
 			return;
 		}
+		// Newer data than the console's: the new program downloads it at its start (mwmp/datadownload.hpp), if the
+		// data's server has it
+		if (r.dataNeeded > dataVersionOf(dataDir))
+		{
+			std::string url = dataIndexUrl(r.dataNeeded);
+			logf("update: it needs data format %d: asking %s", r.dataNeeded, url.c_str());
+			fetch.start(url, false);
+			step = CHECK_DATA;
+			message = "Looking for the game data MW3DS " + r.version + " needs...";
+			return;
+		}
+		download();
+	}
+
+	void dataChecked()
+	{
+		const Release& r = g_check.rel;
+		if (fetch.failed || fetch.req.body.find("\"packs\"") == std::string::npos)
+		{
+			block("MW3DS " + r.version + " needs game data from a newer converter (data format "
+				+ std::to_string(r.dataNeeded) + "; this console's is " + std::to_string(dataVersionOf(dataDir))
+				+ "), and the data's server has none yet. Convert your Morrowind again with the MW3DS Converter "
+				+ r.version + " on your PC and install the CIA it makes, or try again later.");
+			return;
+		}
+		newData = true;
+		download();
+	}
+
+	void download()
+	{
+		const Release& r = g_check.rel;
 		logf("update: downloading %s (%u bytes)", asset.url.c_str(), (unsigned)asset.size);
 		fetch.start(asset.url, false);
 		step = DOWNLOAD;
@@ -683,7 +562,8 @@ struct Updater
 			installHomebrew();
 			return;
 		}
-		if (dataInsideCia(dataDir))
+		// (with new data coming at the next start, the CIA's own data isn't worth copying out)
+		if (dataInsideCia(dataDir) && !newData)
 		{
 			step = COPY_LIST;
 			message = "Moving the game data to the SD card (once: later updates are the program alone)...";
@@ -882,13 +762,19 @@ struct Updater
 		logf("update: %s installed", g_check.rel.version.c_str());
 		file = std::string();
 		step = DONE;
-		message = "MW3DS " + g_check.rel.version + " is installed. Press A to start it.";
+		message = "MW3DS " + g_check.rel.version + " is installed. Press A to start it."
+			+ std::string(newData ? " It downloads its new game data first." : "");
 	}
 
 	void update()
 	{
 		switch (step)
 		{
+		case CHECK_DATA:
+			fetch.update();
+			if (fetch.failed || fetch.done)
+				dataChecked();
+			break;
 		case DOWNLOAD:
 			fetch.update();
 			if (fetch.failed)
@@ -971,7 +857,8 @@ std::string selfUpdateScreen(C3D_RenderTarget* top, C3D_RenderTarget* bottom, co
 		u.update();
 		if (g_answer == "yes" && u.step == ASK)
 			u.begin();
-		bool busy = u.step == DOWNLOAD || u.step == COPY_LIST || u.step == COPY || u.step == INSTALL;
+		bool busy = u.step == CHECK_DATA || u.step == DOWNLOAD || u.step == COPY_LIST || u.step == COPY
+			|| u.step == INSTALL;
 
 		C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
 		linearRetire();
@@ -995,8 +882,11 @@ std::string selfUpdateScreen(C3D_RenderTarget* top, C3D_RenderTarget* bottom, co
 		std::string result = "\x01";
 		if (u.step == ASK)
 		{
-			uiTextBox(scroll, 6, 26, 308, 140, "A new version of MW3DS is out. Only the program is downloaded; your "
-				"saves, settings and game data stay.\n\n" + notes, 0.45f, true);
+			uiTextBox(scroll, 6, 26, 308, 140, r.dataNeeded > dataVersionOf(dataDir)
+				? "A new version of MW3DS is out. It needs newer game data, which it downloads when it next starts "
+				"(about 1.4 GB over Wi-Fi); your saves and settings stay.\n\n" + notes
+				: "A new version of MW3DS is out. Only the program is downloaded; your saves, settings and game data "
+				"stay.\n\n" + notes, 0.45f, true);
 			if (uiButton(4, 174, 100, 28, "Never") || g_answer == "never")
 			{
 				if (FILE* f = fopen(kOffPath, "w"))

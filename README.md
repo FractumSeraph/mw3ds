@@ -1,7 +1,7 @@
 # MW3DS: Morrowind for the 3DS
 
 > [!NOTE]
-> **This is FractumSeraph's fork.** It adds three things to MW3DS, described in [docs/ONLINE.md](docs/ONLINE.md):
+> **This is FractumSeraph's fork.** It adds four things to MW3DS, described in [docs/ONLINE.md](docs/ONLINE.md):
 > - **Bloodmoon:** `python tools/build/build_cia.py --bloodmoon` converts Morrowind, Tribunal and Bloodmoon, and the
 >   engine runs Bloodmoon's script functions, the werewolf's stats included.
 > - **Online play:** the title's **Online** button signs in to an [openmw-web](https://github.com/FractumSeraph/openmw-web)
@@ -11,6 +11,10 @@
 > - **Updates itself:** at the title screen, with Wi-Fi on, it asks GitHub for the fork's latest release and offers it
 >   (**Update** beside **Online**). Only the program downloads, checked by SHA-256; your saves and game data stay. See
 >   [Updating](docs/ONLINE.md#updating).
+> - **Downloads its game data:** the program-only CIA (`mw3ds-program.cia` from the fork's releases) carries nothing of
+>   Morrowind's. At its first start, with Wi-Fi on, it offers to download the converted data (Morrowind, Tribunal and
+>   Bloodmoon for a New 3DS, about 1.4 GB) from morrowind.fractumseraph.net, checked pack by pack and resumed if cut off.
+>   See [The game data download](docs/ONLINE.md#the-game-data-download).
 >
 > Everything also builds without MSYS2 in a Linux image: `sh tools/build/docker/run.sh python3 tools/build/make.py`.
 

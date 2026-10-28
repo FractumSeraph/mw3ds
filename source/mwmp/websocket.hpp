@@ -3,6 +3,7 @@
 // The online mode's WebSocket (RFC 6455) and HTTP/1.1 clients over NetSocket (FractumSeraph/mw3ds), each moved on once
 // a frame by update(): never waiting on the network. ws:// and http:// in plain TCP, wss:// and https:// in TLS.
 #include <deque>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -61,8 +62,11 @@ public:
 	int status = 0;
 	std::string body;                                     // the response's, de-chunked
 	std::string header(const char* name) const;          // a response header's value ("" none), name in any case
-	size_t received() const { return in.size(); }         // bytes of the answer so far (a download's progress)
+	size_t received() const { return in.size() + streamed; } // bytes of the answer so far (a download's progress)
 	bool sendOrigin = true;                               // (the updater's requests to GitHub go without one)
+	// A 200's body (sent with a Content-Length) handed to this as it arrives instead of kept in body: a download
+	// larger than memory (the game data's packs). Returning false stops the request (FAILED, error() "stopped").
+	std::function<bool(const char* data, size_t n)> sink;
 	const std::string& error() const { return err; }
 private:
 	NetSocket sock;
@@ -70,5 +74,8 @@ private:
 	std::string request, in, err, head;
 	size_t sent = 0;
 	State st = IDLE;
+	bool streaming = false;                               // (sink: the head read, the body going to it)
+	size_t streamed = 0, length = 0;
 	bool finish();
+	bool stream(const char* data, size_t n);
 };

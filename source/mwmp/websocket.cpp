@@ -352,6 +352,8 @@ bool HttpRequest::start(const std::string& method, const std::string& u, const s
 	err.clear();
 	status = 0;
 	sent = 0;
+	streaming = false;
+	streamed = length = 0;
 	if (!url.parse(u))
 	{
 		err = "not an http:// or https:// address: " + u;
@@ -423,6 +425,49 @@ bool HttpRequest::finish()
 	return true;
 }
 
+// The sink's share of what arrived: the head first (a 200 with a Content-Length goes to the sink; anything else, a
+// redirect or an error page, is kept as usual)
+bool HttpRequest::stream(const char* data, size_t n)
+{
+	if (!streaming)
+	{
+		in.append(data, n);
+		size_t end = in.find("\r\n\r\n");
+		if (end == std::string::npos)
+			return true;
+		std::string lower = lowerCase(in.substr(0, end));
+		int code = 0;
+		sscanf(lower.c_str(), "http/%*s %d", &code);
+		size_t cl = lower.find("content-length:");
+		if (code != 200 || cl == std::string::npos || lower.find("transfer-encoding: chunked") != std::string::npos)
+			return true;
+		head = in.substr(0, end);
+		status = code;
+		length = strtoul(lower.c_str() + cl + 15, nullptr, 10);
+		streaming = true;
+		std::string rest = in.substr(end + 4);
+		in.clear();
+		in.shrink_to_fit();
+		return stream(rest.data(), rest.size());
+	}
+	size_t take = n < length - streamed ? n : length - streamed;
+	streamed += take;
+	if (take && !sink(data, take))
+	{
+		err = "stopped";
+		st = FAILED;
+		sock.close();
+		return false;
+	}
+	if (streamed == length)
+	{
+		st = DONE;
+		sock.close();
+		return false;
+	}
+	return true;
+}
+
 std::string HttpRequest::header(const char* name) const
 {
 	std::string lower = lowerCase(head), key = "\r\n" + lowerCase(name) + ":";
@@ -446,7 +491,12 @@ HttpRequest::State HttpRequest::update()
 	if (s == NetSocket::FAILED)
 	{
 		// a close straight after the answer reads as a failed socket: what came is the answer
-		if (!in.empty())
+		if (streaming)
+		{
+			err = "the download stopped early (" + std::to_string(streamed) + " of " + std::to_string(length) + " bytes)";
+			st = FAILED;
+		}
+		else if (!in.empty())
 			finish();
 		else
 		{
@@ -476,14 +526,28 @@ HttpRequest::State HttpRequest::update()
 		int n = sock.recv(buf, sizeof(buf));
 		if (n < 0)
 		{
-			finish();
+			if (streaming)
+			{
+				err = "the download stopped early (" + std::to_string(streamed) + " of " + std::to_string(length) + " bytes)";
+				st = FAILED;
+			}
+			else
+				finish();
 			sock.close();
 			return st;
 		}
 		if (n == 0)
 			break;
-		in.append(buf, n);
+		if (sink)
+		{
+			if (!stream(buf, n))
+				return st;
+		}
+		else
+			in.append(buf, n);
 	}
+	if (streaming)
+		return st;
 	// (a server that keeps the connection open: done once Content-Length is all here)
 	size_t end = in.find("\r\n\r\n");
 	if (end != std::string::npos)

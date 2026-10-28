@@ -30,6 +30,7 @@
 #include "mwgui/loadingscreen.hpp"
 #include "mwmp/online.hpp"
 #include "mwmp/netsocket.hpp"
+#include "mwmp/datadownload.hpp"
 #include "mwmp/selfupdate.hpp"
 #include "components/files/dataversion.hpp"
 #include "extern/cjson/cJSON.h"
@@ -187,6 +188,24 @@ bool Engine::prepare()
 		: stat(kSdDataDir, &st) == 0 ? kSdDataDir : kRomfsDataDir;
 	logf("romfs %s, data dir %s, data format %d (this program's %d)", romfs ? "mounted" : "absent", dataDir,
 		dataVersionOf(dataDir), kDataVersion);
+	// No data of this program's format (the program-only CIA, a .3dsx): it comes down from the server that hosts it
+	// (mwmp/datadownload.hpp), or the player quits
+	std::string dataNeed = dataDownloadNeed(dataDir);
+	if (!dataNeed.empty())
+	{
+		if (!dataDownloadScreen(top, bottom, dataNeed, isNew3ds))
+		{
+			uiExit();
+			rendererExit();
+			C2D_Fini();
+			C3D_Fini();
+			irrstExit();
+			logExit();
+			gfxExit();
+			return false;
+		}
+		dataDir = kSdDataDir;
+	}
 	int maxTex = dataMaxTex(dataDir);
 	logf("data: textures up to %d texels%s", maxTex, maxTex ? "" : " (not recorded: converted before max_tex)");
 	// (not for a scripted test run: the native Old 3DS suite runs the New 3DS's data on purpose)
