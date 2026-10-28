@@ -1,8 +1,8 @@
 """Builds build/mw3ds.cia with the converted game data packed into its RomFS.
 New 3DS settings: 124MB app memory mode, 804MHz CPU, L2 cache.
     python tools/build/make_cia.py [--no-data] [--data out/world] [--out build/mw3ds-o3ds.cia] [--prebuilt]
-  --no-data   the program only (~2 MB): the game reads its data from sdmc:/3ds/mw3ds/data
-              (the whole island copied there by card reader); no Wi-Fi update checks either
+  --no-data   the program only (~2 MB): the game reads its data from sdmc:/3ds/mw3ds/data, and downloads it there
+              at its first start when the card has none (source/mwmp/datadownload.cpp)
   --data      pack that data (default out/data, the Balmora area)
   --out       write the CIA there (default build/mw3ds.cia)
   --prebuilt  do not run make: pack the mw3ds.elf and mw3ds.smdh already in the repo root
@@ -27,7 +27,9 @@ import mwtools
 
 ROOT = mwtools.ROOT
 DEFS = {
-    "APP_TITLE": "MW3DS", "APP_PRODUCT_CODE": "CTR-P-MW3D", "APP_UNIQUE_ID": "0xF8287",
+    # FractumMorrowind (the fork): its own title ID, so it installs beside upstream MW3DS (0xF8287) and not over it; the
+    # exheader name holds 8 characters (the HOME menu shows the SMDH title)
+    "APP_TITLE": "FractMW", "APP_PRODUCT_CODE": "CTR-P-FMRW", "APP_UNIQUE_ID": "0xFC0E5",
     "APP_ROMFS": "build/romfs", "APP_CATEGORY": "Application", "APP_USE_ON_SD": "true", "APP_ENCRYPTED": "false",
     "APP_MEMORY_TYPE": "Application", "APP_SYSTEM_MODE": "64MB", "APP_SYSTEM_MODE_EXT": "124MB",
     "APP_CPU_SPEED": "804MHz", "APP_ENABLE_L2_CACHE": "true", "APP_VERSION_MAJOR": "0",

@@ -134,13 +134,13 @@ is one this data has.
 
 ### Updating
 
-At the title screen, when the console is on Wi-Fi, MW3DS asks GitHub for the latest release of FractumSeraph/mw3ds
+At the title screen, when the console is on Wi-Fi, FractumMorrowind asks GitHub for the latest release of FractumSeraph/mw3ds
 (`source/mwmp/selfupdate.cpp`). A newer one puts **Update mp-X.Y.Z** beside **Online** (or press SELECT). Its screen
 shows the release notes and three buttons: **Update**, **Not now**, and **Never** (no more checks; delete
 `sdmc:/3ds/mw3ds/update_off` to have them back).
 
-Only the program downloads, never anything of Morrowind's. An installed copy takes `mw3ds-program.cia` (the CIA without
-data) and installs it through the console's own installer; a copy run from the Homebrew Launcher takes `mw3ds.3dsx` and
+Only the program downloads, never anything of Morrowind's. An installed copy takes `FractumMorrowind.cia` (the CIA
+without data) and installs it through the console's own installer; a copy run from the Homebrew Launcher takes `FractumMorrowind.3dsx` and
 swaps it in beside the old one. Each file is checked against the size and SHA-256 GitHub lists for it, and a mismatch
 changes nothing. The program-only CIA reads its data from `sdmc:/3ds/mw3ds/data`, so the first update of a CIA that
 carries its data inside copies that data out to the SD card first (once; 1.4 GB for the whole island with Bloodmoon,
@@ -155,7 +155,7 @@ installs and the new program downloads its data when it next starts; if not, the
 (convert again with that release's converter).
 
 *Releasing:* tag the commit `mp-X.Y.Z` and push the tag to the fork. `.github/workflows/release.yml` builds a draft
-release with the converter, `mw3ds-program.cia`, `mw3ds.3dsx` and `update.json`; publishing the draft is what consoles
+release with the converter, `FractumMorrowind.cia`, `FractumMorrowind.3dsx` and `update.json`; publishing the draft is what consoles
 see (GitHub's "latest" skips drafts and pre-releases). Raise `kDataVersion` in the same commit as a converter change the
 program needs.
 
@@ -163,8 +163,8 @@ program needs.
 
 The program-only CIA and the .3dsx carry nothing of Morrowind's. When the console has no data of the program's format
 (no data in the CIA, none in `sdmc:/3ds/mw3ds/data`, or older data there), a screen at the start offers to download it
-(`source/mwmp/datadownload.cpp`) from `https://morrowind.fractumseraph.net/mw3ds/data-v<format>/index.json`, hosted
-beside the browser game's own files. It shows the size and the SD card's free space; **Download** fetches packs of about
+(`source/mwmp/datadownload.cpp`) from `https://halomaps.fractumseraph.net/mw3ds/data-v<format>/index.json`, on the
+seedbox that hosts the Halo maps (GitHub's space stays free of it). It shows the size and the SD card's free space; **Download** fetches packs of about
 32 MB, each checked against its SHA-256 in `index.json` and unpacked into `sdmc:/3ds/mw3ds/data.part` as it streams in.
 The packs done are noted there, so a download cut off (Wi-Fi lost, the console shut, **Stop**) carries on from the pack
 it was in. With every pack in, `data.part` becomes `sdmc:/3ds/mw3ds/data` (older data there is replaced; saves are in
@@ -178,7 +178,8 @@ or "no") answers it for a scripted run.
 
 *Hosting it:* `python tools/release/make_datapacks.py out/data-bloodmoon build/datapacks/data-v1` writes `index.json`
 and the packs (`NNN-<sha256>.mwp`; the pack format is in the script). Copy the folder to the server so that
-`/mw3ds/data-v1/index.json` is served beside them: the packs may be cached for good (their names change with their
+`/mw3ds/data-v1/index.json` is served beside them (on the seedbox: `~/www/halomaps.fractumseraph.net/public_html/mw3ds/`,
+the packs first and `index.json` last, so no console sees an index whose packs aren't there yet): the packs may be cached for good (their names change with their
 content), `index.json` never. A new data format is a new folder (`data-v2`), so consoles on the older program keep
 theirs. The data is Morrowind's, converted: host it only where you may.
 

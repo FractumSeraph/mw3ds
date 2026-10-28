@@ -1,22 +1,45 @@
-# MW3DS: Morrowind for the 3DS
+# FractumMorrowind: Morrowind for the 3DS, with online cross-play
 
-> [!NOTE]
-> **This is FractumSeraph's fork.** It adds four things to MW3DS, described in [docs/ONLINE.md](docs/ONLINE.md):
-> - **Bloodmoon:** `python tools/build/build_cia.py --bloodmoon` converts Morrowind, Tribunal and Bloodmoon, and the
->   engine runs Bloodmoon's script functions, the werewolf's stats included.
-> - **Online play:** the title's **Online** button signs in to an [openmw-web](https://github.com/FractumSeraph/openmw-web)
->   multiplayer server (morrowind.fractumseraph.net by default), to play beside people in the browser. You see each
->   other move, dress and chat, and can join friends' worlds; the server's world is shared too: its people and
->   creatures, fights, what is taken, opened and unlocked, chests, quests and the time of day.
-> - **Updates itself:** at the title screen, with Wi-Fi on, it asks GitHub for the fork's latest release and offers it
->   (**Update** beside **Online**). Only the program downloads, checked by SHA-256; your saves and game data stay. See
->   [Updating](docs/ONLINE.md#updating).
-> - **Downloads its game data:** the program-only CIA (`mw3ds-program.cia` from the fork's releases) carries nothing of
->   Morrowind's. At its first start, with Wi-Fi on, it offers to download the converted data (Morrowind, Tribunal and
->   Bloodmoon for a New 3DS, about 1.4 GB) from morrowind.fractumseraph.net, checked pack by pack and resumed if cut off.
->   See [The game data download](docs/ONLINE.md#the-game-data-download).
->
-> Everything also builds without MSYS2 in a Linux image: `sh tools/build/docker/run.sh python3 tools/build/make.py`.
+**FractumMorrowind is a 3DS port of *The Elder Scrolls III: Morrowind*, with online cross-play.** It lets you play
+Morrowind on your 3DS, online with other players connected to the
+**[morrowind.fractumseraph.net](https://morrowind.fractumseraph.net)** server. You can also play the game directly in
+your browser on a PC, on the same server, with the same players.
+
+| Server | Invite code |
+| --- | --- |
+| [morrowind.fractumseraph.net](https://morrowind.fractumseraph.net) | `fractumseraph.net` |
+
+**Getting started (New 3DS / New 2DS XL):**
+
+1. Install `FractumMorrowind.cia` from the [releases](https://github.com/FractumSeraph/mw3ds/releases) with FBI (or
+   another CIA installer) and start it from the HOME menu.
+2. At its first start, with Wi-Fi on, it downloads the game data: Morrowind, Tribunal and Bloodmoon, about 1.4 GB. Keep
+   the console open and charging. A download that gets cut off carries on where it stopped.
+3. To play online, make an account at [morrowind.fractumseraph.net](https://morrowind.fractumseraph.net) with the
+   invite code `fractumseraph.net`, then press **Online** on the 3DS's title screen and sign in with that account. Play
+   offline whenever you have no Wi-Fi: your offline saves are kept apart from the online world.
+
+FractumMorrowind is FractumSeraph's fork of [MW3DS](https://github.com/3ds-conspiracy/mw3ds), and it installs beside
+MW3DS rather than over it. It adds four things to MW3DS, described in [docs/ONLINE.md](docs/ONLINE.md):
+- **Online play:** the title's **Online** button signs in to an [openmw-web](https://github.com/FractumSeraph/openmw-web)
+  multiplayer server (morrowind.fractumseraph.net by default), to play beside people in the browser. You see each
+  other move, dress and chat, and can join friends' worlds; the server's world is shared too: its people and
+  creatures, fights, what is taken, opened and unlocked, chests, quests and the time of day.
+- **Bloodmoon:** `python tools/build/build_cia.py --bloodmoon` converts Morrowind, Tribunal and Bloodmoon, and the
+  engine runs Bloodmoon's script functions, the werewolf's stats included.
+- **Downloads its game data:** the CIA carries nothing of Morrowind's. At its first start it downloads the converted
+  data from halomaps.fractumseraph.net (hosted by FractumSeraph, who has permission to distribute it), checked pack by
+  pack. See [The game data download](docs/ONLINE.md#the-game-data-download).
+- **Updates itself:** at the title screen, with Wi-Fi on, it asks GitHub for the latest release and offers it
+  (**Update** beside **Online**). Only the program downloads, checked by SHA-256; your saves and game data stay. See
+  [Updating](docs/ONLINE.md#updating).
+
+The rest of this page is MW3DS's own: the engine, the converter (to make a CIA from your own Morrowind install, which an
+Old 3DS needs), building and testing.
+
+Everything also builds without MSYS2 in a Linux image: `sh tools/build/docker/run.sh python3 tools/build/make.py`.
+
+## MW3DS, the engine
 
 Play *The Elder Scrolls III: Morrowind* on a **Nintendo 3DS**. MW3DS is a from-scratch engine written in C++ for the 3DS.
 It runs the base game on real hardware and in the [Azahar](https://azahar-emu.org/) emulator.

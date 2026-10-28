@@ -32,12 +32,13 @@ include $(DEVKITARM)/3ds_rules
 #     - <libctru folder>/default_icon.png
 #---------------------------------------------------------------------------------
 TARGET		:=	mw3ds
-APP_TITLE	:=	MW3DS
+# The fork's name on the HOME menu and in homebrew stores (FractumSeraph/mw3ds); the program's files keep mw3ds
+APP_TITLE	:=	FractumMorrowind
 # The release's version, on the HOME menu under the title (the CIA's title version: tools/build/make_cia.py): the
 # release workflow's tag, else the git tag here (a commit past one: 0.0.2-3-g1234abc), else "dev"
 export MW3DS_VERSION	?=	$(or $(TAG),$(shell git describe --tags 2>/dev/null),dev)
-APP_DESCRIPTION	:=	Morrowind engine for 3DS $(MW3DS_VERSION)
-APP_AUTHOR	:=	mw3ds
+APP_DESCRIPTION	:=	Morrowind for 3DS, online with openmw-web $(MW3DS_VERSION)
+APP_AUTHOR	:=	FractumSeraph
 BUILD		:=	build
 SOURCES		:=	source
 SHADERS		:=	source/shaders

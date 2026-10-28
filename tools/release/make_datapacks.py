@@ -3,7 +3,7 @@ these at its first start (source/mwmp/datadownload.cpp), so the CIA a player is 
     python tools/release/make_datapacks.py out/data-bloodmoon build/datapacks/data-v1
     python tools/release/make_datapacks.py <data> <out> --pack-mb 32 --name "Morrowind, Tribunal and Bloodmoon"
 
-Hosted beside a server's own files, for example https://morrowind.fractumseraph.net/mw3ds/data-v1/ (the 3DS asks for
+Hosted on a web server, for example https://halomaps.fractumseraph.net/mw3ds/data-v1/ (the 3DS asks for
 data-v<its data format>/index.json there; sdmc:/3ds/mw3ds/data_url.txt points it elsewhere). The data is Morrowind's,
 converted: host it only where you may.
 

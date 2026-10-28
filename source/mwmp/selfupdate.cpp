@@ -70,8 +70,8 @@ const char* const kUrlPath = "sdmc:/3ds/mw3ds/update_url.txt";
 const char* const kSdData = "sdmc:/3ds/mw3ds/data";
 const char* const kSdDataPart = "sdmc:/3ds/mw3ds/data.part";
 const char* const kSdDataOld = "sdmc:/3ds/mw3ds/data.old";
-const char* const kCiaAsset = "mw3ds-program.cia";
-const char* const kHbAsset = "mw3ds.3dsx";
+const char* const kCiaAsset = "FractumMorrowind.cia";
+const char* const kHbAsset = "FractumMorrowind.3dsx";
 std::string g_answer;                    // the test hook's answer to the screen ("" a player's)
 
 std::string lowerText(std::string s)
@@ -488,7 +488,7 @@ struct Updater
 		}
 		if (homebrew && hbPath.empty())
 		{
-			block("The Homebrew Launcher didn't say where mw3ds.3dsx is. Copy the new one to the SD card yourself.");
+			block("The Homebrew Launcher didn't say where FractumMorrowind.3dsx is. Copy the new one to the SD card yourself.");
 			return;
 		}
 		if (asset.sha256.size() != 64)
@@ -509,7 +509,7 @@ struct Updater
 			logf("update: it needs data format %d: asking %s", r.dataNeeded, url.c_str());
 			fetch.start(url, false);
 			step = CHECK_DATA;
-			message = "Looking for the game data MW3DS " + r.version + " needs...";
+			message = "Looking for the game data FractumMorrowind " + r.version + " needs...";
 			return;
 		}
 		download();
@@ -520,7 +520,7 @@ struct Updater
 		const Release& r = g_check.rel;
 		if (fetch.failed || fetch.req.body.find("\"packs\"") == std::string::npos)
 		{
-			block("MW3DS " + r.version + " needs game data from a newer converter (data format "
+			block("FractumMorrowind " + r.version + " needs game data from a newer converter (data format "
 				+ std::to_string(r.dataNeeded) + "; this console's is " + std::to_string(dataVersionOf(dataDir))
 				+ "), and the data's server has none yet. Convert your Morrowind again with the MW3DS Converter "
 				+ r.version + " on your PC and install the CIA it makes, or try again later.");
@@ -536,7 +536,7 @@ struct Updater
 		logf("update: downloading %s (%u bytes)", asset.url.c_str(), (unsigned)asset.size);
 		fetch.start(asset.url, false);
 		step = DOWNLOAD;
-		message = "Downloading MW3DS " + r.version + "...";
+		message = "Downloading FractumMorrowind " + r.version + "...";
 	}
 
 	void downloaded()
@@ -600,7 +600,7 @@ struct Updater
 		remove(old.c_str());
 		logf("update: %s replaced", hbPath.c_str());
 		step = DONE;
-		message = "MW3DS " + g_check.rel.version + " is installed. Start it again from the Homebrew Launcher.";
+		message = "FractumMorrowind " + g_check.rel.version + " is installed. Start it again from the Homebrew Launcher.";
 	}
 
 	// ---- the data, out of the CIA onto the card
@@ -718,7 +718,7 @@ struct Updater
 		}
 #endif
 		step = INSTALL;
-		message = "Installing MW3DS " + g_check.rel.version + "...";
+		message = "Installing FractumMorrowind " + g_check.rel.version + "...";
 	}
 
 	void install()
@@ -762,7 +762,7 @@ struct Updater
 		logf("update: %s installed", g_check.rel.version.c_str());
 		file = std::string();
 		step = DONE;
-		message = "MW3DS " + g_check.rel.version + " is installed. Press A to start it."
+		message = "FractumMorrowind " + g_check.rel.version + " is installed. Press A to start it."
 			+ std::string(newData ? " It downloads its new game data first." : "");
 	}
 
@@ -868,7 +868,7 @@ std::string selfUpdateScreen(C3D_RenderTarget* top, C3D_RenderTarget* bottom, co
 		C2D_SceneBegin(top);
 		bool art = uiArt("art/menu_morrowind.t3x", 400, 240, 0, 0, 400, 240);
 		uiRect(0, art ? 150 : 60, 400, 90, 0xB0000000);
-		uiTextCentered(200, art ? 156 : 70, 0.6f, col::header, "MW3DS " + r.version);
+		uiTextCentered(200, art ? 156 : 70, 0.6f, col::header, "FractumMorrowind " + r.version);
 		uiTextCentered(200, art ? 180 : 94, 0.45f, col::textDim, std::string("This is ") + ownVersion());
 		float p = u.progress();
 		if (p >= 0.0f)
@@ -883,15 +883,15 @@ std::string selfUpdateScreen(C3D_RenderTarget* top, C3D_RenderTarget* bottom, co
 		if (u.step == ASK)
 		{
 			uiTextBox(scroll, 6, 26, 308, 140, r.dataNeeded > dataVersionOf(dataDir)
-				? "A new version of MW3DS is out. It needs newer game data, which it downloads when it next starts "
+				? "A new version of FractumMorrowind is out. It needs newer game data, which it downloads when it next starts "
 				"(about 1.4 GB over Wi-Fi); your saves and settings stay.\n\n" + notes
-				: "A new version of MW3DS is out. Only the program is downloaded; your saves, settings and game data "
+				: "A new version of FractumMorrowind is out. Only the program is downloaded; your saves, settings and game data "
 				"stay.\n\n" + notes, 0.45f, true);
 			if (uiButton(4, 174, 100, 28, "Never") || g_answer == "never")
 			{
 				if (FILE* f = fopen(kOffPath, "w"))
 				{
-					fputs("Delete this file to have MW3DS check for updates again.\n", f);
+					fputs("Delete this file to have FractumMorrowind check for updates again.\n", f);
 					fclose(f);
 				}
 				logf("update: checks turned off");

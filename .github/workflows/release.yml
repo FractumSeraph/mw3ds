@@ -7,9 +7,9 @@ name: Release
 # tex3ds and makerom for Windows come from this repository's "build-tools" release (uploaded once by hand, pinned
 # below by checksum): devkitPro's package server has refused GitHub's runners before.
 # The fork (FractumSeraph/mw3ds) tags its releases mp-X.Y.Z. Its releases also carry what the 3DS's self-updater
-# (source/mwmp/selfupdate.cpp) downloads, the program alone, never anything of Morrowind's: mw3ds-program.cia (the CIA
-# without data), mw3ds.3dsx and update.json (the version and the data format it needs). GitHub lists each file's
-# SHA-256, which the console checks.
+# (source/mwmp/selfupdate.cpp) downloads, the program alone, never anything of Morrowind's: FractumMorrowind.cia (the
+# CIA without data, which downloads its game data at its first start), FractumMorrowind.3dsx and update.json (the
+# version and the data format it needs). GitHub lists each file's SHA-256, which the console checks.
 
 on:
   push:
@@ -85,8 +85,8 @@ jobs:
           MW3DS_VERSION: ${{ env.TAG }}
         run: |
           cp engine/mw3ds.elf engine/mw3ds.smdh .
-          python tools/build/make_cia.py --prebuilt --no-data --out build/mw3ds-program.cia
-          cp engine/mw3ds.3dsx build/mw3ds.3dsx
+          python tools/build/make_cia.py --prebuilt --no-data --out build/FractumMorrowind.cia
+          cp engine/mw3ds.3dsx build/FractumMorrowind.3dsx
           data=$(sed -n 's/.*kDataVersion = \([0-9]*\).*/\1/p' source/components/files/dataversion.hpp)
           printf '{"version": "%s", "data": %s}\n' "$TAG" "$data" > build/update.json
           cat build/update.json
@@ -111,7 +111,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view "$TAG" > /dev/null 2>&1 || gh release create "$TAG" --draft --title "$TAG" \
-            --notes "Unzip MW3DS-Converter, run MW3DS Converter.exe and pick your own Morrowind install: it makes the CIA. Nothing from Morrowind is in this download."
+          notes="Unzip MW3DS-Converter, run MW3DS Converter.exe and pick your own Morrowind install: it makes the CIA. Nothing from Morrowind is in this download."
+          title="$TAG"
+          case "$TAG" in mp-*)
+            title="FractumMorrowind ${TAG#mp-}"
+            notes="New 3DS: install FractumMorrowind.cia (FBI, or Universal-Updater). At its first start it downloads Morrowind, Tribunal and Bloodmoon (1.35 GB) over Wi-Fi from halomaps.fractumseraph.net; a download cut off carries on where it stopped. Later versions update themselves. Online play: docs/ONLINE.md. MW3DS-Converter makes a CIA from your own Morrowind install instead (the Old 3DS needs that).";;
+          esac
+          gh release view "$TAG" > /dev/null 2>&1 || gh release create "$TAG" --draft --title "$title" --notes "$notes"
           gh release upload "$TAG" --clobber build/release/MW3DS-Converter-*.zip "engine/mw3ds-${TAG}-debug.elf" \
-            build/mw3ds-program.cia build/mw3ds.3dsx build/update.json
+            build/FractumMorrowind.cia build/FractumMorrowind.3dsx build/update.json

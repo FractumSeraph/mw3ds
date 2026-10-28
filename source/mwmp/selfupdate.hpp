@@ -2,7 +2,7 @@
 
 // The self-updater (FractumSeraph/mw3ds). At the title screen, when the console is on a network, GitHub is asked for
 // the fork's latest release; a newer one is offered there. Only the program comes down, never Morrowind's data:
-// mw3ds-program.cia (the CIA's program alone) for an installed copy, mw3ds.3dsx for the Homebrew Launcher's. Each
+// FractumMorrowind.cia (the CIA's program alone) for an installed copy, FractumMorrowind.3dsx for the Homebrew Launcher's. Each
 // file is checked against the size and SHA-256 GitHub lists for it (its "digest") before anything is replaced.
 //
 // The CIA's update replaces the whole installed title, data and all, so a CIA that carries its data inside (the

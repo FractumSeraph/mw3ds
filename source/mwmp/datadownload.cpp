@@ -29,7 +29,7 @@
 
 namespace
 {
-const char* const kBase = "https://morrowind.fractumseraph.net/mw3ds/";
+const char* const kBase = "https://halomaps.fractumseraph.net/mw3ds/";
 const char* const kUrlPath = "sdmc:/3ds/mw3ds/data_url.txt";
 const char* const kAnswerPath = "sdmc:/3ds/mw3ds/data_answer.txt";
 const char* const kSdData = "sdmc:/3ds/mw3ds/data";
@@ -111,8 +111,8 @@ bool readIndex(const std::string& text, Index& x, std::string& err)
 	cJSON_Delete(j);
 	if (x.format != 1 || x.packs.empty())
 	{
-		err = x.format != 1 ? "The server's data is packed in a way this MW3DS can't read (pack format "
-			+ std::to_string(x.format) + "). Update MW3DS." : "The server's index.json lists no packs.";
+		err = x.format != 1 ? "The server's data is packed in a way this version of FractumMorrowind can't read (pack format "
+			+ std::to_string(x.format) + "). Update FractumMorrowind." : "The server's index.json lists no packs.";
 		return false;
 	}
 	Sha256 s;
@@ -330,7 +330,7 @@ struct Downloader
 			(unsigned)idx.packs.size());
 		if (idx.data != kDataVersion)
 		{
-			message = "The server has game data of format " + std::to_string(idx.data) + ", and this MW3DS needs format "
+			message = "The server has game data of format " + std::to_string(idx.data) + ", and this version of FractumMorrowind needs format "
 				+ std::to_string(kDataVersion) + ".";
 			step = BLOCKED;
 			return;
@@ -622,7 +622,7 @@ bool dataDownloadScreen(C3D_RenderTarget* top, C3D_RenderTarget* bottom, const s
 		C3D_DepthTest(false, GPU_ALWAYS, GPU_WRITE_COLOR);
 		clearTop(top, 0x000000FF);
 		C2D_SceneBegin(top);
-		uiTextCentered(200, 60, 0.9f, col::header, "MW3DS");
+		uiTextCentered(200, 60, 0.9f, col::header, "FractumMorrowind");
 		uiTextCentered(200, 96, 0.5f, col::textDim, "Morrowind's game data");
 		double total = d.idx.bytes > 0 ? d.idx.bytes : 1.0;
 		if (d.step == DOWNLOAD || d.step == PLACE || (d.step == ASK && d.next))
@@ -649,8 +649,8 @@ bool dataDownloadScreen(C3D_RenderTarget* top, C3D_RenderTarget* bottom, const s
 		switch (d.step)
 		{
 		case NO_WIFI:
-			uiTextBox(scroll, 6, 26, 308, 140, d.need + "\n\nMW3DS downloads it over Wi-Fi, and the console isn't on a "
-				"network. Turn Wi-Fi on (or move nearer the router), then try again.\n\nOr install the CIA the MW3DS "
+			uiTextBox(scroll, 6, 26, 308, 140, d.need + "\n\nFractumMorrowind downloads it over Wi-Fi, and the console isn't on a "
+				"network. Turn Wi-Fi on (or move nearer the router), then try again.\n\nOr install the CIA the FractumMorrowind "
 				"Converter makes from your own Morrowind on a PC: it carries the data inside.", 0.45f, true);
 			if (uiButton(4, 208, 100, 28, d.hasOld ? "Not now" : "Quit") || (down & KEY_B) || answer == "no")
 				result = d.hasOld ? 2 : 0;

@@ -78,7 +78,7 @@ void drawLoading(C3D_RenderTarget* top, C3D_RenderTarget* bottom, const char* te
 	}
 	C2D_TargetClear(bottom, C2D_Color32(10, 8, 6, 255));
 	C2D_SceneBegin(bottom);
-	uiTextCentered(160, 40, 0.5f, col::textDim, "MW3DS");
+	uiTextCentered(160, 40, 0.5f, col::textDim, "FractumMorrowind");
 	// What the loader is doing (its last log line), so a hang shows where it stopped
 	if (seconds >= 0.0f)
 	{
@@ -423,7 +423,7 @@ std::string titleScreen(C3D_RenderTarget* top, C3D_RenderTarget* bottom, const c
 		// The online mode (FractumSeraph/mw3ds, mwgui/onlinescreen.cpp): play on an openmw-web server
 		if (uiButton(232, 1, 86, 18, "Online") || (down & KEY_Y))
 			result = "online";
-		// A newer MW3DS (the self-updater): its screen asks first
+		// A newer FractumMorrowind (the self-updater): its screen asks first
 		const std::string& offer = selfUpdateOffer();
 		if (!offer.empty() && (uiButton(120, 1, 108, 18, "Update " + offer) || (down & KEY_SELECT)))
 			result = "update";
@@ -463,7 +463,7 @@ int dataMaxTex(const char* dataDir)
 void wrongConsoleScreen(C3D_RenderTarget* top, C3D_RenderTarget* bottom, int maxTex)
 {
 	static const char* kLines[] = {
-		"This copy of MW3DS was made for the New 3DS.",
+		"This copy of FractumMorrowind was made for the New 3DS.",
 		"",
 		"Its textures need more memory than an Old 3DS",
 		"or 2DS has, so the game would stop on a black",
@@ -500,7 +500,7 @@ void wrongConsoleScreen(C3D_RenderTarget* top, C3D_RenderTarget* bottom, int max
 			uiTextCentered(200, 64 + 15 * i, 0.5f, i >= 8 ? col::header : col::text, kLines[i]);
 		C2D_TargetClear(bottom, C2D_Color32(10, 8, 6, 255));
 		C2D_SceneBegin(bottom);
-		uiTextCentered(160, 40, 0.5f, col::textDim, "MW3DS");
+		uiTextCentered(160, 40, 0.5f, col::textDim, "FractumMorrowind");
 		uiTextCentered(160, 110, 0.5f, col::text, "Press START to quit");
 		uiTextCentered(160, 200, 0.4f, col::textDim, detail);
 		C3D_FrameEnd(0);
