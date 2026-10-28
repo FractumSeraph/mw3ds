@@ -145,8 +145,7 @@ swaps it in beside the old one. Each file is checked against the size and SHA-25
 changes nothing. The program-only CIA reads its data from `sdmc:/3ds/mw3ds/data`, so the first update of a CIA that
 carries its data inside copies that data out to the SD card first (once; 1.4 GB for the whole island with Bloodmoon,
 some minutes; the SD card needs that much free). From then on an update is the program alone. Installed, **Start it**
-restarts into the new version. The HOME menu's banner then plays the plain tune (the release can't carry Morrowind's
-music).
+restarts into the new version.
 
 Data and program go together: the converter writes `data_version.txt` (the format, `kDataVersion` in
 `source/components/files/dataversion.hpp`), and a release's `update.json` says which it needs. When a release needs
@@ -172,6 +171,11 @@ it was in. With every pack in, `data.part` becomes `sdmc:/3ds/mw3ds/data` (older
 Over a 3DS's Wi-Fi the whole island takes some time (the emulator managed about 0.5 MB/s): keep the console open and
 charging.
 
+**From a PC instead:** the same data is on the seedbox as one zip,
+`https://halomaps.fractumseraph.net/mw3ds/FractumMorrowind-data-v1.zip` (1.4 GB, stored, holding `3ds/mw3ds/data`).
+Unzipped to the SD card's root with a card reader, it is found at the start (`data_version.txt` says its format) and
+nothing downloads. A new data format gets its own zip (`-data-v2`).
+
 The hosted data is the New 3DS's (textures up to 256 texels); an Old 3DS is told to convert its own on a PC.
 `sdmc:/3ds/mw3ds/data_url.txt` points the screen at another `index.json` (a test server's); `data_answer.txt` ("yes"
 or "no") answers it for a scripted run.
@@ -181,7 +185,8 @@ and the packs (`NNN-<sha256>.mwp`; the pack format is in the script). Copy the f
 `/mw3ds/data-v1/index.json` is served beside them (on the seedbox: `~/www/halomaps.fractumseraph.net/public_html/mw3ds/`,
 the packs first and `index.json` last, so no console sees an index whose packs aren't there yet): the packs may be cached for good (their names change with their
 content), `index.json` never. A new data format is a new folder (`data-v2`), so consoles on the older program keep
-theirs. The data is Morrowind's, converted: host it only where you may.
+theirs. For the zip, put the data folder under `3ds/mw3ds/data` in a zip without compression (the files are already
+compressed).
 
 ### Building
 

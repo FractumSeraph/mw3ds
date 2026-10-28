@@ -547,7 +547,7 @@ std::string dataDownloadNeed(const char* dataDir)
 		return "This console has no game data yet.";
 	int have = dataVersionOf(dataDir);
 	if (strncmp(dataDir, "romfs:", 6) != 0 && have < kDataVersion)
-		return "The game data on the SD card is format " + std::to_string(have) + ", older than this MW3DS's ("
+		return "The game data on the SD card is format " + std::to_string(have) + ", older than this FractumMorrowind's ("
 			+ std::to_string(kDataVersion) + "): online, other players' things and people won't line up with yours.";
 	return "";
 }

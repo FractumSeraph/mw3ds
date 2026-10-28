@@ -15,6 +15,12 @@ your browser on a PC, on the same server, with the same players.
    another CIA installer) and start it from the HOME menu.
 2. At its first start, with Wi-Fi on, it downloads the game data: Morrowind, Tribunal and Bloodmoon, about 1.4 GB. Keep
    the console open and charging. A download that gets cut off carries on where it stopped.
+
+   **Faster, with an SD card reader:** download
+   [FractumMorrowind-data-v1.zip](https://halomaps.fractumseraph.net/mw3ds/FractumMorrowind-data-v1.zip) on a PC and
+   unzip it to the root of the 3DS's SD card (it holds `3ds/mw3ds/data`). The game finds the data there and skips the
+   download. (Morrowind's own game files can't be used as they are: the 3DS needs them converted. To convert your own
+   install instead, see [the converter](#mw3ds-the-engine) below; the CIA it makes carries its data.)
 3. To play online, make an account at [morrowind.fractumseraph.net](https://morrowind.fractumseraph.net) with the
    invite code `fractumseraph.net`, then press **Online** on the 3DS's title screen and sign in with that account. Play
    offline whenever you have no Wi-Fi: your offline saves are kept apart from the online world.
@@ -28,8 +34,7 @@ MW3DS rather than over it. It adds four things to MW3DS, described in [docs/ONLI
 - **Bloodmoon:** `python tools/build/build_cia.py --bloodmoon` converts Morrowind, Tribunal and Bloodmoon, and the
   engine runs Bloodmoon's script functions, the werewolf's stats included.
 - **Downloads its game data:** the CIA carries nothing of Morrowind's. At its first start it downloads the converted
-  data from halomaps.fractumseraph.net (hosted by FractumSeraph, who has permission to distribute it), checked pack by
-  pack. See [The game data download](docs/ONLINE.md#the-game-data-download).
+  data from halomaps.fractumseraph.net, checked pack by pack, unless the SD card already has it. See [The game data download](docs/ONLINE.md#the-game-data-download).
 - **Updates itself:** at the title screen, with Wi-Fi on, it asks GitHub for the latest release and offers it
   (**Update** beside **Online**). Only the program downloads, checked by SHA-256; your saves and game data stay. See
   [Updating](docs/ONLINE.md#updating).
@@ -54,8 +59,7 @@ shows a screen that says so and quits. It is under development: expect rough edg
 > [!IMPORTANT]
 > **For testing and research only. You need your own legally obtained copy of Morrowind.**
 > This repository contains no Morrowind content. The tools convert the game files from your own install, on your own
-> machine. The converted data and any build made from it contain copyrighted material: keep them to yourself and never
-> share or upload them. MW3DS is an unofficial fan project, not affiliated with or endorsed by Bethesda Softworks or
+> machine. MW3DS is an unofficial fan project, not affiliated with or endorsed by Bethesda Softworks or
 > ZeniMax Media.
 
 ## The converter (Windows, no setup)

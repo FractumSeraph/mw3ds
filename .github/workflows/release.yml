@@ -27,6 +27,8 @@ env:
   TAG: ${{ inputs.tag || github.ref_name }}
   BUILD_TOOLS_URL: https://github.com/3ds-conspiracy/mw3ds/releases/download/build-tools/build-tools-windows.zip
   BUILD_TOOLS_SHA256: "08ebdc200afe09076029860bd23e43f39168f0dbd698b5138fb1c4bd5becdbe8"
+  BANNER_TUNE_URL: https://halomaps.fractumseraph.net/mw3ds/banner/morrowind-title-3s.wav
+  BANNER_TUNE_SHA256: "1b72c1e855483dbec4fbb4480f4333b2234ba118cce89eb731d15fb05e60bd41"
 
 jobs:
   engine:
@@ -84,6 +86,14 @@ jobs:
           MW3DS_CTR_TOOLS_DIR: ${{ github.workspace }}\build-tools
           MW3DS_VERSION: ${{ env.TAG }}
         run: |
+          # the HOME menu banner plays the start of Morrowind's title music: a clip kept beside the game data on the
+          # seedbox (never in this repository), checked by its SHA-256
+          if curl -fsSL -o build-tools/banner-tune.wav "$BANNER_TUNE_URL" \
+            && echo "$BANNER_TUNE_SHA256  build-tools/banner-tune.wav" | sha256sum -c -; then
+            export MW3DS_BANNER_TUNE="$PWD/build-tools/banner-tune.wav"
+          else
+            echo "::warning::no banner tune: the CIA's banner plays its own"
+          fi
           cp engine/mw3ds.elf engine/mw3ds.smdh .
           python tools/build/make_cia.py --prebuilt --no-data --out build/FractumMorrowind.cia
           cp engine/mw3ds.3dsx build/FractumMorrowind.3dsx
