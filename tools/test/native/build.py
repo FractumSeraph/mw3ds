@@ -134,7 +134,8 @@ def main():
         print("\n".join(errors))
         sys.exit(1)
     exe = BUILD / "mw3ds-native.exe"
-    r = subprocess.run(zig("c++", *TARGET, *[o.as_posix() for _, o, _ in jobs], *(["-lkernel32"] if MEM else []), "-lws2_32", "-o",
+    r = subprocess.run(zig("c++", *TARGET, *[o.as_posix() for _, o, _ in jobs], *(["-lkernel32"] if MEM else []),
+                           *(["-lws2_32"] if MEM or os.name == "nt" else []), "-o",  # (online's sockets: Windows only)
                            exe.as_posix()), capture_output=True, text=True)
     if r.returncode:
         print(r.stderr[:6000])
