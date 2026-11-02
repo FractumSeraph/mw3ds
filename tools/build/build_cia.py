@@ -14,10 +14,10 @@
     python tools/build/build_cia.py --tribunal      with the Tribunal add-on (Tribunal.esm after Morrowind.esm): data in
                                                     out/data-tribunal (out/o3ds-tribunal), build/mw3ds-tribunal.cia
                                                     (mw3ds-o3ds-tribunal.cia); the same program runs both
-    python tools/build/build_cia.py --bloodmoon     with the Bloodmoon add-on too (Morrowind, Tribunal and Bloodmoon, the
-                                                    load order openmw-web's multiplayer servers use; FractumSeraph/mw3ds):
-                                                    data in out/data-bloodmoon, build/mw3ds-bloodmoon.cia; implies
-                                                    --tribunal
+    python tools/build/build_cia.py --bloodmoon     with the Bloodmoon add-on (Bloodmoon.esm after Morrowind.esm, and
+                                                    after Tribunal.esm with --tribunal too): out/data-bloodmoon,
+                                                    build/mw3ds-bloodmoon.cia; with both out/data-tribunal-bloodmoon,
+                                                    build/mw3ds-tribunal-bloodmoon.cia (the o3ds ones to match)
 Needs .env filled in (see .env.example): MW3DS_MORROWIND_DIR, MW3DS_CTR_TOOLS_DIR, and on Windows MW3DS_MSYS2_DIR
 (not with --prebuilt).
 """
@@ -32,7 +32,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import mwtools
-from make_cia import build, pack
+from make_cia import build, names, pack
 
 ROOT = mwtools.ROOT
 
@@ -71,26 +71,26 @@ def fetch_mod_zips():
             raise SystemExit(f"could not download {url} ({e}): check the network (a firewall or antivirus may block "
                              f"Python), or build without the mods")
         shutil.rmtree(dest, ignore_errors=True)
-        tmp = dest.with_name(dest.name + ".part")
-        shutil.rmtree(tmp, ignore_errors=True)
         # GitHub's zip holds one folder, <repository>-<commit>: it is left out here rather than extracted and moved,
         # since its 40-letter commit would take the mod's deepest files past Windows' 260-letter path limit in a
-        # work folder only a little deep (Downloads, OneDrive's Desktop)
+        # work folder only a little deep (Downloads, OneDrive's Desktop). It is extracted in place, not into a
+        # folder renamed afterwards: a virus scanner holding a file makes that rename fail with "Access is denied".
+        # The stamp is written last, so a run stopped halfway is redone.
         try:
             with zipfile.ZipFile(archive) as z:
                 for info in z.infolist():
                     rel = Path(*Path(info.filename).parts[1:])
                     if info.is_dir() or not rel.parts or ".." in rel.parts:
                         continue
-                    out = tmp / rel
+                    out = dest / rel
                     out.parent.mkdir(parents=True, exist_ok=True)
                     with z.open(info) as src, open(out, "wb") as f:
                         shutil.copyfileobj(src, f, 1 << 20)
         except (OSError, zipfile.BadZipFile) as e:
-            shutil.rmtree(tmp, ignore_errors=True)
+            shutil.rmtree(dest, ignore_errors=True)
             raise SystemExit(f"could not unpack {archive.name} into {dest.parent} ({e}): a shorter work folder "
-                             f"(such as C:\\MW3DS) helps if the path was too long")
-        tmp.replace(dest)
+                             f"(such as C:\\MW3DS) helps if the path was too long, and a virus scanner may be "
+                             f"holding the files (exclude the work folder from it)")
         archive.unlink()
         stamp.write_text(pin["commit"] + "\n")
 
@@ -122,7 +122,6 @@ def run(small=False, skip_convert=False, old3ds=False, mods=False, fetch_only=Fa
         tribunal=False, bloodmoon=False):
     os.chdir(ROOT)
     mwtools.load_env()
-    tribunal = tribunal or bloodmoon               # (Bloodmoon comes with Tribunal, as in the Game of the Year edition)
     if tribunal:
         os.environ["MW3DS_TRIBUNAL"] = "1"         # (the converters read it: tools/convert/mwfiles.py)
     if bloodmoon:
@@ -144,17 +143,12 @@ def run(small=False, skip_convert=False, old3ds=False, mods=False, fetch_only=Fa
     if not (ctr / ("makerom.exe" if mwtools.IS_WINDOWS else "makerom")).exists():
         raise SystemExit(f"makerom not found in {ctr}")
 
-    data = "out/o3ds" if old3ds else "out/data"
-    cia = "build/mw3ds-o3ds.cia" if old3ds else "build/mw3ds.cia"
-    if tribunal:
-        suffix = "-bloodmoon" if bloodmoon else "-tribunal"
-        data += suffix
-        cia = cia[:-4] + suffix + ".cia"
-    if tribunal or old3ds:
+    data, cia = names(old3ds, tribunal, bloodmoon)
+    if tribunal or bloodmoon or old3ds:
         os.environ["MW3DS_OUT"] = data
     convert_args = [] if small else ["--world"]
     if old3ds:
-        convert_args += ["--max-tex", "128", "--no-mips"]
+        convert_args += ["--max-tex", "128", "--mips", "few"]
 
     # A CIA left by an earlier failed build must not be mistaken for this one
     (ROOT / cia).unlink(missing_ok=True)

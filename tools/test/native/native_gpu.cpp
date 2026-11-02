@@ -6,7 +6,7 @@
 // What it covers: .t3x textures (none / LZ10 / LZ11 / Huffman / RLE, the PICA's tiled formats and ETC1 / ETC1A4),
 // render targets (the two screens, the local map texture), mwrender/renderingmanager.cpp's vertex shader (shaders/cell.v.pica) in C++,
 // clipping, the texture combiners mwrender/renderingmanager.cpp sets, alpha test, depth test, blending, culling, scissor, and
-// citro2d's rectangles, triangles and images. Not covered: mipmaps (level 0 only), the system font (glyphs are
+// citro2d's rectangles, triangles and images, mipmaps with MW3DS_NATIVE_MIPS=1 (a level for each triangle: see mipLevel). Not covered: the system font (glyphs are
 // grey blocks; the game draws its own Morrowind font once the theme is loaded), stereo (left eye only).
 #include <3ds.h>
 #include <citro3d.h>
@@ -93,6 +93,7 @@ struct TexImage
 	int w = 0, h = 0;
 	bool valid = false;
 	std::vector<u32> px;
+	std::vector<std::vector<u32>> mips;     // the smaller copies, level 1 on (each half the last on both sides)
 	C3D_RenderTarget* target = nullptr;     // a render target's texture reads its colour buffer
 };
 
@@ -150,22 +151,17 @@ static void etc1Block(u64 v, u64 alpha, bool hasAlpha, u32 out[4][4])
 		}
 }
 
-// Level 0 of a PICA texture: 8 x 8 tiles in rows, texels in Morton order inside a tile (ETC: four 4 x 4 blocks).
+// One level of a PICA texture: 8 x 8 tiles in rows, texels in Morton order inside a tile (ETC: four 4 x 4 blocks).
 // The first row in memory is the top of the picture (v = 1).
-static void decodeTex(const C3D_Tex* t, TexImage& img)
+static void decodeLevel(const u8* d, int w, int h, int fmt, std::vector<u32>& px)
 {
-	int w = t->width, h = t->height;
-	img.w = w;
-	img.h = h;
 	{
 		OutsideHeap outside;
-		img.px.assign(w * h, 0xFFFF00FF);
+		px.assign(w * h, 0xFFFF00FF);
 	}
-	const u8* d = (const u8*)t->data;
 	if (!d || w < 8 || h < 8)
 		return;
-	auto put = [&](int x, int row, u32 c) { img.px[row * w + x] = c; };
-	int fmt = t->fmt;
+	auto put = [&](int x, int row, u32 c) { px[row * w + x] = c; };
 	if (fmt == GPU_ETC1 || fmt == GPU_ETC1A4)
 	{
 		bool hasAlpha = fmt == GPU_ETC1A4;
@@ -226,6 +222,27 @@ static void decodeTex(const C3D_Tex* t, TexImage& img)
 		}
 }
 
+// The levels a texture has (tex3ds writes them one after the other, down to 8 texels a side), as many as its maxLevel
+// says: the engine may use fewer than the file has (an Atlas sheet's, mwrender/objects.cpp loadTexture)
+static void decodeTex(const C3D_Tex* t, TexImage& img)
+{
+	img.w = t->width;
+	img.h = t->height;
+	const u8* d = (const u8*)t->data;
+	decodeLevel(d, img.w, img.h, t->fmt, img.px);
+	img.mips.clear();
+	size_t at = t->size;
+	for (int k = 1; k <= t->maxLevel && d; k++)
+	{
+		int w = t->width >> k, h = t->height >> k;
+		if (w < 8 || h < 8)
+			break;
+		img.mips.emplace_back();
+		decodeLevel(d + at, w, h, t->fmt, img.mips.back());
+		at += (size_t)w * h * texBits(t->fmt) / 8;
+	}
+}
+
 static TexImage* texImage(C3D_Tex* t)
 {
 	if (!t)
@@ -254,9 +271,14 @@ static inline V4 unpack(u32 c)
 	return { (c & 255) / 255.0f, ((c >> 8) & 255) / 255.0f, ((c >> 16) & 255) / 255.0f, (c >> 24) / 255.0f };
 }
 
-static inline u32 texel(const TexImage* img, const C3D_Tex* t, int x, int y)
+static inline u32 texel(const TexImage* img, const C3D_Tex* t, int x, int y, int level = 0)
 {
 	int w = img->target ? img->target->w : img->w, h = img->target ? img->target->h : img->h;
+	if (level > 0)
+	{
+		w >>= level;
+		h >>= level;
+	}
 	if (t->wrapS == GPU_REPEAT)
 		x = ((x % w) + w) % w;
 	else
@@ -265,10 +287,28 @@ static inline u32 texel(const TexImage* img, const C3D_Tex* t, int x, int y)
 		y = ((y % h) + h) % h;
 	else
 		y = std::clamp(y, 0, h - 1);
-	return img->target ? img->target->color[y * w + x] : img->px[y * w + x];
+	return img->target ? img->target->color[y * w + x] : level > 0 ? img->mips[level - 1][y * w + x] : img->px[y * w + x];
 }
 
-static V4 sample(C3D_Tex* t, float u, float v)
+static V4 sampleLevel(TexImage* img, C3D_Tex* t, float u, float v, int level)
+{
+	int w = img->target ? img->target->w : img->w, h = img->target ? img->target->h : img->h;
+	w >>= level;
+	h >>= level;
+	float fx = u * w - 0.5f, fy = (1.0f - v) * h - 0.5f;
+	if (t->filter != GPU_LINEAR)
+		return unpack(texel(img, t, (int)floorf(fx + 0.5f), (int)floorf(fy + 0.5f), level));
+	int x0 = (int)floorf(fx), y0 = (int)floorf(fy);
+	float ax = fx - x0, ay = fy - y0;
+	V4 a = unpack(texel(img, t, x0, y0, level)), b = unpack(texel(img, t, x0 + 1, y0, level));
+	V4 c = unpack(texel(img, t, x0, y0 + 1, level)), d = unpack(texel(img, t, x0 + 1, y0 + 1, level));
+	auto lerp = [](float p, float q, float k) { return p + (q - p) * k; };
+	return { lerp(lerp(a.r, b.r, ax), lerp(c.r, d.r, ax), ay), lerp(lerp(a.g, b.g, ax), lerp(c.g, d.g, ax), ay),
+		lerp(lerp(a.b, b.b, ax), lerp(c.b, d.b, ax), ay), lerp(lerp(a.a, b.a, ax), lerp(c.a, d.a, ax), ay) };
+}
+
+// lod: the level wanted (0 the full picture), between two levels a blend of both (the engine's GPU_LINEAR mipmap filter)
+static V4 sample(C3D_Tex* t, float u, float v, float lod = 0.0f)
 {
 	TexImage* img = texImage(t);
 	if (!img)
@@ -276,16 +316,32 @@ static V4 sample(C3D_Tex* t, float u, float v)
 	int w = img->target ? img->target->w : img->w, h = img->target ? img->target->h : img->h;
 	if (w <= 0 || h <= 0)
 		return { 1, 1, 1, 1 };
-	float fx = u * w - 0.5f, fy = (1.0f - v) * h - 0.5f;
-	if (t->filter != GPU_LINEAR)
-		return unpack(texel(img, t, (int)floorf(fx + 0.5f), (int)floorf(fy + 0.5f)));
-	int x0 = (int)floorf(fx), y0 = (int)floorf(fy);
-	float ax = fx - x0, ay = fy - y0;
-	V4 a = unpack(texel(img, t, x0, y0)), b = unpack(texel(img, t, x0 + 1, y0));
-	V4 c = unpack(texel(img, t, x0, y0 + 1)), d = unpack(texel(img, t, x0 + 1, y0 + 1));
-	auto lerp = [](float p, float q, float k) { return p + (q - p) * k; };
-	return { lerp(lerp(a.r, b.r, ax), lerp(c.r, d.r, ax), ay), lerp(lerp(a.g, b.g, ax), lerp(c.g, d.g, ax), ay),
-		lerp(lerp(a.b, b.b, ax), lerp(c.b, d.b, ax), ay), lerp(lerp(a.a, b.a, ax), lerp(c.a, d.a, ax), ay) };
+	int top = img->target ? 0 : (int)img->mips.size();
+	if (lod <= 0.0f || top == 0)
+		return sampleLevel(img, t, u, v, 0);
+	if (lod >= (float)top)
+		return sampleLevel(img, t, u, v, top);
+	int l0 = (int)lod;
+	float k = lod - l0;
+	V4 a = sampleLevel(img, t, u, v, l0), b = sampleLevel(img, t, u, v, l0 + 1);
+	return { a.r + (b.r - a.r) * k, a.g + (b.g - a.g) * k, a.b + (b.b - a.b) * k, a.a + (b.a - a.a) * k };
+}
+
+// The level a triangle's texture is read at, one for the whole triangle: the console showed a face split along its
+// diagonal between two levels (the Redoran steps, Fort Frostmoth's pillars: squares and triangles), as a level picked
+// for each triangle does. From the texels one pixel step covers (texelArea: that step squared, screenArea 1), plus the
+// texture's bias (C3D_TexSetLodBias)
+static float mipLevel(const C3D_Tex* t, float texelArea, float screenArea)
+{
+	// (only with MW3DS_NATIVE_MIPS=1: the rule is a guess at the console's, not yet matched to its shots; without it the
+	// full picture, as the shots the tests judge were taken with)
+	static const bool off = !getenv("MW3DS_NATIVE_MIPS") || strcmp(getenv("MW3DS_NATIVE_MIPS"), "1") != 0;
+	if (off || !t || t->maxLevel == 0 || screenArea <= 0.0f || texelArea <= 0.0f)
+		return 0.0f;
+	int b = t->lodBias & 0x1FFF;
+	if (b & 0x1000)
+		b -= 0x2000;
+	return 0.5f * log2f(texelArea / screenArea) + b / 256.0f;
 }
 
 // ---- .t3x: header, subtextures, then the texture data behind a GBA-style compression header
@@ -440,7 +496,20 @@ static Tex3DS_Texture importT3x(const u8* d, size_t n, C3D_Tex* tex)
 		return nullptr;
 	}
 	tex->maxLevel = mips;
-	memcpy(tex->data, data.data(), std::min<size_t>(data.size(), tex->size));
+	// (the smaller copies after the full picture: room for them as on the console, C3D_TexInitWithParams with maxLevel)
+	size_t all = 0;
+	for (int k = 0; k <= mips; k++)
+		all += (size_t)(tex->width >> k) * (tex->height >> k) * texBits(fmt) / 8;
+	if (all > tex->size)
+	{
+		OutsideHeap outside;
+		void* more = realloc(tex->data, all);
+		if (more)
+			tex->data = more;
+		else
+			tex->maxLevel = 0;
+	}
+	memcpy(tex->data, data.data(), std::min<size_t>(data.size(), tex->maxLevel ? all : tex->size));
 	return (Tex3DS_Texture)t;
 }
 
@@ -860,11 +929,20 @@ int AttrInfo_AddLoader(C3D_AttrInfo* info, int, int format, int count)
 	return info->count++;
 }
 C3D_BufInfo* C3D_GetBufInfo() { return &s_buf; }
-void BufInfo_Init(C3D_BufInfo* info) { info->data = nullptr; info->stride = 0; }
-int BufInfo_Add(C3D_BufInfo* info, const void* data, ptrdiff_t stride, int, u64)
+void BufInfo_Init(C3D_BufInfo* info) { info->data = nullptr; info->stride = 0; info->data2 = nullptr; info->stride2 = 0; info->split = 8; }
+// The game's layouts: one buffer of every attribute in order, or (a shared model's batch) a second one holding the
+// attributes after the first one's
+int BufInfo_Add(C3D_BufInfo* info, const void* data, ptrdiff_t stride, int attribCount, u64)
 {
+	if (info->data)
+	{
+		info->data2 = data;
+		info->stride2 = (int)stride;
+		return 1;
+	}
 	info->data = data;
 	info->stride = (int)stride;
+	info->split = attribCount;
 	return 0;
 }
 
@@ -1010,12 +1088,17 @@ static void readAttr(const u8* v, int fmt, int n, float out[4])
 
 static int attrSize(int fmt) { return fmt == GPU_FLOAT ? 4 : fmt == GPU_SHORT ? 2 : 1; }
 
-static ClipV vertexShader(const u8* v)
+static ClipV vertexShader(const u8* v, const u8* v2 = nullptr)
 {
 	float in[5][4] = {};
 	int off = 0;
 	for (int i = 0; i < s_attr.count && i < 5; i++)
 	{
+		if (v2 && i == s_buf.split)
+		{
+			v = v2;          // (the second buffer's attributes)
+			off = 0;
+		}
 		readAttr(v + off, s_attr.format[i], s_attr.elements[i], in[i]);
 		off += attrSize(s_attr.format[i]) * s_attr.elements[i];
 	}
@@ -1162,6 +1245,17 @@ static bool usesSource(int s)
 	return false;
 }
 
+// The console's GPU time for the frame just sent, priced from its work (mwrender/renderingmanager.cpp gpuModelMs) when a
+// test asks for it (GPUMODEL:on: the dynamic view then answers a heavy view as the console's would); else 0, as the PC
+// build always had
+extern bool g_testGpuModel;
+extern u32 g_lastDraws, g_lastTris;
+float gpuModelMs(u32 draws, u32 tris);
+float C3D_GetDrawingTime()
+{
+	return g_testGpuModel ? gpuModelMs(g_lastDraws, g_lastTris) : 0.0f;
+}
+
 void C3D_DrawElements(int, int count, int type, const void* indices)
 {
 	unifStagedTake();
@@ -1176,13 +1270,15 @@ void C3D_DrawElements(int, int count, int type, const void* indices)
 	static std::vector<ClipV> xf;
 	xf.resize(maxIndex + 1);
 	for (int i = 0; i <= maxIndex; i++)
-		xf[i] = vertexShader(verts + (size_t)i * s_buf.stride);
+		xf[i] = vertexShader(verts + (size_t)i * s_buf.stride,
+			s_buf.data2 ? (const u8*)s_buf.data2 + (size_t)i * s_buf.stride2 : nullptr);
 
 	bool need0 = usesSource(GPU_TEXTURE0) && s_units[0], need1 = usesSource(GPU_TEXTURE1) && s_units[1];
 	V4 consts[6];
 	for (int i = 0; i < 6; i++)
 		consts[i] = unpack(s_env[i].color);
 	bool solidDraw = s_depthOn && s_depthWrite && !s_alphaTestOn;
+	float lod0 = 0.0f, lod1 = 0.0f;       // the level each texture is read at, for the polygon being drawn (mipLevel)
 	auto frag = [&](int x, int y, float z, const float* a) {
 		size_t at = (size_t)y * t->w + x;
 		if (solidDraw)
@@ -1190,8 +1286,8 @@ void C3D_DrawElements(int, int count, int type, const void* indices)
 		if (s_depthOn && !compare(s_depthFunc, z, t->depth[at]))
 			return;
 		V4 prim = { a[0], a[1], a[2], a[3] };
-		V4 tex0 = need0 ? sample(s_units[0], a[4], a[5]) : V4{ 1, 1, 1, 1 };
-		V4 tex1 = need1 ? sample(s_units[1], a[6], a[7]) : V4{ 1, 1, 1, 1 };
+		V4 tex0 = need0 ? sample(s_units[0], a[4], a[5], lod0) : V4{ 1, 1, 1, 1 };
+		V4 tex1 = need1 ? sample(s_units[1], a[6], a[7], lod1) : V4{ 1, 1, 1, 1 };
 		V4 prev = { 0, 0, 0, 0 };
 		for (int st = 0; st < 6; st++)
 		{
@@ -1258,6 +1354,28 @@ void C3D_DrawElements(int, int count, int type, const void* indices)
 		float area = (sv[1].x - sv[0].x) * (sv[2].y - sv[0].y) - (sv[2].x - sv[0].x) * (sv[1].y - sv[0].y);
 		if (s_cull == GPU_CULL_BACK_CCW && area > 0)
 			continue;
+		// (the polygon's areas on the screen and in each texture, over its fan: the vertices' own texture coordinates)
+		auto levelFor = [&](C3D_Tex* tex, int ua) {
+			if (!tex || tex->maxLevel == 0)
+				return 0.0f;
+			// (the polygon's first triangle: its texels per pixel along the screen's x and y, the steeper of the two,
+			// as GPUs pick a level by the texture's longest step between pixels, not its average)
+			float sx1 = sv[1].x - sv[0].x, sy1 = sv[1].y - sv[0].y, sx2 = sv[2].x - sv[0].x, sy2 = sv[2].y - sv[0].y;
+			float det = sx1 * sy2 - sx2 * sy1;
+			if (fabsf(det) < 1e-6f)
+				return 0.0f;
+			const float* p0 = clipped[0].a + ua;
+			const float* p1 = clipped[1].a + ua;
+			const float* p2 = clipped[2].a + ua;
+			float u1 = (p1[0] - p0[0]) * tex->width, v1 = (p1[1] - p0[1]) * tex->height;
+			float u2 = (p2[0] - p0[0]) * tex->width, v2 = (p2[1] - p0[1]) * tex->height;
+			float dudx = (u1 * sy2 - u2 * sy1) / det, dvdx = (v1 * sy2 - v2 * sy1) / det;
+			float dudy = (u2 * sx1 - u1 * sx2) / det, dvdy = (v2 * sx1 - v1 * sx2) / det;
+			float step = fmaxf(dudx * dudx + dvdx * dvdx, dudy * dudy + dvdy * dvdy);
+			return mipLevel(tex, step, 1.0f);
+		};
+		lod0 = need0 ? levelFor(s_units[0], 4) : 0.0f;
+		lod1 = need1 ? levelFor(s_units[1], 6) : 0.0f;
 		for (int k = 1; k + 1 < n; k++)
 			rasterTri(t, sv[0], sv[k], sv[k + 1], kAttrs, true, frag);
 	}
@@ -1541,26 +1659,31 @@ void rendererDrawMesh_sw(const ActorMesh& m, const C3D_Mtx* model, C3D_Tex* tex)
 void rendererDrawMeshGlow_sw(const ActorMesh& m, const C3D_Mtx* model, C3D_Tex* tex, u32 glow);
 void rendererDrawActor_sw(Actor& a, const std::vector<C3D_Tex*>& textures, bool viewModel);
 void rendererDrawGlow_sw(const float pos[3], float size, u32 rgba);
-bool rendererDrawLocalMap_sw(World& w, float minX, float minY, float size, float topZ, float depth, bool opaqueWater);
+bool rendererDrawLocalMap_sw(World& w, float minX, float minY, float size, float topZ, float depth, bool opaqueWater,
+	bool whole, bool mapLight);
 C3D_Tex* rendererLocalMap_sw();
+
+// (GPUMODEL:on: every frame's world and actors go through the renderer, without a pixel drawn, so their draws and
+// triangles are counted and priced)
+static bool drawOrPrice() { return drawFrame() || g_testGpuModel; }
 
 int rendererDrawWorld(World& w, const RenderCamera& cam, float eyeShift, bool secondEye, float fogScale)
 {
-	return drawFrame() ? rendererDrawWorld_sw(w, cam, eyeShift, secondEye, fogScale) : 0;
+	return drawOrPrice() ? rendererDrawWorld_sw(w, cam, eyeShift, secondEye, fogScale) : 0;
 }
 void rendererDrawMesh(const ActorMesh& m, const C3D_Mtx* model, C3D_Tex* tex)
 {
-	if (drawFrame())
+	if (drawOrPrice())
 		rendererDrawMesh_sw(m, model, tex);
 }
 void rendererDrawMeshGlow(const ActorMesh& m, const C3D_Mtx* model, C3D_Tex* tex, u32 glow)
 {
-	if (drawFrame())
+	if (drawOrPrice())
 		rendererDrawMeshGlow_sw(m, model, tex, glow);
 }
 void rendererDrawActor(Actor& a, const std::vector<C3D_Tex*>& textures, bool viewModel)
 {
-	if (drawFrame())
+	if (drawOrPrice())
 		rendererDrawActor_sw(a, textures, viewModel);
 }
 void rendererDrawGlow(const float pos[3], float size, u32 rgba)
@@ -1568,8 +1691,9 @@ void rendererDrawGlow(const float pos[3], float size, u32 rgba)
 	if (drawFrame())
 		rendererDrawGlow_sw(pos, size, rgba);
 }
-bool rendererDrawLocalMap(World& w, float minX, float minY, float size, float topZ, float depth, bool opaqueWater)
+bool rendererDrawLocalMap(World& w, float minX, float minY, float size, float topZ, float depth, bool opaqueWater, bool whole,
+	bool mapLight)
 {
-	return drawFrame() && rendererDrawLocalMap_sw(w, minX, minY, size, topZ, depth, opaqueWater);
+	return drawFrame() && rendererDrawLocalMap_sw(w, minX, minY, size, topZ, depth, opaqueWater, whole, mapLight);
 }
 C3D_Tex* rendererLocalMap() { return drawFrame() ? rendererLocalMap_sw() : nullptr; }

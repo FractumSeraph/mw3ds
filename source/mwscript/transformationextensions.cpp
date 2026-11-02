@@ -17,13 +17,11 @@ std::optional<float> transformationExtensions(Ctx& c, const Node& n, World& w, b
 {
 	switch (n.func)
 	{
-	// GetScale / SetScale / ModScale (OpenMW's: held to 0.5 .. 2, ModScale adds a hundredth of its argument): an
-	// actor is drawn and stands at the new size (World::setRefScale); a static keeps its baked one
-	case F_GETSCALE:
-		return r ? r->scale : 1.0f;
+	// GetScale / SetScale / ModScale: the object's size (OpenMW's; World::scaleObject); the player stays as it is
+	case F_GETSCALE: return r ? r->scale : 1.0f;
 	case F_SETSCALE: case F_MODSCALE:
 		if (r && !onPlayer)
-			w.setRefScale(ref, n.func == F_SETSCALE ? argNum(c, n, 0) : r->scale + argNum(c, n, 0) / 100.0f);
+			w.scaleObject(ref, (n.func == F_MODSCALE ? r->scale : 0.0f) + argNum(c, n, 0));
 		return 0.0f;
 	// PlaceAtPC / PlaceAtMe id count distance direction (0 front, 1 back, 2 left, 3 right)
 	// PlaceItem id x y z zRot: a new one at that spot in the player's cell (outdoors the cell under it); PlaceItemCell id
@@ -50,16 +48,6 @@ std::optional<float> transformationExtensions(Ctx& c, const Node& n, World& w, b
 	case F_PLACEATPC: case F_PLACEATME:
 	{
 		bool atPC = n.func == F_PLACEATPC || !r;
-		if (w.actorsElsewhere && w.game.spawns.count(lower(argStr(c, n, 0))))
-		{
-			// (online: a person or creature is the server's world's to place; it asks, and they come back as its own)
-			const float* at = atPC ? w.player.feet : r->pos;
-			float yaw = atPC ? w.player.yaw : r->rot[2], dist = argNum(c, n, 2, 0);
-			World::SpawnAsk ask = { lower(argStr(c, n, 0)), std::max(1, (int)argNum(c, n, 1, 1)),
-				{ at[0] + sinf(yaw) * dist, at[1] + cosf(yaw) * dist, at[2] }, yaw };
-			w.spawnAsks.push_back(ask);
-			return 0.0f;
-		}
 		w.placeAt(argStr(c, n, 0), (int)argNum(c, n, 1, 1), argNum(c, n, 2, 0), (int)argNum(c, n, 3, 0),
 			atPC ? w.player.feet : r->pos, atPC ? w.player.yaw : r->rot[2]);
 		return 0.0f;
@@ -155,9 +143,15 @@ std::optional<float> transformationExtensions(Ctx& c, const Node& n, World& w, b
 	}
 	case F_GETDISTANCE:
 	{
+		std::string to = lower(argStr(c, n, 0));
+		// Player->GetDistance <object>: the player's distance to it (Dream of Hircine's hunter spawner picks its spot so)
+		if (onPlayer)
+		{
+			int o = to == "player" ? -1 : w.findRef(to);
+			return to == "player" ? 0.0f : o < 0 ? 100000.0f : w.distanceToPlayer(o);
+		}
 		if (!r)
 			return 100000.0f;
-		std::string to = lower(argStr(c, n, 0));
 		if (to == "player")
 			return w.distanceToPlayer(ref);
 		int o = w.findRef(to);
@@ -198,8 +192,21 @@ std::optional<float> transformationExtensions(Ctx& c, const Node& n, World& w, b
 		int grid = w.gridCell((int)floorf(pos[0] / 8192.0f), (int)floorf(pos[1] / 8192.0f));
 		int cell;
 		if (n.func == F_POSITION)
-			// the player goes to the exterior cell there (from an interior too), anyone else stays in their cell
-			cell = toPlayer ? (grid >= 0 ? grid : w.current) : w.placeOf(ref);
+		{
+			// the player goes to the exterior cell there (from an interior too); anyone else outdoors goes to the exterior
+			// cell there as well, and an actor indoors only when the player is outdoors and that cell is in play
+			// (OpenMW's World::moveObject); otherwise they stay in their cell. Bloodmoon's werewolf attack brings Korst
+			// from Lake Fjalding to Skaal Village so
+			if (toPlayer)
+				cell = grid >= 0 ? grid : w.current;
+			else
+			{
+				int here = w.placeOf(ref);
+				bool outdoors = here >= 0 && !w.cells[here].interior;
+				bool toActive = r->actor >= 0 && grid >= 0 && w.current >= 0 && !w.cells[w.current].interior && w.cells[grid].live;
+				cell = grid >= 0 && (outdoors || toActive) ? grid : here;
+			}
+		}
 		else
 		{
 			std::string name = argStr(c, n, 4);

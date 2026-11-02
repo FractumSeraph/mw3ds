@@ -62,7 +62,8 @@ local function act(s, player)
 			a[#a + 1] = w
 		end
 		if a[1] == 'goto' then
-			player:teleport(a[2], util.vector3(tonumber(a[3]), tonumber(a[4]), tonumber(a[5])), { onGround = true })
+			-- goto:<cell>:x:y:z, the cell '-' for the exterior (an unnamed exterior cell has no name to give)
+			player:teleport(a[2] == '-' and '' or a[2], util.vector3(tonumber(a[3]), tonumber(a[4]), tonumber(a[5])), { onGround = true })
 		elseif a[1] == 'journal' then
 			types.Player.quests(player)[a[2]]:addJournalEntry(tonumber(a[3]), player)
 		elseif a[1] == 'give' then
@@ -76,6 +77,17 @@ local function act(s, player)
 				o:teleport(player.cell, util.vector3(tonumber(a[3]), tonumber(a[4]), tonumber(a[5])), { onGround = true })
 				spawned[a[2]] = o
 			end
+		elseif a[1] == 'attack' then
+			-- attack:<id>: that spawned actor goes for the player (its Combat package)
+			local o = spawned[a[2]]
+			if o and o:isValid() then
+				o:sendEvent('MW3DS_SBS_Attack', { target = player })
+			else
+				print(string.format('MW3DS-SBS scene: no spawned %s to attack with', a[2]))
+			end
+		elseif a[1] == 'sound' then
+			-- sound:<id>: that sound record played once at the player (openmw.ambient: a recording of its level)
+			player:sendEvent('MW3DS_SBS_Sound', { id = a[2] })
 		elseif a[1] == 'travel' then
 			-- travel:<id>:x:y:z: that actor walks there on OpenMW's own AI (its Travel package), from where it is now
 			local o = spawned[a[2]]
@@ -185,6 +197,10 @@ local function setup(data)
 			world.createObject(id, id == s.ammo and 50 or 1):moveInto(inv)
 		end
 	end
+	-- werewolf=1: the player in werewolf form (it stays for the shots after, as the 3DS side's)
+	if s.werewolf and not types.NPC.isWerewolf(player) then
+		types.NPC.setWerewolf(player, true)
+	end
 	-- a menu shot's items (give=: apparatus, soul gems, ingredients)
 	for _, g in ipairs(s.give or {}) do
 		if inv:countOf(g[1]) < g[2] then
@@ -255,6 +271,9 @@ local function poseActor(p)
 		player:sendEvent('MW3DS_SBS_Posed', { index = p.index })
 		return
 	end
+	if s.enable then
+		a.enabled = true
+	end
 	local rot = a.startingRotation
 	if s.face then
 		rot = util.transform.rotateZ(s.face)
@@ -283,7 +302,15 @@ return {
 			world.setSimulationTimeScale(d.on and 0 or 1)
 		end,
 		MW3DS_SBS_ActorPosed = function(d)
-			world.players[1]:sendEvent('MW3DS_SBS_Posed', d)
+			-- (where everyone stands as the shot is taken, physics settled: the 3DS side's heights are checked against it)
+			local pl = world.players[1]
+			print(string.format('MW3DS-SBS at the shot: player at %.1f %.1f %.1f', pl.position.x, pl.position.y, pl.position.z))
+			for id, o in pairs(spawned) do
+				if o:isValid() then
+					print(string.format('MW3DS-SBS at the shot: %s at %.1f %.1f %.1f', id, o.position.x, o.position.y, o.position.z))
+				end
+			end
+			pl:sendEvent('MW3DS_SBS_Posed', d)
 		end,
 	},
 	engineHandlers = {
@@ -299,6 +326,9 @@ return {
 				if pending.frames == (pending.shot.weather and 90 or 20) then
 					local p = pending
 					pending = nil
+					local pl = world.players[1]
+					print(string.format('MW3DS-SBS before the pose: player in %s at %.1f %.1f %.1f, water %s level %s', pl.cell.name,
+						pl.position.x, pl.position.y, pl.position.z, tostring(pl.cell.hasWater), tostring(pl.cell.waterLevel)))
 					poseActor(p)
 				end
 			end

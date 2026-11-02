@@ -27,8 +27,8 @@ const int kRobeHides[] = { 3, 4, 5, 11, 12, 13, 14, 19, 20, 21, 22 };
 const int kSkirtHides[] = { 4, 21, 22 };
 }
 
-static const std::vector<std::pair<std::string, std::string>>* headChoices(const World& w, const std::string& race,
-	bool female, bool hair)
+static const std::vector<std::pair<Atom, Atom>>* headChoices(const World& w, const std::string& race, bool female,
+	bool hair)
 {
 	const ThirdPersonDef& t = w.game.firstPerson.third;
 	auto& map = (hair ? t.hairs : t.heads)[female ? 1 : 0];
@@ -36,31 +36,14 @@ static const std::vector<std::pair<std::string, std::string>>* headChoices(const
 	return it != map.end() && !it->second.empty() ? &it->second : nullptr;
 }
 
-const std::vector<std::pair<std::string, std::string>>* playerHeadChoices(const World& w, bool hair)
+const std::vector<std::pair<Atom, Atom>>* playerHeadChoices(const World& w, bool hair)
 {
 	return headChoices(w, w.stats.race, w.stats.female, hair);
-}
-
-// A werewolf's body as Bloodmoon draws its werewolf NPCs: the beast-legged (Argonian) skeleton under the werewolf
-// robe, whose WerewolfSkin covers the body, with the WerewolfHead and WerewolfHair parts
-void werewolfLook(BodyLook& look)
-{
-	look.race = "argonian";
-	look.female = false;
-	look.head = "werewolfhead";
-	look.hair = "werewolfhair";
-	look.worn = { "werewolfrobe" };
-	look.weapon.clear();
 }
 
 BodyLook playerLook(const World& w)
 {
 	BodyLook look;
-	if (w.werewolf)
-	{
-		werewolfLook(look);
-		return look;
-	}
 	look.race = lower(w.stats.race);
 	look.female = w.stats.female;
 	look.head = w.stats.head;
@@ -79,13 +62,47 @@ BodyLook playerLook(const World& w)
 	return look;
 }
 
+// In wolf form the werewolf's own model and animations (OpenMW: wolf\skin.nif as the skeleton, the werewolf race's
+// parts, WerewolfHead and WerewolfHair), as the library's werewolf NPCs change into (World::werewolfBody). Its
+// textures are the cell's, so it is built again in each cell
+void PlayerBody::rebuildWolf(World& w)
+{
+	if (wolf && ready && wolfCell == w.current)
+		return;
+	free(w);
+	auto sp = w.game.spawns.find("bm_werewolf_default");
+	LoadedCell* l = w.current >= 0 ? w.cells[w.current].live : nullptr;
+	if (sp == w.game.spawns.end() || !l)
+		return;
+	set.actors.clear();
+	const float place[12] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0 };
+	if (actorsAddFromLibrary(set, l->cell, w.textures, w.dataDir, sp->second.lib, -1, sp->second.skeleton, place) < 0)
+		return;
+	skel = sp->second.skeleton;
+	textures = l->cell.textures;
+	wolf = true;
+	wolfCell = w.current;
+	ready = true;
+	builtFor = "werewolf";
+	group.clear();
+	acting = BODY_NONE;
+	logf("playerbody: the werewolf, %d meshes on skeleton %d", (int)set.actors[0].meshes.size(), skel);
+}
+
 void PlayerBody::rebuild(World& w, bool weaponOut)
 {
+	if (w.stats.werewolf)
+	{
+		rebuildWolf(w);
+		return;
+	}
 	rebuildLook(w, playerLook(w), weaponOut);
 }
 
 void PlayerBody::rebuildLook(World& w, const BodyLook& look, bool weaponOut)
 {
+	if (wolf)
+		free(w);                                // (back to the human body below)
 	const ThirdPersonDef& t = w.game.firstPerson.third;
 	std::string race = look.race;
 	int female = look.female ? 1 : 0;
@@ -141,11 +158,8 @@ void PlayerBody::rebuildLook(World& w, const BodyLook& look, bool weaponOut)
 		const std::string& want = hair ? look.hair : look.head;
 		for (auto& e : *list)
 			if (e.first == want)
-				return e.second;
-		// (the werewolf's own head and hair, or nothing: never a person's hair on the beast)
-		if (want.compare(0, 8, "werewolf") == 0)
-			return std::string();
-		return list->front().second;
+				return e.second.str();
+		return list->front().second.str();
 	};
 	part[SLOT_HEAD] = chosen(false);
 	part[SLOT_HAIR] = chosen(true);
@@ -238,7 +252,8 @@ void PlayerBody::rebuildLook(World& w, const BodyLook& look, bool weaponOut)
 		}
 	}
 	a.deformed = false;
-	logf("playerbody: %d meshes on skeleton %d, %d pieces kept", (int)a.meshes.size(), skel, (int)pieces.size());
+	logf("playerbody: %s %s, %d meshes on skeleton %d, %d pieces kept", race.c_str(), female ? "female" : "male", (int)a.meshes.size(), skel,
+		(int)pieces.size());
 }
 
 // Where a blow's wind-up holds, as a share of the way from the group's start to its hit: the min and max attack marks
@@ -430,6 +445,15 @@ void PlayerBody::draw(World& w, bool deform)
 
 void PlayerBody::free(World& w)
 {
+	// (the werewolf's meshes are its own, read from the library; the human body's belong to its pieces)
+	if (wolf && !set.actors.empty())
+		for (auto& m : set.actors[0].meshes)
+		{
+			lockedLinearFree(m.verts);
+			lockedLinearFree(m.indices);
+		}
+	wolf = false;
+	wolfCell = -1;
 	for (auto& p : pieces)
 		fpFreePiece(w, p.second);
 	pieces.clear();
@@ -464,7 +488,7 @@ bool npcDress(World& w, LoadedCell& l, Actor& a, const ActorDef& d, const std::v
 		if (it != map.end())
 			for (auto& e : it->second)
 				if (e.first == want)
-					return e.second;
+					return e.second.str();
 		return std::string();
 	};
 	part[SLOT_HEAD] = own(false);

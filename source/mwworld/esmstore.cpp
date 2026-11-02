@@ -13,6 +13,8 @@
 #include "mwworld/containerstore.hpp"
 #include <strings.h>
 #include "mwworld/esmhelpers.hpp"
+#include "mwdialogue/dialoguemanagerimp.hpp"
+#include "mwscript/scriptstore.hpp"
 
 std::string lower(const std::string& s)
 {
@@ -38,10 +40,12 @@ const Object* GameData::object(const std::string& id) const
 	for (char c : id)
 		if (c >= 'A' && c <= 'Z')
 		{
-			auto it = objects.find(lower(id));
+			Atom k;
+			auto it = Atom::lookup(lower(id), k) ? objects.find(k) : objects.end();
 			return it == objects.end() ? nullptr : &it->second;
 		}
-	auto it = objects.find(id);
+	Atom k;
+	auto it = Atom::lookup(id, k) ? objects.find(k) : objects.end();
 	return it == objects.end() ? nullptr : &it->second;
 }
 
@@ -597,9 +601,11 @@ bool gameLoad(GameData& g, const char* path)
 		const cJSON* item;
 		cJSON_ArrayForEach(item, arr(it, "items"))
 			o.items.emplace_back((int)cJSON_GetArrayItem(item, 0)->valuedouble, cJSON_GetArrayItem(item, 1)->valuestring);
-		g.objects[it->string] = o;
+		g.objects[Atom(it->string)] = o;
 	});
 
+	// (each tree to the card as soon as it is built: mwscript/scriptstore.cpp)
+	scriptsSpillBegin();
 	forSection(root, "scripts", [&](const cJSON* it) {
 		Script& s = g.scripts[it->string];
 		s.name = str(it, "name");
@@ -612,8 +618,12 @@ bool gameLoad(GameData& g, const char* path)
 		convertBlock(arr(it, "body"), s.body, &s);
 		s.usesOnActivate = treeCalls(s.body, "onactivate");
 		s.scriptedHits = treeCalls(s.body, "hitonme") || treeCalls(s.body, "sethealth");
+		scriptSpillOne(s);
 	});
+	scriptsSpillEnd();
 
+	// (each topic's answers to the card as soon as they are read, but Voice's: mwdialogue/topicstore.cpp)
+	topicsSpillBegin();
 	forSection(root, "dialogue", [&](const cJSON* it) {
 		Topic t;
 		t.name = str(it, "name");
@@ -658,8 +668,10 @@ bool gameLoad(GameData& g, const char* path)
 			}
 			t.infos.push_back(std::move(info));
 		}
+		topicSpillOne(g, t);
 		g.topics.push_back(std::move(t));
 	});
+	topicsSpillEnd();
 
 	forSection(root, "journal", [&](const cJSON* it) {
 		Journal& jn = g.journals[it->string];
@@ -709,6 +721,9 @@ bool gameLoad(GameData& g, const char* path)
 		for (int i = 0; i < 8; i++)
 			for (int s = 0; s < 2; s++)
 				r.attributes[i][s] = cJSON_GetArrayItem(cJSON_GetArrayItem(arr(it, "attributes"), i), s)->valueint;
+		if (const cJSON* wt = arr(it, "weight"))
+			for (int sx = 0; sx < 2 && sx < cJSON_GetArraySize(wt); sx++)
+				r.weight[sx] = (float)cJSON_GetArrayItem(wt, sx)->valuedouble;
 		r.playable = num(it, "playable") != 0;
 		r.beast = num(it, "beast") != 0;
 		cJSON_ArrayForEach(b, arr(it, "spells"))
@@ -773,8 +788,15 @@ bool gameLoad(GameData& g, const char* path)
 		g.skills.push_back(sd);
 	}
 
+	// A sound record's volume byte is on a decibel scale, 33.48 dB from 0 to 255 (OpenMW's SoundBufferPool::insertSound:
+	// 10 ^ ((byte / 255 x 3348 - 3348) / 2000)): Water Layer's 102 is 0.099, Boat Hull's 178 0.31. Taken as the plain
+	// share (0.4, 0.7; game.json keeps it so) every quiet record played four times too loud: the sea in Mournhold's
+	// Great Bazaar, the regions' wind
 	cJSON_ArrayForEach(it, arr(root, "sounds"))
-		g.sounds[it->string] = { str(it, "file"), (float)num(it, "volume", 1.0), (int)num(it, "min"), (int)num(it, "max") };
+	{
+		float share = (float)num(it, "volume", 1.0);
+		g.sounds[it->string] = { str(it, "file"), powf(10.0f, (share * 3348.0f - 3348.0f) / 2000.0f), (int)num(it, "min"), (int)num(it, "max") };
+	}
 	forSection(root, "voices", [&](const cJSON* it) {
 		if (voiceName(it->string) == it->valuestring)
 			g.voices.insert(it->string);
@@ -991,7 +1013,15 @@ bool gameLoad(GameData& g, const char* path)
 	}
 	const cJSON* sp;
 	cJSON_ArrayForEach(sp, cJSON_GetObjectItem(root, "spawn"))
-		g.spawns[sp->string] = { (int)num(sp, "actor"), str(sp, "lib"), str(sp, "type"), (int)num(sp, "skeleton") };
+	{
+		SpawnDef& d = g.spawns[sp->string];
+		d = { (int)num(sp, "actor"), str(sp, "lib"), str(sp, "type"), (int)num(sp, "skeleton") };
+		// (the size a placement of it has: the record's scale, a person's race weight and height)
+		const cJSON* size = cJSON_GetObjectItem(sp, "size");
+		if (cJSON_GetArraySize(size) == 2)
+			for (int k = 0; k < 2; k++)
+				d.size[k] = (float)cJSON_GetArrayItem(size, k)->valuedouble;
+	}
 	cJSON_ArrayForEach(ts, cJSON_GetObjectItem(root, "town_spawns"))
 	{
 		std::vector<float> v;
@@ -1017,6 +1047,12 @@ bool gameLoad(GameData& g, const char* path)
 			g.art.hud[lower(a->string)] = one(a);
 		cJSON_ArrayForEach(a, cJSON_GetObjectItem(art, "book"))
 			g.art.book[lower(a->string)] = one(a);
+	}
+	if (const cJSON* ww = cJSON_GetObjectItem(root, "werewolf"))
+	{
+		if (const cJSON* v = cJSON_GetObjectItem(ww, "fov"))
+			if (cJSON_IsNumber(v))
+				g.firstPerson.werewolfFov = (float)v->valuedouble;
 	}
 	if (const cJSON* sb = cJSON_GetObjectItem(root, "sky_bodies"))
 	{
@@ -1049,9 +1085,9 @@ bool gameLoad(GameData& g, const char* path)
 				o.earlyFadeAngle = num(md, "Moon Shadow Early Fade Angle", 0.5f);
 			}
 		d.sunrise = num(sb, "sunrise", 6); d.sunset = num(sb, "sunset", 18);
-		for (int k = 0; k < 3; k++)
-			if (const cJSON* c = cJSON_GetArrayItem(cJSON_GetObjectItem(sb, "script_color"), k))
-				d.scriptColor[k] = (float)c->valuedouble / 255.0f;
+		if (const cJSON* sc = cJSON_GetObjectItem(sb, "script_color"))
+			for (int k = 0; k < 3 && k < cJSON_GetArraySize(sc); k++)
+				d.scriptColor[k] = (u8)std::max(0, std::min(255, cJSON_GetArrayItem(sc, k)->valueint));
 	}
 	if (const cJSON* fp = section(root, "firstperson"))
 	{
@@ -1065,13 +1101,8 @@ bool gameLoad(GameData& g, const char* path)
 			}
 		if (const cJSON* ww = cJSON_GetObjectItem(fp, "werewolf"))
 		{
-			const cJSON* sk = cJSON_GetObjectItem(ww, "skeleton");
-			const cJSON* pc = cJSON_GetObjectItem(ww, "piece");
-			if (cJSON_IsNumber(sk) && cJSON_IsString(pc))
-			{
-				g.firstPerson.werewolfSkeleton = sk->valueint;
-				g.firstPerson.werewolfPiece = pc->valuestring;
-			}
+			g.firstPerson.werewolfSkeleton = (int)num(ww, "skeleton", -1);
+			g.firstPerson.werewolfPiece = str(ww, "piece");
 		}
 		const cJSON* vf;
 		cJSON_ArrayForEach(vf, cJSON_GetObjectItem(fp, "vfx"))
@@ -1207,11 +1238,11 @@ bool gameLoad(GameData& g, const char* path)
 	// The objects with a world visual or creature sprays carry a mark (Object::fx): the per-frame sweeps over the loaded
 	// refs test the mark instead of looking every id up
 	for (auto& wf : g.firstPerson.worldFx)
-		if (auto o = g.objects.find(lower(wf.first)); o != g.objects.end())
-			o->second.fx |= 1;
+		if (Object* o = const_cast<Object*>(g.object(lower(wf.first))))
+			o->fx |= 1;
 	for (auto& cf : g.firstPerson.cpfx)
-		if (auto o = g.objects.find(lower(cf.first)); o != g.objects.end())
-			o->second.fx |= 2;
+		if (Object* o = const_cast<Object*>(g.object(lower(cf.first))))
+			o->fx |= 2;
 	logf("game: %d objects, %d scripts, %d topics, %d journals, %d sounds, %d voices, heap used %d KB (%u KB of texts, %u KB of long texts)",
 		(int)g.objects.size(), (int)g.scripts.size(), (int)g.topics.size(), (int)g.journals.size(),
 		(int)g.sounds.size(), (int)g.voices.size(), mallinfo().uordblks / 1024, (unsigned)(Atom::poolBytes() / 1024),

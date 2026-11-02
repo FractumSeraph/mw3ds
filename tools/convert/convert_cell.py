@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 
 from mwfiles import OVERLAYS, cell_refs, content_key, fixed_utf8, safe_name
-from meshes import (FLAG_BLEND, FLAG_DECAL, FLAG_SCROLL, FLAG_TEST, FLAG_TWO_SIDED,
+from meshes import (FLAG_BLEND, FLAG_DECAL, FLAG_RISE, FLAG_SCROLL, FLAG_TEST, FLAG_TWO_SIDED,
                     collision_triangles, extract_shapes, find_node, ref_matrix)
 from nif import Nif
 from npc import NpcBuilder
@@ -247,13 +247,14 @@ def packed_ints(a, width):
     return planar(d.view(np.uint8).reshape(-1, width))
 
 
-def write_batches(f, batches):
+def write_batches(f, batches, shared=False):
     """Batches of one group (a cell's static batches, one door, or the sky) share one position grid:
     s16 = (pos - offset) / scale, so coplanar terrain layers in different batches quantize identically.
     The step is a power of two and the offset a multiple of it: terrain corners (multiples of 8) then sit
     on every cell's grid, and the engine can rebuild positions near the camera exactly in the GPU's
     24-bit floats (mwrender/renderingmanager.cpp uploadTransform), so neighbouring cells meet without cracks.
-    UVs are s16 scaled per batch. 16 bytes per vertex instead of 24."""
+    UVs are s16 scaled per batch. 16 bytes per vertex instead of 24. shared (a shared model's batches, format 11): 12
+    bytes, no colour (each placement's colours come apart, write_shared)."""
     f.write(struct.pack("<I", len(batches)))
     if not batches:
         return
@@ -285,14 +286,16 @@ def write_batches(f, batches):
         # the colours' alpha holds the side light (side_facing), 0 when it is the alpha
         lc = b.get("lamp_color")
         f.write(bytes(([int(round(c * 255)) for c in lc] if lc is not None else [0, 0, 0]) + [1 if b.get("side") else 0]))
-        q = np.zeros(len(v), dtype=[("pos", "<i2", 4), ("uv", "<i2", 2), ("color", "u1", 4)])
+        fields = [("pos", "<i2", 4), ("uv", "<i2", 2)] + ([] if shared else [("color", "u1", 4)])
+        q = np.zeros(len(v), dtype=fields)
         q["pos"][:, :3] = np.clip(np.round((p - offset) / scale), -32767, 32767)
         if "lamp" in v.dtype.names:
             q["pos"][:, 3] = v["lamp"]
         q["uv"] = np.clip(np.round(v["uv"] / uv_scale), -32767, 32767)
-        q["color"] = v["color"]
+        if not shared:
+            q["color"] = v["color"]
         # Format 7: positions as differences from the previous vertex, then everything as byte planes
-        rec = q.view(np.uint8).reshape(-1, 16).copy()
+        rec = q.view(np.uint8).reshape(-1, q.dtype.itemsize).copy()
         if len(q):
             rec[:, 0:6] = deltas(q["pos"][:, :3].view(np.uint16), 16).astype("<u2").view(np.uint8).reshape(-1, 6)
         f.write(planar(rec))
@@ -342,7 +345,7 @@ def write_collision(f, pos, tris, ranges=None):
     return out_ranges
 
 
-def write_cell(path, info, textures, batches, collision, actors, door_meshes, sky, col_ranges=None):
+def write_cell(path, info, textures, batches, collision, actors, door_meshes, sky, col_ranges=None, shared=None):
     """Layout (little endian):
        'MWC1' u32 version=10 u32 flags (bit0 interior, bit1 water plane, bit2 sky)
        f32 spawn[3] f32 yaw f32 pitch
@@ -368,11 +371,17 @@ def write_cell(path, info, textures, batches, collision, actors, door_meshes, sk
          f32 radius, f32 height
        swing doors: u32 count, then per door: u32 ref index, batches as above in object space
        sky: batches as above around the origin, drawn centred on the camera without fog
+       format 11 (only a cell with shared models; any other is written as format 10): u32 count, then per shared model
+         (share_models): its batches as above in the model's own space, 12-byte vertices (s16 pos[4], s16 uv[2]: no
+         colour), u32 placements, per placement f32 matrix[12] (3 x 4 rows, model -> world) f32 bbox_min[3]
+         f32 bbox_max[3] f32 max_distance u32 ref index (not drawn while it is disabled), then u32 colour sets (1: one
+         for every placement, SHARE_ONE_LIGHT; else one a placement) and the sets (u8 rgba a vertex of the model's
+         batches, in order, set after set) as byte planes
     """
     flags = (CELL_INTERIOR if info["interior"] else 0) | (CELL_WATER if info["water"] else 0) \
         | (CELL_SKY if sky else 0)
     with open(path, "wb") as f:
-        f.write(b"MWC1" + struct.pack("<II", 10, flags))
+        f.write(b"MWC1" + struct.pack("<II", 11 if shared else 10, flags))
         f.write(struct.pack("<5f", *info["spawn"], info["yaw"], 0.0))
         f.write(bytes(info["ambient"]) + bytes(info["fog"]) + struct.pack("<f", info["fog_density"]))
         f.write(struct.pack("<3f", info["fog_start"], info["fog_end"], info["water_z"]))
@@ -392,7 +401,30 @@ def write_cell(path, info, textures, batches, collision, actors, door_meshes, sk
             f.write(struct.pack("<I", d["ref"]))
             write_batches(f, d["batches"])
         write_batches(f, sky)
+        if shared:
+            write_shared(f, shared)
     return ranges
+
+
+def write_shared(f, shared):
+    """Format 11's shared models (write_cell)."""
+    f.write(struct.pack("<I", len(shared)))
+    for sm in shared:
+        write_batches(f, sm["batches"], shared=True)
+        f.write(struct.pack("<I", len(sm["places"])))
+        for pl in sm["places"]:
+            f.write(struct.pack("<12f3f3ffI", *np.asarray(pl["m"], dtype=float)[:3, :4].ravel(), *pl["bmin"], *pl["bmax"],
+                                pl["max_dist"], pl["ref"]))
+        sets = [sm["colors"]] if sm["colors"] is not None else [pl["colors"] for pl in sm["places"]]
+        f.write(struct.pack("<I", len(sets)))
+        f.write(planar(np.concatenate(sets)))
+
+
+def shared_bytes(shared):
+    """Linear memory the 3DS holds for shared models: their vertices and indices once, each placement's colours."""
+    return sum(sum(len(b["verts"]) * 12 + len(b["idx"]) * 2 for b in sm["batches"])
+               + (1 if sm["colors"] is not None else len(sm["places"])) * sum(len(b["verts"]) for b in sm["batches"]) * 4
+               for sm in shared)
 
 
 def color3(d, off):
@@ -483,6 +515,115 @@ def merge_small_groups(groups):
         if k in totals and totals[k] < SMALL_BATCH_TRIS:
             key = key[:3] + ("cell",) + key[4:]
         out.setdefault(key, []).extend(shapes)
+    return out
+
+
+# Shared models (format 11). In the 3 x 3 spots heavier than any of Vvardenfell's (level.py SHARE_WINDOW_VERTICES:
+# Solstheim's pine forests, a spot's trees about 30 MB as batches against a 24 MB budget for all of linear memory), a
+# static placed several times in a cell keeps its vertices once, in its own space, and each placement only its baked
+# colours (4 bytes a vertex instead of 16, and no indices): drawn once a placement with its own transform. Each
+# placement is a draw call per batch of the model, so only models whose draws are big enough to be worth one
+SHARE_TYPES = {"STAT", "ACTI"}  # (Raven Rock's trees are activators a script clears as the colony grows)
+# Trees and plants (a model named flora_*) take one baked light for all their placements in a cell: the model lit as it
+# stands unturned, by the cell's ambient light and the noon sun. A tree outdoors hardly differs in its light from
+# place to place; each placement's own (its turn decides which side the noon sun and the low sun's side light fall on)
+# took 4 bytes a vertex a placement, most of a forest's shared models (spec/performance-tradeoffs.md). Others (rocks,
+# walls) keep each placement's colours. A placement a lamp lights stays baked either way
+SHARE_ONE_LIGHT = "flora"
+SHARE_MIN_PLACES = 3            # placements of the model in the cell
+SHARE_MIN_VERTICES = 256        # vertices a shared draw, on average over the model's batches
+# Kept in the cell's batches: terrain-like overlays, moving or sliding textures, particle sprays. (Blended shapes are
+# shared: the pines' needles are blended and alpha tested, each placement's sorted back to front with the rest)
+SHARE_EXCLUDED_FLAGS = FLAG_DECAL | FLAG_SCROLL | FLAG_RISE
+
+
+def shareable(s):
+    """A model's shape whose vertices a shared model can hold: plain lit geometry."""
+    return not (s["flags"] & SHARE_EXCLUDED_FLAGS) and not s.get("scroll") and not s.get("loop") \
+        and not s.get("omni") and "rgba" not in s
+
+
+def share_models(candidates, groups, lights, ambient, sun, sun_dir, chunk_of):
+    """Picks the models of the cell that share one copy of their vertices (SHARE_MIN_PLACES, SHARE_MIN_VERTICES) among
+    `candidates` (model -> its placements: {"ri", "m", "shapes" in world space, "obj" their positions in the model's
+    space, "detail"}). A placement a lamp lights stays baked: a shared model has no lamp channel, and the night would
+    darken its lamp light. A placement keeps its reference: one a script disables (Raven Rock's trees, cleared as the
+    colony grows) isn't drawn while it is, as OpenMW hides it (baked statics keep only their collision apart). Everything not shared goes into `groups` as the cell's other shapes do. Returns the shared
+    models: {"batches": the model's, "places": [{"m", "bmin", "bmax", "max_dist", "ref", "colors"}], "colors" (one set
+    for every placement, SHARE_ONE_LIGHT; else None and each placement has its own), "baked_bytes"}."""
+    def bake(pl, shapes=None):
+        for sh in (pl["shapes"] if shapes is None else shapes):
+            groups.setdefault((sh["tex"], sh["flags"], sh["alpha_ref"], chunk_of(sh), pl["detail"],
+                               sh.get("scroll") or (0.0, 0.0)), []).append(sh)
+
+    out = []
+    for model, places in candidates.items():
+        idx = [i for i, sh in enumerate(places[0]["shapes"]) if shareable(sh)]
+        kept = []
+        for pl in places:
+            ok = len(pl["shapes"]) == len(places[0]["shapes"]) and bool(idx)
+            if ok:
+                lamp = np.concatenate([shade(pl["shapes"][i], lights, ambient, sun, sun_dir)[1] for i in idx])
+                ok = lamp.max() < 1.0 / 255.0
+            (kept if ok else []).append(pl)
+            if not ok:
+                bake(pl)
+        # The model's batches: its shareable shapes merged by render key, as make_batches does a cell's
+        keys = []
+        for i in idx:
+            sh = places[0]["shapes"][i]
+            k = (sh["tex"], sh["flags"], sh["alpha_ref"])
+            if k not in keys:
+                keys.append(k)
+        nverts = sum(len(places[0]["obj"][i]) for i in idx)
+        if len(kept) < SHARE_MIN_PLACES or nverts < SHARE_MIN_VERTICES * max(len(keys), 1):
+            for pl in kept:
+                bake(pl)
+            continue
+        order = lambda k: (bool(k[1] & FLAG_BLEND), bool(k[1] & FLAG_TEST))
+        keys.sort(key=order)
+        members = [[i for i in idx if (places[0]["shapes"][i]["tex"], places[0]["shapes"][i]["flags"],
+                                       places[0]["shapes"][i]["alpha_ref"]) == k] for k in keys]
+        batches = []
+        for k, mem in zip(keys, members):
+            v = np.zeros(sum(len(places[0]["obj"][i]) for i in mem), dtype=VERTEX)
+            tris, base, at = [], 0, 0
+            for i in mem:
+                sh = places[0]["shapes"][i]
+                n = len(places[0]["obj"][i])
+                v["pos"][at:at + n] = places[0]["obj"][i]
+                v["uv"][at:at + n] = sh["uv"] * [1.0, -1.0] + [0.0, 1.0]     # DirectX V (0 = top) -> PICA V (0 = bottom)
+                tris.append(np.asarray(sh["tris"]).ravel() + at)
+                at += n
+            batches.append({"verts": v, "idx": np.concatenate(tris), "tex_path": k[0], "tex": -1, "flags": k[1],
+                            "alpha_ref": k[2], "max_dist": 0, "flip": None, "scroll": (0.0, 0.0), "lamp_color": None,
+                            "side": not k[1] & (FLAG_BLEND | FLAG_TEST), "shapes": [places[0]["shapes"][i] for i in mem]})
+        one_light = SHARE_ONE_LIGHT in model.replace("/", "\\").rsplit("\\", 1)[-1]
+        sm = {"batches": batches, "places": [], "baked_bytes": 0, "colors": None}
+
+        def colours(shapes):
+            cols = []
+            for b, mem in zip(batches, members):
+                for i in mem:
+                    c = to_bytes(shade(shapes[i], lights, ambient, sun, sun_dir)[0])
+                    if b["side"]:
+                        c[:, 3] = side_bytes(side_facing(shapes[i]))
+                    cols.append(c)
+            return np.concatenate(cols)
+
+        if one_light:
+            # (the model as it stands in its own space: no lamp reaches a shared placement)
+            sm["colors"] = colours([dict(sh, pos=places[0]["obj"][i], nrm=places[0]["objn"][i])
+                                    for i, sh in enumerate(places[0]["shapes"])])
+        for pl in kept:
+            wp = np.concatenate([pl["shapes"][i]["pos"] for i in idx])
+            sm["places"].append({"m": pl["m"], "bmin": wp.min(axis=0).tolist(), "bmax": wp.max(axis=0).tolist(),
+                                 "max_dist": float(pl["detail"]), "ref": pl["ri"],
+                                 "colors": None if one_light else colours(pl["shapes"])})
+            sm["baked_bytes"] += sum(len(pl["shapes"][i]["pos"]) * 16 + len(np.asarray(pl["shapes"][i]["tris"]).ravel()) * 2
+                                     for i in idx)
+            bake(pl, [sh for i, sh in enumerate(pl["shapes"]) if i not in idx])
+        out.append(sm)
     return out
 
 
@@ -753,7 +894,8 @@ class Converter:
         return rel
 
     def spawn_library(self, rec):
-        """A creature / NPC placed at run time: its library (path) and skeleton index, or None."""
+        """A creature / NPC placed at run time: its library (path), skeleton index and size ([across, up]: the record's
+        scale, a person's race weight and height, which a placement carries), or None."""
         ref = {"id": rec.id, "pos": (0.0, 0.0, 0.0), "rot": (0.0, 0.0, 0.0), "scale": 1.0}
         shapes, info = (self.npcs if rec.tag == "NPC_" else self.creatures).build(rec, ref)
         if not info:
@@ -763,7 +905,9 @@ class Converter:
         for s in shapes:
             if s.get("tex") and "raw" in s:
                 self.textures.request_shape(s, s["flags"] & (FLAG_BLEND | FLAG_TEST))
-        return self.actor_library(rec.id.lower(), shapes, sk), self.skel_index[info["skeleton"]]
+        place = np.asarray(info["place"])
+        size = [round(float(np.linalg.norm(place[:3, 0])), 4), round(float(np.linalg.norm(place[:3, 2])), 4)]
+        return self.actor_library(rec.id.lower(), shapes, sk), self.skel_index[info["skeleton"]], size
 
     def skeleton(self, path):
         """Index of a shared skeleton (cells/skeletons.skl), added the first time."""
@@ -788,7 +932,12 @@ class Converter:
                                       default=str, sort_keys=True).encode()).hexdigest()
         meta_path = self.cache_dir / (file + ".json")
         if meta_path.exists() and base.with_suffix(".cel").exists() and base.with_suffix(".act").exists():
-            meta = json.loads(meta_path.read_text())
+            try:
+                meta = json.loads(meta_path.read_text())
+            except ValueError:
+                # (cut short: written by a cell process that failed while writing it, out of memory with five others.
+                # Read as finished, the cell was left out of the data: converted again instead)
+                meta = {}
             if meta.get("key") == key:
                 for path, px, alpha in meta["tex_requests"]:
                     self.textures.request(path, px, alpha)
@@ -812,7 +961,10 @@ class Converter:
                 "generated": sorted(self.cell_generated),
                 "actor_skeletons": self.cell_actors}
         self.textures.log = None
-        meta_path.write_text(json.dumps(meta, default=float))
+        # (whole or not at all: written beside it, then put in its place)
+        part = meta_path.with_suffix(".part")
+        part.write_text(json.dumps(meta, default=float))
+        part.replace(meta_path)
         return out
 
     def load_nif(self, model):
@@ -864,8 +1016,13 @@ class Converter:
                         "bounds": [0.0] * 4, "interior": True},
                "chunk": INTERIOR_CHUNK}
         if struct.unpack_from("<I", cell.get("DATA"))[0] & 0x80 and weather is not None:
+            # (under the sky, Mournhold's long views: chunked as outdoors, so what is behind the camera or past the
+            # fog is left out. In 4096 chunks the Great Bazaar's batches each held most of it, and all of it was drawn
+            # from its entrance: case bug-bazaar-3d-view)
+            # and given the outdoor savings (user, 2026-10-27): small clutter stops by its size, repeated statics share
+            # one copy (the engine's dynamic view closes in there too: case perf-mournhold-sky-interiors)
             env.update({"sky": True, "ambient": weather["ambient"], "sun": weather["sun"], "sun_dir": EXTERIOR_SUN_DIR,
-                        "weather": weather})
+                        "weather": weather, "chunk": EXTERIOR_CHUNK, "share": True})
             env["info"].update({"fog_start": FOG_START, "fog_end": FOG_END,
                                 "fog": [int(round(c * 255)) for c in weather["fog"]] + [255], "fog_density": 1.0})
         refs = cell_refs(cell)
@@ -876,10 +1033,11 @@ class Converter:
             env["water_moves"] = True
         return self.convert(cell_name, refs, env, spawn)
 
-    def exterior_cell(self, gx, gy, terrain, walk_bounds, weather, walkable, name, file, spawn=None):
+    def exterior_cell(self, gx, gy, terrain, walk_bounds, weather, walkable, name, file, spawn=None, share=False):
         """One exterior grid cell. Walkable cells get their references, full-resolution terrain and
         collision; horizon cells (around the walkable area) only coarse terrain and water.
-        walk_bounds = (x0, y0, x1, y1) world rectangle the player is kept in."""
+        walk_bounds = (x0, y0, x1, y1) world rectangle the player is kept in. share: a cell of a heavy spot (level.py
+        heavy_spots), its repeated statics shared (share_models)."""
         cell = self.db["CELL"].get((gx, gy))
         refs = cell_refs(cell) if walkable and cell is not None else []
         ambient, sun = weather["ambient"], weather["sun"]
@@ -890,6 +1048,8 @@ class Converter:
                         "bounds": list(walk_bounds), "interior": False},
                "chunk": EXTERIOR_CHUNK, "grid": (gx, gy), "terrain": terrain, "walkable": walkable,
                "weather": weather, "file": file}
+        if share:
+            env["share"] = True          # (only then: other cells' cache keys stay as they were)
         return self.convert(name, refs, env, spawn)
 
     def lights_of(self, refs):
@@ -944,6 +1104,7 @@ class Converter:
             return (int(math.floor(c[0] / chunk_size)), int(math.floor(c[1] / chunk_size)))
 
         groups, door_groups, col_ranges = {}, {}, {}
+        candidates = {}                  # (env "share") model -> its placements that may share one copy (share_models)
         col_pos, col_tris, col_count, actors, npc_recs = [], [], 0, [], []
         npc_models = []
         ref_out = []
@@ -1023,6 +1184,11 @@ class Converter:
                     door_groups[ri] = shapes
                     shapes = []
                 else:
+                    # (a static of a heavy spot: its shapes in the model's own space too, for share_models)
+                    if env.get("share") and rec.tag in SHARE_TYPES and wfx is None and shapes:
+                        candidates.setdefault(model.lower(), []).append(
+                            {"ri": ri, "m": m, "shapes": shapes, "obj": [s["pos"].copy() for s in shapes],
+                             "objn": [s["nrm"].copy() for s in shapes]})
                     world_shapes(shapes, m)
             allpos = [s["pos"] for s in (shapes or door_groups.get(ri, []))]
             if allpos:
@@ -1033,13 +1199,19 @@ class Converter:
             if rec.tag in ("NPC_", "CREA"):
                 continue
             detail = 0.0
-            if not env["interior"] and allpos:
+            if (not env["interior"] or env.get("sky")) and allpos:
                 detail = detail_distance(float(np.linalg.norm(p.max(0) - p.min(0))))
             for s in shapes:
                 s["ref"] = ri if rec.tag != "STAT" else None
+            if rec.tag in SHARE_TYPES and candidates.get(model.lower(), [{}])[-1].get("ri") == ri:
+                candidates[model.lower()][-1]["detail"] = detail
+                continue                 # (share_models decides where its shapes go)
+            for s in shapes:
                 # (a sliding texture keeps its own batch: the rate is the batch's)
                 groups.setdefault((s["tex"], s["flags"], s["alpha_ref"], chunk_of(s), detail, s.get("scroll") or (0.0, 0.0)),
                                   []).append(s)
+
+        shared = share_models(candidates, groups, lights, ambient, sun, sun_dir, chunk_of) if candidates else []
 
         sky = []
         if not env["interior"]:
@@ -1089,6 +1261,11 @@ class Converter:
         for shapes in door_groups.values():
             for s in shapes:
                 use(s, (s["tex"], s["flags"]))
+        for sm in shared:
+            for b in sm["batches"]:
+                for sh in b["shapes"]:
+                    use(sh, (sh["tex"], sh["flags"]))
+                b["tex"] = tex_index.get(b["tex_path"], -1)
         for a in npc_models:
             for s in a["shapes"]:
                 use(s, (s["tex"], s["flags"]))
@@ -1120,7 +1297,7 @@ class Converter:
         collision = (np.concatenate(col_pos), np.concatenate(col_tris)) if col_pos else \
             (np.zeros((3, 3)), np.array([[0, 1, 2]]))
         placed = write_cell(base.with_suffix(".cel"), info, tex_names, batches, collision, actors, door_meshes, sky,
-                            col_ranges)
+                            col_ranges, shared)
         for ri, (first, n) in placed.items():
             if n:
                 ref_out[ri]["col"] = [first, n]
@@ -1139,16 +1316,20 @@ class Converter:
                             "lib": self.actor_library(a["id"], a["shapes"], sk),
                             "meshes": self.library_meshes[a["id"]],     # (for the memory estimate below)
                             "tint": tint, "lamp": lamp})
-        write_actor_placements(base.with_suffix(".act"), act_out)
+        # (and the light there without lamps: people placed while playing, lit as a placement is)
+        write_actor_placements(base.with_suffix(".act"), act_out, light_tint(np.zeros(3), [], ambient, sun)[0])
         nv = sum(len(b["verts"]) for b in batches)
         nt = sum(len(b["idx"]) for b in batches) // 3
         size = base.with_suffix(".cel").stat().st_size + base.with_suffix(".act").stat().st_size
         print(f"  {base.name}.cel: {len(batches)} batches, {nv} verts, {nt} tris, {len(door_meshes)} swing doors, "
               f"{len(sky)} sky batches, collision {len(collision[1])} tris, {len(tex_names)} textures, "
               f"{len(act_out)} animated actors; {size // 1024} KB on disk")
+        if shared:
+            print(f"  {base.name}.cel: {len(shared)} shared models, {sum(len(sm['places']) for sm in shared)} placements, "
+                  f"{shared_bytes(shared) // 1024} KB (as batches {sum(sm['baked_bytes'] for sm in shared) // 1024} KB)")
         # Linear memory the 3DS needs for this cell's buffers (textures are added by the caller)
         buf = lambda bs: sum(len(b["verts"]) * 16 + len(b["idx"]) * 2 for b in bs)
-        geometry = buf(batches) + buf(sky) + sum(buf(d["batches"]) for d in door_meshes) + \
+        geometry = buf(batches) + buf(sky) + sum(buf(d["batches"]) for d in door_meshes) + shared_bytes(shared) + \
             sum(len(m["pos"]) * VERTEX.itemsize + len(np.asarray(m["tris"]).ravel()) * 2
                 for a in act_out for m in a["meshes"])
         return {"refs": ref_out, "npcs": npc_recs, "file": base.name, "textures": tex_names,

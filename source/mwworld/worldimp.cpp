@@ -86,10 +86,25 @@ void World::attachSpawned(int ri)
 	int skel = sp != game.spawns.end() ? sp->second.skeleton : def ? def->skel : -1;
 	if (!l || lib.empty() || skel < 0)
 		return;
-	float c = cosf(r.rot[2]), s = sinf(r.rot[2]);
-	float place[12] = { c, s, 0.0f, r.pos[0], -s, c, 0.0f, r.pos[1], 0.0f, 0.0f, 1.0f, r.pos[2] };
-	r.anim = actorsAddFromLibrary(l->actors, l->cell, textures, dataDir, lib, ri, skel, place);
-	applyScriptScale(ri);
+	// A person's box to aim at where they stand, as spawnActor gives one: a leveled list's pick drawn from its own
+	// library (Solstheim's reavers and smugglers) had none, and the crosshair never found them
+	if (!r.hasBox)
+	{
+		r.hasBox = true;
+		memcpy(r.start, r.pos, sizeof(r.pos));
+		r.start[3] = r.rot[2];
+		r.boxStart[0] = r.pos[0] - 30.0f; r.boxStart[1] = r.pos[1] - 30.0f; r.boxStart[2] = r.pos[2];
+		r.boxStart[3] = r.pos[0] + 30.0f; r.boxStart[4] = r.pos[1] + 30.0f; r.boxStart[5] = r.pos[2] + 128.0f;
+		r.fitBox();
+	}
+	// (at its size, as a placement of it has: a Grizzly's record makes it 1.5, a person's race height; OpenMW's
+	// adjustScale. Unscaled, a spawned Grizzly stood two thirds of OpenMW's: case bug-spawned-scale)
+	const float across = sp != game.spawns.end() ? sp->second.size[0] : 1.0f;
+	const float up = sp != game.spawns.end() ? sp->second.size[1] : 1.0f;
+	float c = cosf(r.rot[2]) * across, s = sinf(r.rot[2]) * across;
+	float place[12] = { c, s, 0.0f, r.pos[0], -s, c, 0.0f, r.pos[1], 0.0f, 0.0f, up, r.pos[2] };
+	// (lit by the cell's light as a placement there is: the library's even light stood out dark)
+	r.anim = actorsAddFromLibrary(l->actors, l->cell, textures, dataDir, lib, ri, skel, place, l->actors.cellLight);
 	CellActor ca = {};
 	strncpy(ca.id, r.id.c_str(), sizeof(ca.id) - 1);
 	strncpy(ca.name, game.actors[r.actor].name.c_str(), sizeof(ca.name) - 1);
@@ -99,6 +114,46 @@ void World::attachSpawned(int ri)
 	ca.height = 128.0f;
 	l->cell.actors.push_back(ca);
 	r.cellActor = l->cell.actors.size() - 1;
+	syncActor(ri);
+}
+
+void World::werewolfBody(int ri)
+{
+	Ref& r = refs[ri];
+	LoadedCell* l = r.cell >= 0 ? cells[placeOf(ri)].live : nullptr;
+	ActorSet* set = r.anim >= 0 ? actorsOf(ri) : nullptr;
+	if (!l)
+		return;
+	if (r.werewolf && r.humanAnim < 0)
+	{
+		auto sp = game.spawns.find("bm_werewolf_default");
+		if (sp == game.spawns.end() || !set || r.anim >= (int)set->actors.size())
+			return;
+		float c = cosf(r.rot[2]), s = sinf(r.rot[2]);
+		float place[12] = { c, s, 0.0f, r.pos[0], -s, c, 0.0f, r.pos[1], 0.0f, 0.0f, 1.0f, r.pos[2] };
+		// (in the light their own body has where it stands)
+		u8 tint[3];
+		memcpy(tint, set->actors[r.anim].tint, sizeof(tint));
+		int wolf = actorsAddFromLibrary(l->actors, l->cell, textures, dataDir, sp->second.lib, ri, sp->second.skeleton, place,
+			tint);
+		if (wolf < 0)
+			return;
+		const Actor& human = set->actors[r.anim];
+		memcpy(set->actors[wolf].lamp, human.lamp, sizeof(human.lamp));
+		set->actors[wolf].lampSplit = human.lampSplit;
+		set->actors[r.anim].ref = -1;          // (their own model kept, not drawn)
+		r.humanAnim = r.anim;
+		r.anim = wolf;
+	}
+	else if (!r.werewolf && r.humanAnim >= 0)
+	{
+		if (set && r.anim < (int)set->actors.size())
+			set->actors[r.anim].ref = -1;
+		if (set && r.humanAnim < (int)set->actors.size())
+			set->actors[r.humanAnim].ref = ri;
+		r.anim = r.humanAnim;
+		r.humanAnim = -1;
+	}
 	syncActor(ri);
 }
 
@@ -192,6 +247,24 @@ int World::dropItem(const InventoryItem& it, const float pos[3], float yaw, int 
 	rebuildLoadedLists();
 	logf("world: dropped %d x %s at %.0f %.0f %.0f", it.count, it.id.c_str(), pos[0], pos[1], pos[2]);
 	return slot;
+}
+
+// SetScale (OpenMW's World::scaleObject): the reference's size. A person or creature is drawn that much bigger and its
+// collision cylinder grows (syncActor), a door's drawing follows (it is drawn with its scale); what the level baked
+// into the cell's batches keeps its size (no Bloodmoon script scales one)
+void World::scaleObject(int ri, float scale)
+{
+	Ref& r = refs[ri];
+	float now = r.scale > 0.0f ? r.scale : 1.0f;
+	scale = fmaxf(0.01f, scale);
+	if (scale == now)
+		return;
+	r.scaleFactor *= scale / now;
+	r.scale = scale;
+	if (r.actor >= 0)
+		syncActor(ri);
+	else if (r.doorMesh < 0)
+		logf("script: SetScale %s %.2f: drawn at the level's size (baked)", r.id.c_str(), scale);
 }
 
 // PlaceItem / PlaceItemCell (OpenMW's placeObject): a person or creature placed as PlaceAtMe places them, an item as one
@@ -855,9 +928,10 @@ void World::update(float dt)
 	if (g_profile.actorViewLimit > 0.0f)
 		reach = fminf(reach, g_profile.actorViewLimit + 200.0f);
 	frame++;
-	// An Old 3DS poses people by time (ConsoleProfile::poseHz), not every so many frames: near, middle and far rates,
+	// Both consoles pose people by time (ConsoleProfile::poseHz), not every so many frames: near, middle and far rates,
 	// the near one only for the few most in view (ahead of the eye, the nearer and the more central the higher); the
-	// rest near take the middle's rate, and those out of view the far one
+	// rest near take the middle's rate, and those out of view the far one. (A profile without rates poses every few
+	// frames: actorSkinEvery / actorPoseEvery)
 	bool byTime = g_profile.poseHz[0] > 0.0f;
 	if (byTime)
 	{

@@ -12,6 +12,7 @@
 #include "components/debug/debuglog.hpp"
 
 extern const char* g_playerBlock;
+extern const char* g_playerPushed;
 #include <malloc.h>
 #include "testdrive/testhelpers.hpp"
 #include <optional>
@@ -133,11 +134,86 @@ void TestDriver::keepFloating(Session& s)
 		s.castItem("uber_fly");
 }
 
+// The fight with whoever is in the way (fightRef): a walk's, or a flight's blocked in the air by one attacking us
+bool TestDriver::fightInWay(Session& s, PlayerInput& in, float dt)
+{
+	World& w = s.w;
+	Player& p = w.player;
+	const Ref& f = w.refs[fightRef];
+	float fx = f.pos[0] - p.feet[0], fy = f.pos[1] - p.feet[1], fd = hypotf(fx, fy);
+	fightTimer += dt;
+	// v2 kit: someone peaceful the blow would reach (an escort stepping in front): the blow held wound up, not let go,
+	// stepping aside for a clear swing as a player would. Sinnammu Mirpal died to a blow meant for a dreugh
+	// (the blow lands on the nearest one in reach, OpenMW's getHitContact: Session::swingTarget. Any peaceful one in
+	// reach held it, and with a dreugh fought from its own longer reach Sinnammu Mirpal, behind it, held every blow)
+	auto friendInReach = [&]() {
+		if (!s.kitV2())
+			return false;
+		int t = s.swingTarget();
+		if (t >= 0 && t != fightRef && w.refs[t].ai != AI_COMBAT)
+			return true;
+		// (and one following us close in front of us, a step from the arc: the blow lands at the end of the swing, and
+		// Sinnammu Mirpal, fighting the slaughterfish beside the player in the water, swam into it after it was let go)
+		for (int i : w.loadedActors)
+		{
+			const Ref& o = w.refs[i];
+			if (i == fightRef || o.dead || !w.followsPlayer(i))
+				continue;
+			float ox = o.pos[0] - p.feet[0], oy = o.pos[1] - p.feet[1], oz = o.pos[2] - p.feet[2];
+			if (ox * ox + oy * oy + oz * oz < 220.0f * 220.0f && fabsf(remainderf(atan2f(ox, oy) - p.yaw, 6.2831853f)) < 0.9f)
+				return true;
+		}
+		return false;
+	};
+	bool fightOver = f.dead || !f.visible() || (!fightHelp && (f.ai != AI_COMBAT || f.duelFoe >= 0)) || fd > 600.0f || fightTimer > 20.0f;
+	if (fightOver && fightHold && friendInReach())
+	{
+		// over with the blow still held: turned away from them before it goes
+		p.yaw += 3.14159f;
+		in.attack = true;
+		return true;
+	}
+	if (fightOver)
+	{
+		fightHold = false;
+		// (fought the whole while and still standing: not again this walk, it can't be reached; Rotheran's arena
+		// dremora casting from its cage had the walk turning back to it until the step timed out)
+		if (!f.dead && fightTimer > 20.0f)
+			fightGaveUp.push_back(fightRef);
+		fightHelp = false;
+		logf("drive: %s %s after %.1f s: on to %s", f.id.c_str(), f.dead ? "dead" : "no longer in the way", fightTimer, id.c_str());
+		fightRef = -1;
+		progressTimer = 0.0f;
+		memcpy(progressAt, p.feet, sizeof(progressAt));
+		return true;
+	}
+	handItem(s, true);
+	p.yaw = atan2f(fx, fy);
+	p.pitch = atan2f((f.boxMin[2] + f.boxMax[2]) * 0.5f - playerEyeZ(p), fmaxf(fd, 1.0f));
+	// (in the water one above or below us out of the blow's reach up or down, OpenMW's isInMeleeReach: swum to
+	// along the pitch, as a player dives after a fish. It stood 90 off and swung at a slaughterfish 150 under it)
+	bool deep = p.swimming && fabsf(f.pos[2] - p.feet[2]) > 90.0f;
+	in.moveY = fd > 90.0f || deep ? 1.0f : 0.0f;
+	in.attack = fmodf(fightTimer, 0.7f) < 0.4f;
+	// (judged facing the way just set: the blow goes from there)
+	if (friendInReach())
+	{
+		in.attack = fightHold;      // held stays held (let go now it would reach them), unpressed stays so
+		in.moveX = 1.0f;
+	}
+	fightHold = in.attack;
+	return true;
+}
+
 bool TestDriver::updateFly(Session& s, PlayerInput& in, float dt)
 {
 	Player& p = s.w.player;
 	float dx = goal[0] - p.feet[0], dy = goal[1] - p.feet[1];
 	float dist = sqrtf(dx * dx + dy * dy);
+	if (fightRef >= 0)
+		return fightInWay(s, in, dt);
+	if (*g_playerPushed)
+		flyPushedBy = g_playerPushed;
 	// v2 kit: the fly item, used again whenever less than half a second of its levitation is left (a use starts it afresh)
 	bool flyItem = s.kitV2() && s.w.itemCount("uber_fly") > 0;
 	if (flyItem && !(phase == 2 && p.onGround))
@@ -164,6 +240,12 @@ bool TestDriver::updateFly(Session& s, PlayerInput& in, float dt)
 		// the levitation cast the step before (the v2 kit's fly spell) lands at its animation's release: wait for it
 		if (!flyBegun && elapsed < 4.0f && (s.castPending || s.castBusy()))
 			return true;
+		// (a use that did not take, the first after Bloodmoon's ending: used again, as a player presses it again)
+		if (!flyBegun && elapsed < 4.0f && flyItem)
+		{
+			s.castItem("uber_fly");
+			return true;
+		}
 		fail("not levitating (or it ran out on the way)");
 		return false;
 	}
@@ -303,6 +385,31 @@ bool TestDriver::updateFly(Session& s, PlayerInput& in, float dt)
 			bool closer = dist < lastGoal - 40.0f;
 			lastGoal = dist;
 			progressTimer = 0.0f;
+			std::string pushedBy = flyPushedBy;
+			flyPushedBy.clear();
+			// v2 kit: held in the air by one attacking us (a cliff racer's body, as wide as it is, in the way of the
+			// flight: it followed, and every climb met it again): fought, as a player does, then on
+			if (!closer && s.kitV2())
+			{
+				int attacker = -1;
+				for (int i : s.w.loadedActors)
+				{
+					const Ref& a = s.w.refs[i];
+					if (a.visible() && !a.dead && !a.ally && a.ai == AI_COMBAT && a.duelFoe < 0 && strcasecmp(a.idLower.c_str(), pushedBy.c_str()) == 0
+						&& std::find(fightGaveUp.begin(), fightGaveUp.end(), i) == fightGaveUp.end())
+						attacker = i;
+				}
+				if (attacker >= 0)
+				{
+					logf("drive: %s holds us in the air on the way to %s: fighting it", s.w.refs[attacker].id.c_str(), id.c_str());
+					fightRef = attacker;
+					fightHelp = false;
+					fightTimer = 0.0f;
+					progressTimer = 0.0f;
+					memcpy(progressAt, p.feet, sizeof(progressAt));
+					return true;
+				}
+			}
 			if (!closer)
 			{
 				// (v2 kit: 10: the count is shared with the ways down beside the spot, and the kit's lower first climb meets more
@@ -597,59 +704,7 @@ bool TestDriver::walkStep(Session& s, PlayerInput& in, u32& down, float dt, Ref&
 	// an attacker in the way (rats in a corridor, a guard at a door): face it and fight, as a player clears the way,
 	// until it is dead, gone, or 20 s have passed; then on with the walk
 	if (fightRef >= 0)
-	{
-		const Ref& f = w.refs[fightRef];
-		float fx = f.pos[0] - p.feet[0], fy = f.pos[1] - p.feet[1], fd = hypotf(fx, fy);
-		fightTimer += dt;
-		// v2 kit: someone peaceful the blow would reach (an escort stepping in front): the blow held wound up, not let go,
-		// stepping aside for a clear swing as a player would. Sinnammu Mirpal died to a blow meant for a dreugh
-		// (the blow lands on the nearest one in reach, OpenMW's getHitContact: Session::swingTarget. Any peaceful one in
-		// reach held it, and with a dreugh fought from its own longer reach Sinnammu Mirpal, behind it, held every blow)
-		auto friendInReach = [&]() {
-			if (!s.kitV2())
-				return false;
-			int t = s.swingTarget();
-			return t >= 0 && t != fightRef && w.refs[t].ai != AI_COMBAT;
-		};
-		bool fightOver = f.dead || !f.visible() || (!fightHelp && (f.ai != AI_COMBAT || f.duelFoe >= 0)) || fd > 600.0f || fightTimer > 20.0f;
-		if (fightOver && fightHold && friendInReach())
-		{
-			// over with the blow still held: turned away from them before it goes
-			p.yaw += 3.14159f;
-			in.attack = true;
-			return true;
-		}
-		if (fightOver)
-		{
-			fightHold = false;
-			// (fought the whole while and still standing: not again this walk, it can't be reached; Rotheran's arena
-			// dremora casting from its cage had the walk turning back to it until the step timed out)
-			if (!f.dead && fightTimer > 20.0f)
-				fightGaveUp.push_back(fightRef);
-			fightHelp = false;
-			logf("drive: %s %s after %.1f s: on to %s", f.id.c_str(), f.dead ? "dead" : "no longer in the way", fightTimer, id.c_str());
-			fightRef = -1;
-			progressTimer = 0.0f;
-			memcpy(progressAt, p.feet, sizeof(progressAt));
-			return true;
-		}
-		handItem(s, true);
-		p.yaw = atan2f(fx, fy);
-		p.pitch = atan2f((f.boxMin[2] + f.boxMax[2]) * 0.5f - playerEyeZ(p), fmaxf(fd, 1.0f));
-		// (in the water one above or below us out of the blow's reach up or down, OpenMW's isInMeleeReach: swum to
-		// along the pitch, as a player dives after a fish. It stood 90 off and swung at a slaughterfish 150 under it)
-		bool deep = p.swimming && fabsf(f.pos[2] - p.feet[2]) > 90.0f;
-		in.moveY = fd > 90.0f || deep ? 1.0f : 0.0f;
-		in.attack = fmodf(fightTimer, 0.7f) < 0.4f;
-		// (judged facing the way just set: the blow goes from there)
-		if (friendInReach())
-		{
-			in.attack = fightHold;      // held stays held (let go now it would reach them), unpressed stays so
-			in.moveX = 1.0f;
-		}
-		fightHold = in.attack;
-		return true;
-	}
+		return fightInWay(s, in, dt);
 	// a route by trial steps (a dive, a run of jumps): leg by leg
 	if (!swimRoute.empty())
 	{
@@ -835,6 +890,9 @@ bool TestDriver::walkStep(Session& s, PlayerInput& in, u32& down, float dt, Ref&
 				// (v2 kit: not one open already, or opening: a press shut it again, the East Empire Company's back room)
 				if (s.kitV2() && (d.doorTarget != 0.0f || d.doorAngle != 0.0f))
 					continue;
+				// (OPEN: the door asked for is opened by the press at it, not on the way as well: the two shut it again)
+				if (!openToken.empty() && openToken == retryToken && i == ref)
+					continue;
 				float ex = d.pos[0] - p.feet[0], ey = d.pos[1] - p.feet[1];
 				if (ex * ex + ey * ey < bd && fabsf(d.pos[2] - p.feet[2]) < 200.0f)
 				{
@@ -908,7 +966,8 @@ bool TestDriver::walkStep(Session& s, PlayerInput& in, u32& down, float dt, Ref&
 			}
 			// v2 kit: held up right below it (a door a floor up, a ledge, within 400): float up on the fly item a while, as a player with it
 			// would; the walk rises to a target above while levitating
-			if (s.kitV2() && dz > 60.0f && dist < 400.0f && floatUntil < 0.0f && s.w.itemCount("uber_fly") > 0 && p.levitate <= 0.0f)
+			if (s.kitV2() && dz > 60.0f && dist < (wayOn && (escort.empty() || p.swimming) ? 1200.0f : 400.0f) && floatUntil < 0.0f && s.w.itemCount("uber_fly") > 0 && p.levitate <= 0.0f
+				&& !(wayOn && dz < 150.0f && stuckTries == 0))
 			{
 				logf("drive: stuck below %s (%.0f up): floating up", id.c_str(), dz);
 				floatUntil = s.w.time + 8.0f;
@@ -1026,6 +1085,15 @@ bool TestDriver::walkStep(Session& s, PlayerInput& in, u32& down, float dt, Ref&
 					sidestepTimer = (1.0f + round * 0.8f) * (s.kitV2() ? 550.0f / fmaxf(100.0f, p.runSpeed * p.loadSpeed) : 1.0f);
 				}
 			}
+			else if (s.testLegit && kind == WALK && !w.controlsEnabled)
+			{
+				// a script took the controls on the way (a scene: Hircine's, once the player is within 512 of him): a
+				// player stands there too, so the walk ends where it got to rather than failing
+				logf("drive: walk to %s ends at %.0f %.0f %.0f (%.0f away): the controls taken by a script", id.c_str(), p.feet[0],
+					p.feet[1], p.feet[2], dist);
+				kind = NONE;
+				return false;
+			}
 			else if (s.testLegit)
 			{
 				// LEGIT: no warp past it (a player can't); the run stops being one a player could have played
@@ -1037,6 +1105,18 @@ bool TestDriver::walkStep(Session& s, PlayerInput& in, u32& down, float dt, Ref&
 					logf("drive: stuck diagnostics: fatigue %.0f of %.0f, effects:%s, screen %d, swimming %d, levitate %.0f", w.stats.fatigue, w.stats.fatigueMax,
 						fx.empty() ? " none" : fx.c_str(), (int)s.screen, (int)p.swimming, p.levitate);
 					logf("drive: stuck diagnostics: target at %.0f %.0f %.0f, last pushed back by %s", r.pos[0], r.pos[1], r.pos[2], g_playerBlock);
+					logf("drive: stuck diagnostics: controls %d (off %d), knocked %.1f, bounty %d, paused %d", (int)w.controlsEnabled, (int)w.controlsOff, w.player.knockTimer, w.bounty, (int)s.worldPaused());
+					{
+						// what the crosshair meets looking straight at the middle of the target
+						float eye[3] = { p.feet[0], p.feet[1], playerEyeZ(p) };
+						float cx = (r.boxMin[0] + r.boxMax[0]) * 0.5f, cy = (r.boxMin[1] + r.boxMax[1]) * 0.5f, cz = (r.boxMin[2] + r.boxMax[2]) * 0.5f;
+						float d[3] = { cx - eye[0], cy - eye[1], cz - eye[2] };
+						float len = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+						for (float& v : d) v /= fmaxf(len, 1.0f);
+						int hit = worldPick(w, eye, d, 192.0f);
+						logf("drive: stuck diagnostics: the game's crosshair is on %s, yaw %.2f pitch %.2f, to the door %.2f, aims %d", s.target >= 0 ? w.refs[s.target].id.c_str() : "nothing", p.yaw, p.pitch, atan2f(cx - p.feet[0], cy - p.feet[1]), (int)aimsAt(s, ref));
+						logf("drive: stuck diagnostics: aimed at its middle (%.0f away, box %.0f..%.0f x %.0f..%.0f x %.0f..%.0f) the crosshair meets %s", len, r.boxMin[0], r.boxMax[0], r.boxMin[1], r.boxMax[1], r.boxMin[2], r.boxMax[2], hit >= 0 ? w.refs[hit].id.c_str() : "nothing");
+					}
 					// who stands close (a person in the way of a doorway shows here)
 					for (int i : w.loadedActors)
 					{

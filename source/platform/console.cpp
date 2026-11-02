@@ -20,8 +20,11 @@ void consoleProfileInit(bool new3ds, size_t heapBytes)
 		p.actorDetailScale = 1.0f;
 		p.detailScale = 1.0f;
 		p.skinEvery[0] = 2, p.skinEvery[1] = 3, p.skinEvery[2] = 4;
-		p.poseHz[0] = p.poseHz[1] = p.poseHz[2] = 0.0f;
-		p.poseFull = 0;
+		// People are posed by time, as on an Old 3DS, a step above it (user, 2026-10-27): 30 a second for the three most in
+		// view, 15 for the rest near and the middle, 10 far. Counted in frames with the steps shortened below 50 fps, a
+		// Balmora street at 30 fps was posed 1.8 x as often and ran slower (perf-new3ds-pose-budget)
+		p.poseHz[0] = 30.0f, p.poseHz[1] = 15.0f, p.poseHz[2] = 10.0f;
+		p.poseFull = 3;
 		p.rgb565 = false;
 		p.cmdBufScale = 8;           // room for both eyes of a busy town
 		p.goldenEyeAtStart = false;
@@ -64,7 +67,6 @@ void consoleProfileInit(bool new3ds, size_t heapBytes)
 	p.spriteBudgetMax = p.slowCpu ? 400 : 600;
 	// (an Old 3DS has the streaks alone: it has the least to spare in a busy town, in 3D most of all)
 	p.rainExtras = !p.slowCpu;
-	// (an Old 3DS draws from Project Atlas's sheets: a sheet's smaller copies blend its pictures into each other, and the
-	// far walkways and walls showed dark patches of the trim packed under them, flickering in and out)
-	p.textureMips = !p.slowCpu;
+	// (snow as ash's flakes on a New 3DS, half on an Old one: spec/performance-tradeoffs.md)
+	p.snowFlakes = p.slowCpu ? 120 : 240;
 }

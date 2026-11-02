@@ -54,7 +54,12 @@ int Session::spellSchool(const SpellDef& sp, float* lowest)
 
 int Session::castChance(const SpellDef& sp)
 {
-	if (sp.type == 5)
+	// Powers always work; an enchantment is no spell of the caster's, so its target's resistance roll takes 100
+	// (OpenMW's getEffectMultiplier: castChance only for an ESM::Spell)
+	if (sp.type == 5 || sp.type >= ENCH_ONCE)
+		return 100;
+	// A spell flagged "always succeeds" (SPDT flags 4: Bloodmoon's Call Wolf and Call Bear) too (OpenMW's F_Always)
+	if (sp.flags & 4)
 		return 100;
 	const PlayerStats& s = w.stats;
 	float lowest = 0.0f;

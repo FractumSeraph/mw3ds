@@ -17,6 +17,80 @@ extern const char* g_playerBlock;
 #include "components/files/zfile.hpp"
 #include <malloc.h>
 #include "testdrive/testhelpers.hpp"
+#include "components/misc/cardslices.hpp"
+#include "mwdialogue/dialoguemanagerimp.hpp"
+
+// The card files' write-once rule (components/misc/cardslices.hpp) on a scratch file: 0 when every step does what it
+// should, else the first step that didn't
+static int cardSlicesSteps()
+{
+	const char* path = "sdmc:/3ds/mw3ds/slices-test.bin";
+	remove(path);
+	u8 a[100], b[50], b2[50], c[70];
+	for (int i = 0; i < 100; i++)
+		a[i] = (u8)i;
+	for (int i = 0; i < 50; i++)
+		b[i] = b2[i] = (u8)(200 - i);
+	b2[25] ^= 1;
+	memset(c, 7, sizeof(c));
+	u32 off[3], check[3];
+	// (the slices given, a start's worth: how many bytes it wrote, -1 if the card refused one)
+	auto start = [&](CardSlices& f, std::initializer_list<std::pair<const u8*, u32>> slices) -> int {
+		if (!f.begin())
+			return -1;
+		int k = 0;
+		for (auto& sl : slices)
+		{
+			if (!f.put(sl.first, sl.second, off[k], check[k]))
+				return -1;
+			k++;
+		}
+		return f.end() ? (int)f.written() : -1;
+	};
+	CardSlices f(path, 1);
+	if (start(f, { { a, 100 }, { b, 50 }, { c, 70 } }) != 220) return 1;          // no file: all of it
+	u32 cAt = off[2];
+	if (start(f, { { a, 100 }, { b, 50 }, { c, 70 } }) != 0 || off[2] != cAt) return 2;   // the same: nothing
+	if (start(f, { { a, 100 }, { b2, 50 }, { c, 70 } }) != 120) return 3;         // the second differs: it and on
+	if (start(f, { { a, 100 }, { b2, 50 }, { c, 70 } }) != 0) return 4;
+	if (start(f, { { a, 100 }, { b2, 50 } }) != 0) return 5;                       // one fewer: only the table
+	if (start(f, { { a, 100 }, { b2, 50 } }) != 0) return 6;
+	if (start(f, { { a, 100 }, { b2, 50 }, { c, 70 } }) != 70) return 7;          // one more: that one
+	CardSlices other(path, 2);
+	if (start(other, { { a, 100 }, { b2, 50 }, { c, 70 } }) != 220) return 8;     // another format: all of it
+	// read back as the stores do: the slice checks out, and once a letter of it changes on the card it doesn't
+	u8 back[70];
+	FILE* r = fopen(path, "rb");
+	bool same = r && fseek(r, off[2], SEEK_SET) == 0 && fread(back, 1, 70, r) == 70 && CardSlices::check(back, 70) == check[2];
+	if (r)
+		fclose(r);
+	if (!same) return 9;
+	FILE* w = fopen(path, "r+b");
+	u8 bad = 8;
+	bool hurt = w && fseek(w, off[2] + 10, SEEK_SET) == 0 && fwrite(&bad, 1, 1, w) == 1;
+	if (w)
+		fclose(w);
+	r = fopen(path, "rb");
+	same = r && fseek(r, off[2], SEEK_SET) == 0 && fread(back, 1, 70, r) == 70 && CardSlices::check(back, 70) == check[2];
+	if (r)
+		fclose(r);
+	if (!hurt || same) return 10;
+	other.damaged();                                                               // the next start writes it all
+	if (start(other, { { a, 100 }, { b2, 50 }, { c, 70 } }) != 220) return 11;
+	// a write under way: the header is cleared before the first slice goes, so a cut there leaves no whole file
+	if (!other.begin()) return 12;
+	other.put(a, 100, off[0], check[0]);
+	other.put(b, 50, off[1], check[1]);
+	char head[4] = { 1, 1, 1, 1 };
+	r = fopen(path, "rb");
+	bool cleared = r && fread(head, 1, 4, r) == 4 && memcmp(head, "\0\0\0\0", 4) == 0;
+	if (r)
+		fclose(r);
+	other.end();
+	if (!cleared) return 12;
+	remove(path);
+	return 0;
+}
 
 std::optional<bool> numberOfState(Session& s, const std::string& what, const std::string& arg, float& v)
 {
@@ -29,6 +103,8 @@ std::optional<bool> numberOfState(Session& s, const std::string& what, const std
 	else if (what == "bloodlow") v = s.bloodLow;
 	else if (what == "bloodhigh") v = s.bloodHigh;
 	else if (what == "bodymeshes") v = s.body.set.actors.empty() ? 0.0f : (float)s.body.set.actors[0].meshes.size();   // the third-person body's meshes
+	else if (what == "bodywolf")     // the third-person body is the werewolf's own model (in wolf form), 1; else 0
+		v = s.body.wolf && !s.body.set.actors.empty() && !s.body.set.actors[0].meshes.empty() ? 1.0f : 0.0f;
 	else if (what == "bodyhits") v = (float)s.body.hitsPlayed;       // Hit groups the third-person body has played on being struck
 	else if (what == "healthmax") v = st.healthMax;
 	else if (what == "magicka") v = st.magicka;
@@ -108,6 +184,8 @@ std::optional<bool> numberOfState(Session& s, const std::string& what, const std
 	else if (what == "makeeffects") v = (float)s.makeEffects.size(); // ... the effects put together so far
 	else if (what == "footrepeat") v = (float)s.stepRepeats;         // footsteps on the same foot twice in a row
 	else if (what == "enemiesnear") v = s.enemiesNear() ? 1.0f : 0.0f;   // rest refused: enemies about
+	else if (what == "werewolfkills") v = (float)w.stats.werewolfKills;   // people killed since the change (GetWerewolfKills)
+	else if (what == "werewolf") v = w.stats.werewolf ? 1.0f : 0.0f;     // the player is in wolf form
 	else if (what == "watervolume") v = s.waterVolume;                // the near-water sound's volume (0..1, OpenMW's rule)
 	else if (what == "footeven")    // the last two gaps between footsteps, the shorter as a percent of the longer (100: even)
 	{
@@ -185,9 +263,19 @@ std::optional<bool> numberOfState(Session& s, const std::string& what, const std
 	// The heap (Old 3DS soak runs): KB in use now, the most used so far, the biggest block still to be had; zlib streams
 	// left open; whether the out-of-memory reserve is spent (1) or held (0)
 	else if (what == "heapused") v = (float)(mallinfo().uordblks / 1024);
-	else if (what == "heappeak") { heapNote(mallinfo().uordblks); v = (float)(heapHighWater() / 1024); }
+	else if (what == "heappeak") { heapNote(heapInUse()); v = (float)(heapHighWater() / 1024); }
 	else if (what == "heapblock") v = (float)(heapLargestBlock() / 1024);
+	else if (what == "probemismatch") v = (float)dialogueProbeMismatches(w);   // topicstore.cpp's probe against the filter
+	else if (what == "objslots") v = (float)w.refs.size();          // object slots held (World::refs), in use or free
+	else if (what == "objsloaded") v = (float)w.refsInMemory();     // objects of cells in memory
+	// ... KB free in holes under 256 KB (the PC memory checker's heap; 0 elsewhere): the heap cut up
+	else if (what == "heapscattered")
+	{
+		size_t kb[4] = {};
+		v = heapHoles(kb) ? (float)(kb[0] + kb[1]) : 0.0f;
+	}
 	else if (what == "zopen") v = (float)zOpenCount();
+	else if (what == "cardslices") v = (float)cardSlicesSteps();   // the card files' write-once rule: 0 when it holds
 	else if (what == "memorylow") v = memoryReserveHeld() ? 0.0f : 1.0f;
 	else if (what == "uiintact") v = uiThemeIntact() ? 1.0f : 0.0f;  // the UI's font and frames still as loaded
 	else if (what == "groundgaps") { extern int g_groundGaps; v = (float)g_groundGaps; }   // cracks in the last SHOT (native only, -1 on the 3DS)
@@ -205,6 +293,7 @@ std::optional<bool> numberOfState(Session& s, const std::string& what, const std
 	else if (what == "waterscroll") v = rendererWaterScroll();       // water's slide, texture repeats a second
 	else if (what == "controls") v = w.controlsEnabled ? 1.0f : 0.0f;   // DisablePlayerControls / EnablePlayerControls
 	else if (what == "jumping") v = w.jumpingEnabled ? 1.0f : 0.0f;     // DisablePlayerJumping / EnablePlayerJumping
+	else if (what == "menuopen") v = s.menuOpen() ? 1.0f : 0.0f;       // a screen, a message or a talk holds the world still
 	else if (what == "loadscreens") v = (float)s.loadScreens;          // trips through the loading screen so far
 	else if (what == "restsleep") v = s.restSleep ? 1.0f : 0.0f;       // the rest menu sleeps (else only waits: illegal here)
 	else if (what == "skillsum") { v = 0; for (int k = 0; k < 27; k++) v += st.skills[k]; }   // all 27 skills (jail time)
@@ -214,6 +303,9 @@ std::optional<bool> numberOfState(Session& s, const std::string& what, const std
 	else if (what == "mapzoom") v = s.mapZoomIdx;         // its zoom step
 	else if (what == "mapcx") v = s.mapCX;                // the map view's centre (world map: map pixels, local: picture pixels)
 	else if (what == "mapcy") v = s.mapCY;
+	else if (what == "mapviewdist")       // the local map's view centre outdoors: how far from the player, world units
+		v = hypotf(s.localMin[0] + s.mapCX / 256.0f * s.localSize - w.player.feet[0],
+			s.localMin[1] + s.localSize - s.mapCY / 256.0f * s.localSize - w.player.feet[1]);
 	else if (what == "mapfogseen")                         // the squares of this interior's local map out of the fog
 	{
 		v = 0;
@@ -235,6 +327,7 @@ std::optional<bool> numberOfState(Session& s, const std::string& what, const std
 	else if (what == "swings") v = (float)s.swingCount;       // blows the player let go
 	else if (what == "casts") v = (float)s.castCount;         // spells the player cast
 	else if (what == "vmaction") v = (float)s.vm.action;
+	else if (what == "hudwolfhand") v = s.hudHandArt() ? 1.0f : 0.0f;   // the weapon box shows the werewolf's claw
 	else if (what == "spells") v = (float)st.spells.size();
 	else return false;
 	return true;

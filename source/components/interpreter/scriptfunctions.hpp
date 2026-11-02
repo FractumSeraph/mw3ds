@@ -75,12 +75,7 @@
 	X(GETSTANDINGACTOR, "getstandingactor") X(GETCOLLIDINGPC, "getcollidingpc") \
 	X(GETCOLLIDINGACTOR, "getcollidingactor") X(HURTCOLLIDINGACTOR, "hurtcollidingactor") X(EXPLODESPELL, "explodespell") \
 	X(GETWATERLEVEL, "getwaterlevel") X(SETWATERLEVEL, "setwaterlevel") X(MODWATERLEVEL, "modwaterlevel") \
-	X(PLACEITEM, "placeitem") X(PLACEITEMCELL, "placeitemcell") \
-	X(BECOMEWEREWOLF, "becomewerewolf") X(UNDOWEREWOLF, "undowerewolf") X(ISWEREWOLF, "iswerewolf") \
-	X(GETWEREWOLFKILLS, "getwerewolfkills") X(SETWEREWOLFACROBATICS, "setwerewolfacrobatics") \
-	X(GETPCINJAIL, "getpcinjail") X(GETPCTRAVELING, "getpctraveling") X(GETWEAPONTYPE, "getweapontype") \
-	X(SETSCALE, "setscale") X(GETSCALE, "getscale") X(MODSCALE, "modscale") \
-	X(TURNMOONRED, "turnmoonred") X(TURNMOONWHITE, "turnmoonwhite")
+	X(PLACEITEM, "placeitem") X(PLACEITEMCELL, "placeitemcell") 	X(GETPCTRAVELING, "getpctraveling") X(GETPCINJAIL, "getpcinjail") X(GETWEAPONTYPE, "getweapontype") 	X(SETSCALE, "setscale") X(GETSCALE, "getscale") X(MODSCALE, "modscale") X(TURNMOONRED, "turnmoonred") 	X(TURNMOONWHITE, "turnmoonwhite") X(BECOMEWEREWOLF, "becomewerewolf") X(UNDOWEREWOLF, "undowerewolf") 	X(ISWEREWOLF, "iswerewolf") X(SETWEREWOLFACROBATICS, "setwerewolfacrobatics") X(GETWEREWOLFKILLS, "getwerewolfkills")
 
 enum ScriptFunction
 {
@@ -102,15 +97,12 @@ static const char* const kSkillFuncs[27] = { "block", "armorer", "mediumarmor", 
 	"axe", "spear", "athletics", "enchant", "destruction", "alteration", "illusion", "conjuration", "mysticism",
 	"restoration", "alchemy", "unarmored", "security", "sneak", "acrobatics", "lightarmor", "shortblade", "marksman",
 	"mercantile", "speechcraft", "handtohand" };
-// Get / Set / Mod + a magic effect (OpenMW's GetMagicEffect / SetMagicEffect / ModMagicEffect, statsextensions.cpp): the
-// effect, and the one that counts against it (a weakness; -1 none). Bloodmoon's scripts use ModResistFire and
-// ModResistParalysis. tools/convert/mwscript.py (engine_functions) reads the names
-struct EffectFunc { const char* name; int positive, negative; };
-static const EffectFunc kEffectFuncs[24] = {
-	{ "resistmagicka", 93, 31 }, { "resistfire", 90, 28 }, { "resistfrost", 91, 29 }, { "resistshock", 92, 30 },
-	{ "resistdisease", 94, 32 }, { "resistblight", 95, 33 }, { "resistcorprus", 96, 34 }, { "resistpoison", 97, 35 },
-	{ "resistparalysis", 99, -1 }, { "resistnormalweapons", 98, 36 }, { "waterbreathing", 0, -1 },
-	{ "chameleon", 40, -1 }, { "waterwalking", 2, -1 }, { "swimspeed", 1, -1 }, { "superjump", 9, -1 },
-	{ "flying", 10, -1 }, { "armorbonus", 3, -1 }, { "castpenalty", -1, 48 }, { "silence", 46, -1 },
-	{ "blindness", 47, -1 }, { "paralysis", 45, -1 }, { "invisible", 39, -1 }, { "attackbonus", 117, -1 },
-	{ "defendbonus", 42, -1 } };
+// Get / Set / Mod + these: a magic effect's magnitude on an actor (OpenMW's Stats loop in extensions0.cpp: Bloodmoon's
+// spriggans ModResistFire 100); kEffectStatIds holds the effect each reads and the one counted against it (-1: none)
+static const char* const kEffectFuncs[24] = { "resistmagicka", "resistfire", "resistfrost", "resistshock",
+	"resistdisease", "resistblight", "resistcorprus", "resistpoison", "resistparalysis", "resistnormalweapons",
+	"waterbreathing", "chameleon", "waterwalking", "swimspeed", "superjump", "flying", "armorbonus", "castpenalty",
+	"silence", "blindness", "paralysis", "invisible", "attackbonus", "defendbonus" };
+static const short kEffectStatIds[24][2] = { { 93, 31 }, { 90, 28 }, { 91, 29 }, { 92, 30 }, { 94, 32 }, { 95, 33 },
+	{ 96, 34 }, { 97, 35 }, { 99, -1 }, { 98, 36 }, { 0, -1 }, { 40, -1 }, { 2, -1 }, { 1, -1 }, { 9, -1 }, { 10, -1 },
+	{ 3, -1 }, { -1, 48 }, { 46, -1 }, { 47, -1 }, { 45, -1 }, { 39, -1 }, { 117, -1 }, { 42, -1 } };

@@ -43,6 +43,12 @@ Silence makes it 0. With less magicka than the cost the chance shown is 0.
    `Session::spellSchool`.
 3. **Sound applied after the fatigue term.** OpenMW subtracts Sound before multiplying. `Session::castChance`.
 
+## Findings (2026-10-27)
+
+1. **"Always succeeds" ignored.** A spell with SPDT flag 4 (Bloodmoon's Call Wolf, Call Bear, Summon Bonewolf) rolled
+   like any other; now 100, for the player (`Session::castChance`) and in a fighter's spell rating
+   (`aicombataction.cpp`). Test `bug-spell-always-succeeds`.
+
 ## Resistance (OpenMW: `spellresistance.cpp`, `MagicEffect::getResistanceEffect` / `getWeaknessEffect`)
 
 An incoming harmful effect is resisted by: fire, frost and shock damage by Resist Fire / Frost / Shock (weakened by
@@ -163,6 +169,10 @@ Helseth's Collar or a birthsign's fortify showed no icon. Test: `trib-worn-icons
 9. **Dispel** removed effects one by one from any source; OpenMW removes whole spells, one roll each, and leaves
    potions and enchantments. **Remove Curse** did nothing; it removes curses.
 10. **Open** made no sound on failure and was no crime on an owned lock; **Lock** gave no feedback.
+11. **An enchanted item the player used took the player's chance for it as a spell** in the target's resistance roll
+   (its bolt and its touch): the Amulet of Admonition's 107 points came out at 0, which skipped the `50 / castChance`
+   scaling, so Dandras Vules (Willpower 73) resisted its Paralyze 96 times in 100 instead of 48. `castChance` is now
+   100 for enchantments, as OpenMW passes no spell for them. Test: `item-cast-resist`.
 
 Tests: `openmw-spec-magic` (cost, chance), `openmw-spec-resist` (resistance terms), `openmw-spec-actormagic`
 (hand-written: a Dunmer's Resist Fire 75 and an Altmer's weaknesses read from `const_effects`; the NPC ids

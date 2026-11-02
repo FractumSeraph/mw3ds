@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -55,6 +56,30 @@ HyperText dialogueHyperText(const GameData& g, const std::string& raw, const std
 	const std::vector<std::string>& ids);
 // Who last named a topic without having an answer for it ("" when nobody did): for the tests
 std::string dialogueNamedBy(const std::string& topicLower);
+
+// The responses kept on the card outside a talk (topicstore.cpp). topicsSpillBegin / topicSpillOne / topicsSpillEnd, as
+// the load reads the topics: each one but Voice to the card and out of the heap as soon as it is read (they stay when
+// the card can't be written). topicInfos: a topic's responses, read back from the card if they aren't in.
+// topicsRelease: the ones read back go again (no talk open)
+void topicsSpillBegin();
+void topicSpillOne(GameData& g, Topic& t);
+void topicsSpillEnd();
+const std::vector<Info>& topicInfos(World& w, const Topic& t);
+// false when no response of the topic can be the speaker's (its who-may-say-it filters), without reading it back
+bool topicMayAnswer(World& w, const Topic& t, int ref);
+// Whether a response of the topic on the card is the speaker's, decoding only those its who-fields don't rule out
+// (judge: filter.cpp's rules on one; 1 answers, 2 refused by disposition alone, 0 no). -1: not on the card. With
+// found, the response that answers is copied out for the talk (its pointer holds until topicsRelease)
+int topicProbe(World& w, const Topic& t, int ref, const std::function<int(const Info&)>& judge, const Info** found = nullptr);
+// Whether the speaker has an answer on the topic (the topic list, learning a topic): the probe, or the Infos themselves
+bool dialogueTopicAnswers(World& w, const Topic& topic, int ref);
+bool dialogueWhoMay(const Info& info, const ActorDef* sa, int actorIndex);   // who may say it (filter.cpp's part of passes)
+int dialogueProbeMismatches(World& w);     // the probe against the whole-topic filter, every topic and loaded speaker (tests)
+bool topicOwns(const Topic& t, const Info* info);   // one of the topic's own responses (in its list, or the probe's copy)
+unsigned topicsTalkReads();          // the talk so far: reads of the card, responses decoded (the tests)
+unsigned topicsTalkDecoded();
+void topicsRelease();
+size_t topicsLoadedBytes();
 
 // First response of `topic` the speaker may give now (also used for Hello voice lines); refusal: fall back to
 // "Info Refusal" when only the speaker's disposition stands in the way (topics clicked, listed and learned)

@@ -6,6 +6,7 @@
 -- readied, Use pressed, and the world stopped (global.lua) `after` seconds of game time later; after the shot the world
 -- goes on for kClearSecs, the bolt and its visuals gone before the next cast.
 -- Angles as in the 3DS engine: yaw 0 looks along +Y, 90 along +X; pitch up is positive (OpenMW's is down).
+local ambient = require('openmw.ambient')
 local camera = require('openmw.camera')
 local core = require('openmw.core')
 local input = require('openmw.input')
@@ -144,13 +145,17 @@ local function updateCast()
 	end
 	castFrames = castFrames + 1
 	if s.act then
-		-- a scene step: done by the world (global.lua); the shot `after` seconds of game time later
+		-- a scene step: done by the world (global.lua); the shot `after` seconds of game time later. The world stood
+		-- still since the last frame (its setup took a second and more of game time otherwise): it goes on from here
 		if not castStart then
+			core.sendGlobalEvent('MW3DS_SBS_Halt', { on = false })
 			castStart = core.getSimulationTime()
 			return false
 		end
 		if core.getSimulationTime() - castStart >= s.after then
 			core.sendGlobalEvent('MW3DS_SBS_Halt', { on = true })
+			-- (the game time of the frame: a scene's frames joined into a video by it)
+			print(string.format('MW3DS-SBS scene time %s %.3f', s.name, core.getSimulationTime()))
 			castFrames = -1
 			return true
 		end
@@ -201,6 +206,9 @@ end
 
 return {
 	eventHandlers = {
+		MW3DS_SBS_Sound = function(d)
+			ambient.playSound(d.id)
+		end,
 		MW3DS_SBS_Posed = function(d)
 			if d.index ~= index then
 				return
@@ -255,12 +263,14 @@ return {
 			elseif state == 'shot' then
 				placeCamera()
 				if frames >= kAfterShotFrames then
-					if poses[index].cast or poses[index].vfx or poses[index].act then
+					-- (a scene's world stays still until its next frame starts its clock: updateCast)
+					if poses[index].cast or poses[index].vfx then
 						if not resumedAt then
 							core.sendGlobalEvent('MW3DS_SBS_Halt', { on = false })
 							resumedAt = core.getRealTime()
 						end
-						if core.getRealTime() - resumedAt < (poses[index].act and 0.1 or kClearSecs) then
+						-- (a scene goes on at once: its next frame `after` game seconds on, not more)
+						if not poses[index].act and core.getRealTime() - resumedAt < kClearSecs then
 							return
 						end
 						resumedAt = nil

@@ -51,6 +51,13 @@ struct World
 	struct StreamJob* streamJob = nullptr;   // an exterior cell loading on the streaming thread
 	bool streamPaused = false;               // tests (STREAM:off): no neighbour streams in; the player's own cell still loads
 	bool streamThreaded = false;             // a cell has streamed in on a thread (the console, the emulator; never the PC build)
+	// Where the player is heading outdoors (units a second, eased) and where the feet were when streaming last looked:
+	// the neighbouring cell ahead streams in first
+	float streamHeading[2] = { 0.0f, 0.0f }, streamFeet[2] = { 0.0f, 0.0f }, streamFeetAt = -1.0f;
+	// The cell ahead first, one behind let go for it (an Old 3DS only): off until the fall through the Hlaalu Council
+	// Manor's floor it led to is understood; tests turn it on (STREAMAHEAD:on, bug-stream-ahead)
+	int streamWanted = -1;      // the neighbour a cell was let go for (an Old 3DS out of room): it streams in next
+	bool streamAhead = false;
 	std::unordered_map<long long, int> gridIndex;   // exterior grid -> index into cells
 	// every cell's references. A deque: it grows without moving them (a vector's doubling needed one
 	// block twice the size, tens of MB, and ran the heap out after many cells were visited)
@@ -158,6 +165,7 @@ struct World
 	bool applyLevPick(int ref, const std::string& pick);   // a leveled spot becomes that creature
 	// Owned by someone else: taking it (or what it holds) is theft, sleeping in it isn't allowed
 	bool ownedByOther(int ref) const;
+	bool shownOwned(int ref) const;           // ... and using it would be a crime: its name shows red
 	// What an NPC's disposition to the player is now: their own (with persuasion's changes) plus race,
 	// Personality, faction reactions, disease (Morrowind's derived disposition, as OpenMW has it)
 	int disposition(int ref, bool clamp = true) const;
@@ -199,6 +207,7 @@ struct World
 	int weatherShown() const;                     // the weather whose rain, storm and loops show (OpenMW's threshold)
 	bool weatherPrecip() const;                   // rain, snow or blight falling (not an ash storm)
 	bool weatherStorm() const;
+	void stormDirection(int weather, const float at[2], float out[2]) const;   // where a storm blows to (unit, x y)
 	float sunVisibility() const;                  // glare view, blended as OpenMW does
 	float glareFade() const;                      // 0 at night, 1 at midday
 	bool sunOn() const;
@@ -206,22 +215,26 @@ struct World
 	int nightDay() const;                         // 0 default, 1 interior in daylight, 2 exterior at night
 	bool underWater(float z) const;               // below the water of a loaded cell
 	bool teleportDisabled = false;
+	bool moonRed = false;             // TurnMoonRed / TurnMoonWhite: Secunda in [Moons] Script Color (Bloodmoon; saved)
+	// GetPCTraveling / GetPCInJail: the script runs still to see a trip or a jail term (Session::travelGo, goToJail)
+	int pcTraveling = 0, pcInJail = 0;
+	// Bloodmoon's werewolf, the player (ref -1) or an NPC: the state, its kills reset on a change to it (OpenMW's
+	// MechanicsManager::setWerewolf; mwmechanics/mechanicsmanagerimp.cpp). What the form changes reads this state
+	void setWerewolf(int ref, bool on);
+	void scaleObject(int ref, float scale);       // SetScale
+	bool isWerewolf(int ref) const;
+	// the player's hit attempt foe (OpenMW's CreatureStats::getHitAttemptActor on the player): the first in a fight with
+	// the player to swing at them, or the first the player swings at; the player's followers take it on (-1: none)
+	int playerHitAttempt = -1;
+	bool werewolfJustChanged = false;              // the player became one this frame: the session looks for witnesses
+	// A werewolf's claws: hand to hand as health damage times the WerewolfClawMult global (25, 35 after the first
+	// dream; OpenMW's getHandToHandDamage) times fHandtoHandHealthPer; a silver weapon on a werewolf does
+	// fWereWolfSilverWeaponDamageMult times its damage (applyWerewolfDamageMult). Both in mwmechanics/mechanicsmanagerimp.cpp
+	float werewolfClaw(float handToHand) const;
+	float silverOnWerewolf(const struct Object* weapon, int target) const;
+	// A magic effect stat a script changed (Mod<effect>: OpenMW's MagicEffects::modifyBase) on the player (ref -1) or an actor
+	void modScriptEffect(int ref, int effect, int delta);
 	bool levitationDisabled = false;  // DisableLevitation (Tribunal's Mournhold): Levitate ends at once, saved (OpenMW's LEVT)
-	// Bloodmoon (saved): the player is a werewolf, has the beast's Acrobatics (SetWerewolfAcrobatics), and has killed
-	// this many in that form; Secunda is red (TurnMoonRed)
-	bool werewolf = false, werewolfAcrobatics = false;
-	int werewolfKills = 0;
-	bool moonRed = false;
-	// When the player was last jailed / last travelled with a guide (World::time): GetPCInJail / GetPCTraveling
-	float jailedAt = -1e9f, travelledAt = -1e9f;
-	// The player's lasting magic effect modifiers (SetResistFire, ModResistParalysis ...): effect -> magnitude, saved;
-	// effectTotal counts them (an actor's are on its Ref)
-	std::unordered_map<int, float> effectBase;
-	void modEffectBase(int ref, int effect, float delta);   // ref -1: the player
-	int weaponTypeOf(int ref) const;                         // GetWeaponType (ref -1: the player)
-	void setRefScale(int ref, float scale);                  // SetScale: held to 0.5 .. 2, an actor redrawn at it
-	void applyScriptScale(int ref);                          // a script's scale on an actor just placed from its cell
-	void recomputeKeepingBars();                             // recomputeStats keeping health / magicka / fatigue
 	// SetWaterLevel / ModWaterLevel: an interior's water moved by a script (lowercase cell name -> height), saved and
 	// laid on the cell each time it is read (Tribunal's sewers)
 	std::unordered_map<std::string, float> waterLevels;
@@ -266,9 +279,13 @@ struct World
 		std::vector<u8> z;          // {"refs": [...], "scripts": [...]}, zlib
 		u32 raw = 0;                // its length unpacked
 		bool movedRefs = false;     // holds references moved to another cell ("at"): read on loading
+		std::vector<std::string> movedTo;   // the cells they stand in: the cell is read back as one of those loads
+		bool movedScanned = false;          // movedTo filled (a save's kept block is looked through once, when asked)
 	};
 	std::unordered_map<std::string, StoredCell> cellStates;   // cell file -> its changes
 	void storeCellState(const std::string& file, const std::string& json);
+	void readMovedIn(int cell);        // the cells whose people stand in this one (PositionCell) read back, them with it
+	std::string holdReason(int cell, const std::function<bool(int)>& inUse) const;   // why evictCells keeps it ("": it wouldn't)
 	std::string cellStateJson(const StoredCell& s) const;     // "" when it won't unpack
 	std::unordered_map<std::string, int> deadCounts;           // lowercase id -> killed (GetDeadCount)
 	std::vector<std::pair<int, int>> freeRefs, freePaths;      // slot ranges evicted cells left (first, count)
@@ -278,6 +295,7 @@ struct World
 	mutable bool refIndexStale = true;
 	void refsChanged() { refIndexStale = true; }
 	u32 useTick = 0;
+	bool heapShort = false;              // the cells near the player wait for room in the heap (scene.cpp)
 	// References placed while playing (PlaceAtPC / PlaceAtMe): outside any cell's range, drawn while
 	// their cell is loaded; they go when their cell's objects leave memory (and aren't saved)
 	std::vector<int> spawned;
@@ -321,6 +339,9 @@ struct World
 	// the highest ground under all of it (0 without a box)
 	float actorBoxLift(int ri);
 	void attachSpawned(int ri);       // its mesh and collision in its (loaded) cell
+	// A person drawn as what they are: in wolf form Bloodmoon's werewolf body (the bm_werewolf_default creature's
+	// library: OpenMW draws a werewolf on the wolf skeleton with its skin), else their own model again
+	void werewolfBody(int ri);
 	int refsInMemory() const;
 	// Moves the objects of the cells used longest ago (not loaded, nothing pointing into them: inUse)
 	// out of memory until at most `budget` remain; returns how many cells went
@@ -332,14 +353,14 @@ struct World
 	bool dropFarthestLiveNeighbour();
 	// Waits for the cell streaming in the background and takes it in (before anything that can't have it running: a clean-up)
 	void waitForStream();
-	void evictCell(int cell);
+	bool evictCell(int cell);          // false: it stays (no heap to keep its changes)
 	// mwstate/statemanagerimp.cpp: one object's save item, its hash (baseHash when unchanged), applying an item; a script
 	// instance's item; a cell's changed objects and scripts as text, and applying stored text
 	cJSON* refState(int i) const;
 	u32 refHash(int i) const;
 	void applyRefState(Ref& r, const cJSON* item);
 	cJSON* scriptState(const ScriptInstance& s) const;
-	std::string cellStateText(int cell) const;
+	std::string cellStateText(int cell, bool* failed = nullptr) const;   // failed: out of heap putting it together
 	void applyCellState(int cell);
 	void rebuildScriptIndex();
 	bool sameSpace(int a, int b) const;                 // both in one interior, or both outdoors
@@ -447,6 +468,8 @@ struct World
 	bool deferEnable(const std::string& id, bool on);   // true: remembered, nothing read
 	void stopGlobalScript(const std::string& name);
 	void setItemScriptLocal(const std::string& itemId, const char* local, float value);
+	// a carried item's script local (nullptr when it has no running script or no such local)
+	float* itemScriptLocal(const std::string& itemId, const char* local);
 };
 
 // Nearest activatable reference along the view ray within reach, or -1.

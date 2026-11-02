@@ -15,10 +15,6 @@ struct Ref
 	Atom id, idLower, type;
 	RecName recType = REC_OTHER;           // type as a number (components/esm/defs.hpp)
 	float pos[3], rot[3], scale = 1.0f;
-	float scaleOrig = 0.0f;       // the scale before a script's SetScale (0: none set; saved with scale)
-	bool werewolf = false;        // BecomeWerewolf on an NPC (Bloodmoon; saved)
-	// Lasting magic effect modifiers scripts set on the actor (ModResistFire ...): effect, magnitude (saved)
-	std::vector<std::pair<int, float>> effectBase;
 	int count = 1;
 	int lockLevel = 0;
 	// Owner: an NPC, or a faction (members from ownerRank up may take it); a set ownerGlobal lets the
@@ -98,6 +94,7 @@ struct Ref
 
 	// actors
 	int anim = -1;                // index into World::actors while its cell is loaded
+	int humanAnim = -1;           // a werewolf's own model, hidden while the wolf body is drawn (World::werewolfBody)
 	int cellActor = -1;           // index into Cell::actors (collision cylinder)
 	int hello = -1;               // SetHello (-1: the record's; saved)
 	struct TimedEffect { int effect; float magnitude, remaining; int key = -1; };   // key: the attribute or skill of a drain / fortify / absorb
@@ -175,6 +172,7 @@ struct Ref
 	bool straightWay = false;       // npcMoveTo's last way was the straight one (else the grid's)
 	float straightZ = 0.0f;         // its height when it last changed between the two
 	float dropUntil = 0.0f;         // World::time until which a step outdoors may go down a ledge (npcMoveTo: the grid's way climbed back)
+	float wayZ = 0.0f, wayAt = -1.0f;   // npcMoveTo's goal height this frame (its next grid point, else its target) and when
 	float lastPos[2] = {};
 	bool talkedToPC = false;
 	int disposition = 50;
@@ -197,6 +195,13 @@ struct Ref
 	bool aiDone = false;          // GetAIPackageDone
 	bool aiRepeat = false;        // the script's reset argument: the package starts over when it finishes
 	bool aiActive = true;         // AIFollow from a script waits to see its target first (OpenMW's activation)
+
+	// Bloodmoon's: a werewolf (BecomeWerewolf on an NPC; World::setWerewolf), the magic effect stats its scripts set
+	// (ModResistFire ...: effect, amount, counted into World::actorEffect), and SetScale's size over the level's
+	// placement (its drawing and its collision cylinder follow it); all saved, the first two gone with Resurrect
+	bool werewolf = false;
+	std::vector<std::pair<s16, s16>> scriptEffects;
+	float scaleFactor = 1.0f;
 
 	bool visible() const { return enabled && !pickedUp; }
 	struct InventoryItemLite { int condition = -1; std::string soul; float charge = -1.0f; } dropState;

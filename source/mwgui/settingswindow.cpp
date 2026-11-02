@@ -22,7 +22,8 @@
 // own screen (options, audio, display, look), so B and Close leave from any of them. 3D has no setting: the 3D slider
 // alone turns it on and off
 static const Screen kOptionTabs[4] = { SCR_OPTIONS, SCR_AUDIO, SCR_DISPLAY, SCR_LOOK };
-static const int kControlsButtonsFocus = 6;   // Controls' Layout button, where the button list's Close comes back to
+// Controls' Layout button, where the button list's Close comes back to (the stylus layout's tab has a bar fewer)
+static int controlsButtonsFocus() { return stylusLayout() ? 5 : 6; }
 
 void Session::drawOptions()
 {
@@ -191,23 +192,26 @@ void Session::drawOptions()
 			uiRect(14 + i * 29.2f, 88, 29.2f, 12, C2D_Color32(c, c, c, 255));
 		}
 		uiFrame(14, 88, 292, 12);
-		// Auto gamma: what this console reads the light with
+		// Auto gamma: what this console reads the light with (on: the light read now)
 		GammaSensor sensor = gammaSensor();
-		if (choice(106, "Auto gamma", sensor == SENSOR_NONE ? "No light sensor" : onOff(gammaAutoOn()), sensor != SENSOR_NONE))
+		std::string autoShown = sensor == SENSOR_NONE ? "No light sensor" : onOff(gammaAutoOn());
+		if (gammaAutoOn() && sensor != SENSOR_NONE)
+		{
+			snprintf(text, sizeof(text), "On (light x%.2f)", gammaLift());
+			autoShown = text;
+		}
+		if (choice(104, "Auto gamma", autoShown, sensor != SENSOR_NONE))
 		{
 			g_autoGamma = gammaAutoOn() ? 0 : 1;
 			notify(!gammaAutoOn() ? "Auto gamma off." : sensor == SENSOR_QTM
 				? "Auto gamma on: the picture lifts in bright light."
 				: "Auto gamma on: the inner camera checks the light at each loading screen.");
 		}
-		const char* how = sensor == SENSOR_QTM ? "Auto gamma checks the light every few seconds."
-			: sensor == SENSOR_CAMERA ? "Auto gamma uses the inner camera at loads."
-			: "No light sensor: Auto gamma stays off.";
 		// View distance (outdoors; OpenMW's 7168 at the most): Max, the console's longest whatever the speed; Min, its
 		// shortest; Mid halfway; Auto between them with the frame rate (a New 3DS from the longest, closing in when slow;
 		// an Old 3DS from the shortest, opening out while there is room). A tap goes Auto, Max, Mid, Min
 		static const char* kViewNames[4] = { "Min", "Auto", "Max", "Mid" };
-		if (choice(130, "View distance", kViewNames[viewMode]))
+		if (choice(126, "View distance", kViewNames[viewMode]))
 		{
 			viewMode = viewMode == VIEW_AUTO ? VIEW_MAX : viewMode == VIEW_MAX ? VIEW_MID : viewMode == VIEW_MID ? VIEW_MIN : VIEW_AUTO;
 			changed = true;
@@ -218,20 +222,17 @@ void Session::drawOptions()
 		}
 		// Depth buffer: 24-bit, 16-bit while 3D is on (half the depth traffic of two eyes), or 16-bit always. A tap cycles
 		static const char* kDepthNames[3] = { "24-bit", "16-bit in 3D", "16-bit" };
-		if (choice(154, "Depth buffer", kDepthNames[g_depthMode]))
+		if (choice(148, "Depth buffer", kDepthNames[g_depthMode]))
 		{
 			g_depthMode = (g_depthMode + 1) % 3;
 			changed = true;
 			notify(g_depthMode == DEPTH_24 ? "Depth buffer 24-bit." : g_depthMode == DEPTH_16_IN_3D
 				? "Depth buffer 16-bit while 3D is on: lighter frames in 3D." : "Depth buffer 16-bit: far surfaces may flicker.");
 		}
-		// (the rows close up so the two hint lines clear the buttons)
-		uiText(10, 180, 0.4f, col::textDim, how);
-		if (gammaAutoOn())
-			snprintf(text, sizeof(text), "Light now: x%.2f, gamma in use %.2f", gammaLift(), g);
-		else
-			snprintf(text, sizeof(text), "Gamma 1.00 is Morrowind's own; higher helps in sun.");
-		uiText(10, 192, 0.4f, col::textDim, text);
+		// (the two hint lines under the rows: what Auto gamma reads the light with, and what gamma 1.00 is)
+		uiText(10, 180, 0.4f, col::textDim, sensor == SENSOR_QTM ? "Auto gamma checks the light every few seconds."
+			: sensor == SENSOR_CAMERA ? "Auto gamma uses the inner camera at loads." : "No light sensor: Auto gamma stays off.");
+		uiText(10, 192, 0.4f, col::textDim, "Gamma 1.00 is Morrowind's own; higher helps in sun.");
 		b = buttons(208, 28, { "Default", w.game.gmstLabel("sclose", "Close") });
 		closing = b == 1;
 		if (b == 0)
@@ -247,14 +248,25 @@ void Session::drawOptions()
 	{
 		// Look speed (the C-stick, the D-pad and the GoldenEye pad while aiming: one bar, they were two) and the GoldenEye
 		// pad's turn while walking (0.50x to 2.00x), the sticks' dead zone (10% to 35% of a full push: a stick that rests
-		// a little off centre kept walking or turning the view), Invert and Gyro aim
-		snprintf(text, sizeof(text), "%.2fx", g_lookSpeed / 100.0f);
-		bar(50, "Look speed (sticks, D-pad, aiming)", text, g_lookSpeed, kLookMinPct, kLookMaxPct, kLookStepPct);
-		snprintf(text, sizeof(text), "%.2fx", g_geTurnSpeed / 100.0f);
-		bar(84, "GoldenEye turn (walking)", text, g_geTurnSpeed, kGeTurnMinPct, kGeTurnMaxPct, kLookStepPct);
+		// a little off centre kept walking or turning the view), Invert and Gyro aim. The stylus layout, where no stick
+		// looks: how far a slide turns, the dead zone, Invert and Gyro aim (its glass buttons are switched on its button list)
+		bool stylus = stylusLayout();
+		if (stylus)
+		{
+			snprintf(text, sizeof(text), "%.2fx", g_stylusSpeed / 100.0f);
+			bar(50, "Stylus speed (sliding to look)", text, g_stylusSpeed, kStylusMinPct, kStylusMaxPct, kLookStepPct);
+		}
+		else
+		{
+			snprintf(text, sizeof(text), "%.2fx", g_lookSpeed / 100.0f);
+			bar(50, "Look speed (sticks, D-pad, aiming)", text, g_lookSpeed, kLookMinPct, kLookMaxPct, kLookStepPct);
+			snprintf(text, sizeof(text), "%.2fx", g_geTurnSpeed / 100.0f);
+			bar(84, "GoldenEye turn (walking)", text, g_geTurnSpeed, kGeTurnMinPct, kGeTurnMaxPct, kLookStepPct);
+		}
 		snprintf(text, sizeof(text), "%d%%", g_stickZonePct);
-		bar(118, "Stick dead zone", text, g_stickZonePct, kStickZoneMinPct, kStickZoneMaxPct, kStickZoneStepPct);
-		if (choice(154, "Invert look", onOff(g_invertY)))
+		bar(stylus ? 84 : 118, "Stick dead zone", text, g_stickZonePct, kStickZoneMinPct, kStickZoneMaxPct, kStickZoneStepPct);
+		float row = stylus ? 120 : 154;
+		if (choice(row, "Invert look", onOff(g_invertY)))
 		{
 			g_invertY = !g_invertY;
 			notify(g_invertY ? "Up on the stick now looks down." : "Up on the stick looks up.");
@@ -262,7 +274,7 @@ void Session::drawOptions()
 		// Gyro aim: turning the console turns the view (off, half, as far, twice as far as it turned)
 		static const int kGyroSteps[4] = { 0, 50, 100, 200 };
 		snprintf(text, sizeof(text), g_gyroAim > 0 ? "%.1fx" : "Off", g_gyroAim / 100.0f);
-		if (int d = choice(180, "Gyro aim", text))
+		if (int d = choice(row + 26, "Gyro aim", text))
 		{
 			int k = 0;
 			while (k < 3 && kGyroSteps[k] != g_gyroAim)
@@ -274,13 +286,14 @@ void Session::drawOptions()
 			g_gyroCalibrate = g_gyroAim > 0;
 			notify(g_gyroAim > 0 ? "Gyro aim on: lay the 3DS down for 2 seconds to calibrate, then turn it to aim." : "Gyro aim off.");
 		}
-		// Layout: the button list, what each button does in the layout in use (Y there switches Xbox, classic, GoldenEye)
+		// Layout: the button list, what each button does in the layout in use (Y there switches Xbox, classic, GoldenEye,
+		// stylus)
 		b = buttons(208, 28, { "Default", "Layout", w.game.gmstLabel("sclose", "Close") });
 		closing = b == 2;
 		if (b == 0)
 		{
 			g_lookSpeed = kLookDefaultPct;
-			g_geTurnSpeed = 100;
+			g_geTurnSpeed = g_stylusSpeed = 100;
 			g_stickZonePct = kStickZoneDefaultPct;
 			g_invertY = false;
 			g_gyroAim = 0;
@@ -321,7 +334,9 @@ void Session::drawOptions()
 void Session::drawControls()
 {
 	bool xbox = g_controlLayout == CONTROLS_XBOX, goldenEye = g_controlLayout == CONTROLS_GOLDENEYE;
-	header(xbox ? "Controls (Xbox layout)" : goldenEye ? "Controls (GoldenEye layout)" : "Controls (classic layout)");
+	bool stylus = stylusLayout();
+	header(xbox ? "Controls (Xbox layout)" : goldenEye ? "Controls (GoldenEye layout)" : stylus ? "Controls (stylus layout)"
+		: "Controls (classic layout)");
 	static const char* kXbox[][2] = {
 		{ "Circle Pad / C-Stick", "Move (pushed far: run) / look" }, { "A", "Activate: talk, open, take" },
 		{ "R (hold, release)", "Wind up, strike" }, { "X", "Ready / put away the weapon" }, { "L", "Cast the selected spell" },
@@ -343,25 +358,47 @@ void Session::drawControls()
 		{ "Y", "Jump (swim up in water)" }, { "B", "Sneak on / off" }, { "SELECT", "First / third person" },
 		{ "D-Pad", "Left / right: strafe; up / down: look" }, { "START", "Menu: save, rest, options" },
 		{ "Touch screen", "Menus, quick keys" } };
+	// The stylus in the right hand looks; the left hand moves and fights (stylusInput)
+	// GoldenEye's buttons, the stylus looking; the glass buttons over the map are the same ones (stylusInput)
+	static const char* kStylus[][2] = {
+		{ "Circle Pad", "Move (pushed far: run)" }, { "Stylus (slide)", "Look" },
+		{ "A", "Activate: talk, open, take" }, { "R (hold, release)", "Wind up, strike" },
+		{ "L", "Cast the selected spell" }, { "X", "Ready / put away the weapon" },
+		{ "Y", "Jump (held: swim up)" }, { "B (hold)", "Sneak" }, { "SELECT", "First / third person" },
+		{ "D-Pad", "Strafe; look up / down" }, { "START", "Menu: save, rest, options" },
+		{ "Map's glass buttons", "The same (B: sneak on / off)" },
+		{ "C-Stick, ZL, ZR", "If there: look; sneak; rise" } };
 	float y = 30;
 	int n = xbox ? sizeof(kXbox) / sizeof(kXbox[0]) : goldenEye ? sizeof(kGoldenEye) / sizeof(kGoldenEye[0])
-		: sizeof(kClassic) / sizeof(kClassic[0]);
+		: stylus ? sizeof(kStylus) / sizeof(kStylus[0]) : sizeof(kClassic) / sizeof(kClassic[0]);
 	for (int i = 0; i < n; i++)
 	{
-		const char* const* l = xbox ? kXbox[i] : goldenEye ? kGoldenEye[i] : kClassic[i];
+		const char* const* l = xbox ? kXbox[i] : goldenEye ? kGoldenEye[i] : stylus ? kStylus[i] : kClassic[i];
 		uiText(14, y, 0.42f, col::header, l[0]);
 		uiText(140, y, 0.42f, col::text, l[1]);
 		y += 13.5f;
 	}
-	// Y: the next layout (Xbox, classic, GoldenEye); A / B: back to the Controls tab, on its Layout button
-	if (uiButton(4, 208, 154, 28, xbox ? "Y: Use classic" : goldenEye ? "Y: Use Xbox" : "Y: Use GoldenEye") || (uiIn().down & KEY_Y))
+	// Y: the next layout (Xbox, classic, GoldenEye, stylus); A / B: back to the Controls tab, on its Layout button
+	static const int kNext[4] = { CONTROLS_CLASSIC, CONTROLS_GOLDENEYE, CONTROLS_STYLUS, CONTROLS_XBOX };
+	static const char* kUse[4] = { "Y: Use classic", "Y: Use GoldenEye", "Y: Use stylus", "Y: Use Xbox" };
+	int k = g_controlLayout >= 0 && g_controlLayout < 4 ? g_controlLayout : 0;
+	// (the stylus layout's list: X switches its glass buttons over the minimap on or off, between the two)
+	float bw = stylus ? 102 : 154;
+	if (uiButton(4, 208, bw, 28, kUse[k]) || (uiIn().down & KEY_Y))
 	{
-		g_controlLayout = xbox ? CONTROLS_CLASSIC : goldenEye ? CONTROLS_XBOX : CONTROLS_GOLDENEYE;
+		g_controlLayout = kNext[k];
 		saveSettings();
 	}
-	else if (uiButton(162, 208, 154, 28, w.game.gmst("sclose", "Close"), true) || (uiIn().down & (KEY_A | KEY_B)))
+	else if (stylus && (uiButton(110, 208, 102, 28, g_stylusButtons ? "X: Buttons on" : "X: Buttons off")
+		|| (uiIn().down & KEY_X)))
+	{
+		g_stylusButtons = !g_stylusButtons;
+		saveSettings();
+		notify(g_stylusButtons ? "The glass buttons show over the map." : "No buttons over the map: the stylus only looks there.");
+	}
+	else if (uiButton(316 - bw, 208, bw, 28, w.game.gmst("sclose", "Close"), true) || (uiIn().down & (KEY_A | KEY_B)))
 	{
 		openScreen(SCR_LOOK);
-		focus = kControlsButtonsFocus;
+		focus = controlsButtonsFocus();
 	}
 }

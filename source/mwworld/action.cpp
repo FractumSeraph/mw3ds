@@ -29,12 +29,21 @@ void Session::playerActivate(int ref)
 	activate(ref);
 }
 
-// A werewolf can't use things (OpenMW's sWerewolfRefusal)
-bool Session::werewolfRefused()
+// A werewolf can't use things (OpenMW's sWerewolfRefusal), with a growl by what it was: one of the Wolf* sounds
+// of the thing's kind at random (WolfNPC1-3, WolfCreature1-3, WolfContainer1-2, WolfActivator1, WolfItem1-3: OpenMW's
+// getWerewolfRefusalSoundId and searchRandom)
+bool Session::werewolfRefused(int ref)
 {
-	if (!w.werewolf)
+	if (!w.stats.werewolf)
 		return false;
 	notify(w.game.gmst("swerewolfrefusal", "You cannot use items while in werewolf form."));
+	if (ref >= 0)
+	{
+		RecName t = w.refs[ref].recType;
+		const char* kind = t == REC_NPC_ ? "wolfnpc" : t == REC_CREA ? "wolfcreature" : t == REC_CONT ? "wolfcontainer"
+			: t == REC_ACTI ? "wolfactivator" : "wolfitem";
+		playRandomSound(-1, kind);
+	}
 	return true;
 }
 
@@ -51,7 +60,7 @@ bool Session::readRefused()
 // when someone saw it and reports it the sleep is refused too
 bool Session::bedRefused(int bed)
 {
-	if (w.werewolf)
+	if (w.stats.werewolf)
 	{
 		notify(w.game.gmst("swerewolfrefusal", "You cannot use items while in werewolf form."));
 		return true;
@@ -78,7 +87,7 @@ void Session::activate(int ref)
 	if (!r.visible())
 		return;
 	// A werewolf is refused by everything but doors (OpenMW's getWerewolfRefusalAction)
-	if (r.recType != REC_DOOR && werewolfRefused())
+	if (r.recType != REC_DOOR && werewolfRefused(ref))
 		return;
 	// what it does is its type's: talk, search, open, read, take ... (mwclass/)
 	MWClass::activate(*this, ref);
@@ -88,8 +97,10 @@ std::string Session::targetLabel(int ref)
 {
 	Ref& r = w.refs[ref];
 	std::string name = r.obj ? r.obj->name.str() : r.id.str();
+	// (a person in wolf form goes by sWerewolfPopup, not their name: OpenMW's Npc::getName)
 	if (r.actor >= 0)
-		name = w.game.actors[r.actor].name + (r.dead ? " (dead)" : "");
+		name = (r.recType == REC_NPC_ && r.werewolf ? w.game.gmst("swerewolfpopup", "Werewolf") : w.game.actors[r.actor].name.str())
+			+ (r.dead ? " (dead)" : "");
 	if (r.recType == REC_DOOR && r.hasDest && lower(r.destCell) != lower(w.cellName()))
 		name += " - " + w.game.cellLabel(r.destCell);
 	if (r.lockLevel > 0)
@@ -110,11 +121,13 @@ void Session::aimAndActivate(const PlayerInput& in, bool menu)
 	// Telekinesis reaches farther (magnitude in feet, 22 units each)
 	target = menu ? -1 : worldPick(w, eye, dir, kReach + w.effectTotal(59) * 22.0f);
 	// (GoldenEye: on a tap of A, let go before it aimed; the press itself is kept from the screens either way)
-	bool goldenEye = g_controlLayout == CONTROLS_GOLDENEYE;
-	if (!menu && ((uiIn().down & KEY_A) || (goldenEye && in.activate)))
+	// (the stylus layouts: D-pad up, or the HUD's Use, through in.activate; A is the stylus hand's, or a move)
+	bool byInput = g_controlLayout == CONTROLS_GOLDENEYE || stylusLayout();
+	if (!menu && ((!stylusLayout() && (uiIn().down & KEY_A)) || (byInput && in.activate)))
 	{
-		uiConsume(KEY_A);
-		if ((goldenEye ? in.activate : true) && target >= 0 && w.controlsEnabled)
+		if (!stylusLayout())
+			uiConsume(KEY_A);
+		if ((byInput ? in.activate : true) && target >= 0 && w.controlsEnabled)
 			playerActivate(target);
 	}
 }

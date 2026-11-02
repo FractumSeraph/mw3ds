@@ -55,6 +55,8 @@ int rendererReplayWorld(float eyeShift);
 extern int g_replayCount, g_replayMissed;      // right eyes drawn from the record / drawn again (no room), per second
 // After rendererDrawWorld, in the same frame: one mesh with a model matrix (nullptr = world space)
 void rendererDrawMesh(const ActorMesh& m, const C3D_Mtx* model, C3D_Tex* tex);
+// Whether a batch with these flags (BATCH_*) writes depth: all but a blended one that isn't alpha tested too
+bool batchWritesDepth(u8 flags);
 // Sky bodies for the next frames' sky pass: a textured square in direction dir (unit, world axes), size its half
 // width at the sky's radius, facing the eye (turned by roll) or laid along its own two axes (fixed: the moons, as
 // OpenMW turns their quads); additive for a moon's picture; afterClouds: drawn over the clouds (the sun's glare, a
@@ -114,8 +116,13 @@ void rendererUvOverride(bool on, float u = 0.0f, float v = 0.0f);
 void rendererViewAxes(float right[3], float up[3], float back[3]);
 // Local map: renders the loaded cells seen from above (x/y square from minX, minY, size units wide;
 // looking down from topZ through depth units) into a 256 x 256 texture. Inside a frame, before the
-// screens are drawn. The texture: rendererLocalMap() (nullptr until the first render).
-bool rendererDrawLocalMap(World& w, float minX, float minY, float size, float topZ, float depth, bool opaqueWater = false);
+// screens are drawn. The texture: rendererLocalMap() (nullptr until the first render). It starts a picture and draws
+// a share of the frame's GPU commands of it; rendererLocalMapMore goes on with it on the next frames (true once it is
+// whole). whole: all of it in this frame (MAPCELL's file). mapLight: lit from above as OpenMW's map camera lights it (an
+// interior's; the outdoor ones keep the day's light). False: no texture for it
+bool rendererDrawLocalMap(World& w, float minX, float minY, float size, float topZ, float depth, bool opaqueWater = false,
+	bool whole = false, bool mapLight = false);
+bool rendererLocalMapMore(World& w);
 C3D_Tex* rendererLocalMap();
 
 // Day and night outdoors: tint on the baked light, the sky's tint and the fog / clear colour (0..1)

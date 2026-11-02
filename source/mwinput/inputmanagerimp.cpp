@@ -13,6 +13,16 @@
 #include "mwbase/session.hpp"
 #include "mwinput/inputmanagerimp.hpp"
 
+#ifdef __3DS__
+// The Circle Pad Pro on an Old 3DS: its ZL / ZR reach the buttons only through the ir:rst service, which libctru folds
+// into hidKeysHeld / Down / Up on a New 3DS alone (its weak hidShouldUseIrrst, replaced here). On both consoles now:
+// every layout reads ZL / ZR, and the second stick (hidCstickRead), from the Circle Pad Pro as from a New 3DS
+extern "C" bool hidShouldUseIrrst(void)
+{
+	return true;
+}
+#endif
+
 // The C-stick up / down for the menus' text panes: -1 (up) to 1 (down), nothing inside the dead zone
 float readStickScroll()
 {
@@ -185,7 +195,116 @@ PlayerInput invertLook(PlayerInput in)
 	return in;
 }
 
-// Three button layouts (Options > Controls; START and SELECT the same in all):
+// The stylus layout's buttons: GoldenEye's (no ZL / ZR, which an Old 3DS lacks), with the stylus to look. The Circle
+// Pad moves as the Xbox layout's stick does (walks and sidesteps, pushed far runs: the stylus turns), A activates, R
+// winds up and strikes, L casts, X readies or puts away the weapon, Y jumps (held: swims up, rises), B held sneaks,
+// SELECT first / third person, the D-pad sidesteps (left / right) and looks up / down. A New 3DS's or a Circle Pad
+// Pro's extras, never needed: the C-stick looks too, ZL held sneaks, ZR held rises (as the Xbox layout's). The HUD's
+// glass buttons are the same buttons under the stylus (Session::stylusButtons), but for B: on / off there
+void stylusInput(PlayerInput& in, u32 held, u32 down)
+{
+	in.lookY += ((held & KEY_DUP) ? lookScale() : 0.0f) - ((held & KEY_DDOWN) ? lookScale() : 0.0f);
+	in.moveX = fmaxf(-1.0f, fminf(1.0f, in.moveX + ((held & KEY_DRIGHT) ? 1.0f : 0.0f) - ((held & KEY_DLEFT) ? 1.0f : 0.0f)));
+	in.activate = down & KEY_A;
+	in.attack = held & KEY_R;
+	in.cast = down & KEY_L;
+	in.readyToggle = down & KEY_X;
+	in.jump = down & KEY_Y;
+	in.up = held & (KEY_Y | KEY_ZR);
+	in.sneak = in.down = held & (KEY_B | KEY_ZL);
+	in.togglePov = down & KEY_SELECT;
+}
+
+int stylusPadAt(int x, int y)
+{
+	if (!g_stylusButtons)
+		return -1;
+	// (2 pixels more round each: a stylus lands a little off)
+	for (int i = 0; i < 4; i++)
+	{
+		float dx = x - kStylusPad[i][0], dy = y - kStylusPad[i][1];
+		if (dx * dx + dy * dy <= (kStylusPadRadius + 2) * (kStylusPadRadius + 2))
+			return i;
+	}
+	for (int i = 0; i < 2; i++)
+	{
+		const float* b = kStylusShoulder[i];
+		if (x >= b[0] - 2 && x < b[0] + b[2] + 2 && y >= b[1] - 2 && y < b[1] + b[3] + 2)
+			return STYLUS_PAD_L + i;
+	}
+	return -1;
+}
+
+// Stylus layouts: a slide on the bottom screen during play turns the view, as far as the stylus moves (Controls'
+// stylus speed). A touch becomes a slide once it has gone farther than a tap may (kTapSlop) from where it came down,
+// and turns from there by the whole way it came, so none of the start is lost; from then on until the stylus lifts
+// it is the view's alone: no button under it lights or acts, wherever it goes. Above the HUD's button rows
+// (kStylusTapTop) the screen only looks, but for the round buttons over the minimap (stylusPadAt): a touch there taps
+// nothing even when it never moves, so setting the stylus down to aim can't open the map or show an effect. A touch that comes down while a menu is open stays the menu's (a slide in
+// the inventory never turns the view when it closes). The stylus's way across is a turn about the world's up, up the
+// screen a look up (Invert look turns that round)
+void stylusLook(UiInput& ui, PlayerInput& in, bool inPlay)
+{
+	static bool down = false, looking = false, menuTouch = false, lookOnly = false;
+	static int startX = 0, startY = 0, lastX = 0, lastY = 0;
+	if (!stylusLayout())                 // (the other layouts: the touch screen is the HUD's and the menus' alone)
+	{
+		down = looking = menuTouch = lookOnly = false;
+		return;
+	}
+	if (!ui.touching)
+	{
+		if (looking || lookOnly || (ui.tapped && inPlay && ui.tapY < kStylusTapTop
+			&& stylusPadAt(ui.tapX, ui.tapY) < 0))
+			ui.tapped = false;           // (a scripted run's TAP comes without a touch)
+		down = looking = menuTouch = lookOnly = false;
+		return;
+	}
+	if (!down)
+	{
+		down = true;
+		menuTouch = !inPlay;
+		lookOnly = !menuTouch && ui.touchY < kStylusTapTop && stylusPadAt(ui.touchX, ui.touchY) < 0;
+		startX = lastX = ui.touchX;
+		startY = lastY = ui.touchY;
+	}
+	if (menuTouch)
+		return;
+	if (lookOnly)
+	{
+		ui.touching = false;
+		ui.dragDX = ui.dragDY = 0;
+	}
+	if (!inPlay)
+	{
+		if (looking)                     // (a menu opened under the slide: it stays the view's till the stylus lifts)
+		{
+			ui.touching = false;
+			ui.dragDX = ui.dragDY = 0;
+		}
+		return;
+	}
+	int dx = ui.touchX - lastX, dy = ui.touchY - lastY;
+	if (!looking && abs(ui.touchX - startX) + abs(ui.touchY - startY) > kTapSlop)
+	{
+		looking = true;
+		dx = ui.touchX - startX;
+		dy = ui.touchY - startY;
+	}
+	lastX = ui.touchX;
+	lastY = ui.touchY;
+	if (!looking)
+		return;
+	// (1.00x: 0.01 radians a pixel, the bottom screen's 320 pixels across a little over half way round; slower felt
+	// sluggish on the console)
+	const float perPixel = 0.01f * g_stylusSpeed / 100.0f;
+	in.stylusYaw += dx * perPixel;
+	in.stylusPitch += (g_invertY ? dy : -dy) * perPixel;
+	ui.touching = false;
+	ui.dragDX = ui.dragDY = 0;
+}
+
+// Four button layouts (Options > Controls; START and SELECT the same in all), the stylus layout's in stylusInput:
 //   Xbox (Morrowind on the Xbox): R attack, L cast, X ready / put away the weapon, Y jump, B free (walk or run by the pad),
 //     ZL sneak (down when levitating), ZR up when levitating, D-pad quick keys
 //   Classic: X attack, Y cast, B jump, L sneak, ZL + D-pad quick keys, D-pad look, ZL + X put away
@@ -208,6 +327,11 @@ PlayerInput readInput(u32 held, u32 down, u32 up, float dt)
 	{
 		static GoldenEyeState state;
 		goldenEyeInput(state, in, in.moveX, in.moveY, held, down, up, dt);
+		return invertLook(in);
+	}
+	if (stylusLayout())
+	{
+		stylusInput(in, held, down);
 		return invertLook(in);
 	}
 	if (g_controlLayout == CONTROLS_XBOX)

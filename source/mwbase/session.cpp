@@ -4,6 +4,7 @@
 #include <sys/stat.h>
 #include <tex3ds.h>
 #include <citro2d.h>
+#include "mwscript/scriptstore.hpp"
 #include "mwbase/session.hpp"
 #include "components/debug/profile.hpp"
 
@@ -156,6 +157,10 @@ void Session::update(const PlayerInput& inRaw, float dt)
 	profAdd(PROF_OTHER, t);
 	w.streamExterior(false);
 	w.retryMissingTextures(dt);
+	// (the responses a talk read back from the card go again once it is over)
+	if (!dlg.open)
+		topicsRelease();
+	scriptsTick();
 	profAdd(PROF_STREAM, t);
 
 	aimAndActivate(in, menu);
@@ -174,12 +179,20 @@ void Session::update(const PlayerInput& inRaw, float dt)
 	// (a cast, like a blow, plays out before the next: OpenMW has one spellcast animation at a time)
 	if (in.cast && !menu && w.controlsEnabled && !playerDead && w.magicEnabled && vm.action != VM_CAST && vm.action != VM_FOLLOW
 		&& !castBusy())
-		castSpell();
-	if (in.quick >= 0 && !menu && w.controlsEnabled && !playerDead)
+	{
+		// (a werewolf casts nothing, nor uses quick keys: OpenMW's HUD refuses magic and items in wolf form)
+		if (!werewolfRefused())
+			castSpell();
+	}
+	if (in.quick >= 0 && !menu && w.controlsEnabled && !playerDead && !werewolfRefused())
 		useQuickKey(in.quick);
 	profAdd(PROF_OTHER, t);
 	MARK("scripts");
 	scriptsRun(w, *this, dt);
+	if (w.pcTraveling > 0 && travelCell < 0)
+		w.pcTraveling--;
+	if (w.pcInJail > 0)
+		w.pcInJail--;
 	profAdd(PROF_SCRIPTS, t);
 	if (!menuOpen())
 	{
@@ -193,6 +206,11 @@ void Session::update(const PlayerInput& inRaw, float dt)
 	updateMouths(dt);
 
 	updateFootsteps(in, menu, dt);
+	if (w.werewolfJustChanged)
+	{
+		w.werewolfJustChanged = false;
+		werewolfWitnesses();
+	}
 
 	// (the loops' mixes every third frame: a lookup by name and trig per loop, and the ear can't tell)
 	if (w.frame % 3 == 0 || !cadenceOn(CAD_LOOPS))

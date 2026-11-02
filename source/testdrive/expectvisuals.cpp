@@ -10,11 +10,14 @@
 #include <tuple>
 #include "testdrive/testdrive.hpp"
 #include "platform/gamma.hpp"
+#include "mwdialogue/dialoguemanagerimp.hpp"
 #include "mwbase/session.hpp"
 #include "components/debug/debuglog.hpp"
 #include "mwsound/soundmanagerimp.hpp"
+#include "mwrender/renderingmanager.hpp"
 
 extern const char* g_playerBlock;
+extern int g_sharedDrawn, g_worldDraws;
 #include <malloc.h>
 #include "testdrive/testhelpers.hpp"
 #include "testdrive/expecthelpers.hpp"
@@ -207,7 +210,31 @@ std::optional<bool> numberOfWorld(Session& s, const std::string& what, const std
 	else if (what == "wfogscale") v = w.weatherFogScale();      // the share of the view drawn in this weather
 	else if (what == "framecap") v = (float)s.frameCap;          // the frame rate the console holds to (Old 3DS: 30 or 20)
 	else if (what == "colorbits") v = g_profile.rgb565 ? 16.0f : 32.0f;   // the 3D screen's colour buffer
-	else if (what == "viewscale") v = s.viewScale;              // the adaptive view distance outdoors (1: the whole view)
+	else if (what == "viewscale") v = s.viewScale;              // the adaptive view distance (1: the whole view)
+	else if (what == "fovy")         // the world's field of view, up and down, in degrees (a werewolf's first person: wider)
+	{
+		extern float g_worldFovY;
+		v = g_worldFovY;
+	}
+	// The last frame's drawing work, both eyes (mwrender/renderingmanager.cpp), and what the console's GPU would take for it
+	// cpuest: its CPU time on this build times GPUMODEL's scale (-1 with no scale); fpsest: the frame rate the console
+	// would show, the slower of the two in whole screen refreshes (60 a second), at most the frame cap
+	else if (what == "gpudraws" || what == "gputris" || what == "gpuest" || what == "cpuest" || what == "fpsest")
+	{
+		extern u32 g_lastDraws, g_lastTris;
+		extern float g_lastCpuMs, g_testCpuScale;
+		float gpuModelMs(u32 draws, u32 tris);
+		float gpu = gpuModelMs(g_lastDraws, g_lastTris), cpu = g_testCpuScale > 0.0f ? g_lastCpuMs * g_testCpuScale : -1.0f;
+		if (what == "gpudraws") v = (float)g_lastDraws;
+		else if (what == "gputris") v = (float)g_lastTris;
+		else if (what == "gpuest") v = gpu;
+		else if (what == "cpuest") v = cpu;
+		else
+		{
+			float refreshes = ceilf(fmaxf(gpu, cpu) / (1000.0f / 60.0f) - 0.001f);
+			v = fminf((float)s.frameCap, 60.0f / fmaxf(1.0f, refreshes));
+		}
+	}
 	else if (what == "viewdrawn") v = s.viewDrawn;              // ... as drawn: in steps, held while viewScale saws (Session::viewDrawn)
 	else if (what == "hudcaption")    // the cell name under the HUD's minimap is this cell's, 1; else 0
 	{
@@ -216,6 +243,8 @@ std::optional<bool> numberOfWorld(Session& s, const std::string& what, const std
 	}
 	else if (what == "torchtime") v = w.useTorches() ? 1.0f : 0.0f;   // time for torches here (night, a dark interior)
 	else if (what == "subtitle") v = w.time < s.subtitleUntil && !s.subtitle.empty() ? 1.0f : 0.0f;   // a spoken line written now
+	else if (what == "subtitlehas")     // <text, '_' a space>: the last line spoken (its subtitle) holds it, 1
+		v = lower(s.subtitle).find(lower(spaced(arg))) != std::string::npos ? 1.0f : 0.0f;
 	else if (what == "lampbatches")     // batches the last view drew with lamp light the night left alone (outdoors)
 	{
 		extern int g_lampLitBatches;
@@ -223,10 +252,20 @@ std::optional<bool> numberOfWorld(Session& s, const std::string& what, const std
 	}
 	else if (what == "precip")          // <streaks|flakes|ring|farring|x0>: the rain and ash the last frame drew (drawPrecipitation;
 	{                                   // ring: the far rain's band 450 out, farring: the one 900 out)
-		extern int g_precipStreaks, g_precipFlakes, g_precipRing, g_precipFarRing;
-		extern float g_precipX0;
+		// (snow: the flakes that were snow's sheets; dust: the clouds, blizzard: those that were a blizzard's; windx /
+		// windy: the way the flakes and clouds blew across the ground)
+		extern int g_precipStreaks, g_precipFlakes, g_precipRing, g_precipFarRing, g_precipSnow, g_precipDust, g_precipBlizzard;
+		extern float g_precipX0, g_precipWind[2];
 		v = arg == "flakes" ? (float)g_precipFlakes : arg == "ring" ? (float)g_precipRing : arg == "farring" ? (float)g_precipFarRing
-			: arg == "x0" ? g_precipX0 : (float)g_precipStreaks;
+			: arg == "x0" ? g_precipX0 : arg == "snow" ? (float)g_precipSnow : arg == "dust" ? (float)g_precipDust
+			: arg == "blizzard" ? (float)g_precipBlizzard : arg == "windx" ? g_precipWind[0] : arg == "windy" ? g_precipWind[1]
+			: (float)g_precipStreaks;
+	}
+	else if (what == "stormdir")        // <x|y>: where the storm of the weather now blows the player (World::stormDirection)
+	{
+		float d[2];
+		w.stormDirection(w.weatherNow, w.player.feet, d);
+		v = arg == "x" ? d[0] : d[1];
 	}
 	else if (what == "torchpixel")      // the player's torch in the last view: per pixel 1, per vertex 0, none -1
 	{
@@ -241,6 +280,9 @@ std::optional<bool> numberOfWorld(Session& s, const std::string& what, const std
 		else if (arg == "inverty") v = g_invertY ? 1.0f : 0.0f;
 		else if (arg == "subtitles") v = g_subtitles ? 1.0f : 0.0f;
 		else if (arg == "stickzone") v = (float)g_stickZonePct;
+		else if (arg == "stylusspeed") v = (float)g_stylusSpeed;
+		else if (arg == "stylusbuttons") v = g_stylusButtons ? 1.0f : 0.0f;
+		else if (arg == "layout") v = (float)g_controlLayout;      // 0 Xbox, 1 classic, 2 GoldenEye, 3 stylus
 		else
 			return false;
 	}
@@ -267,6 +309,7 @@ std::optional<bool> numberOfWorld(Session& s, const std::string& what, const std
 		else if (arg == "auto") v = gammaAutoOn() ? 1.0f : 0.0f;
 		else if (arg == "lift") v = gammaLift();
 		else if (arg == "sensor") v = (float)gammaSensor();
+			else if (arg == "qtmopen") v = gammaQtmOpen() ? 1.0f : 0.0f;
 		else if (arg == "saved")
 		{
 			v = -1.0f;
@@ -301,16 +344,49 @@ std::optional<bool> numberOfWorld(Session& s, const std::string& what, const std
 						v++;
 				}
 	}
+	else if (what == "scriptsinheap")  // scripts with their tree in the heap now (mwscript/scriptstore.cpp)
+	{
+		v = 0;
+		for (const auto& kv : w.game.scripts)
+			if (!kv.second.spilled || kv.second.loaded)
+				v++;
+	}
+	else if (what == "talkreads") v = (float)topicsTalkReads();         // the talk so far: reads of the card ...
+	else if (what == "talkdecoded") v = (float)topicsTalkDecoded();     // ... and responses decoded (topicstore.cpp)
+	else if (what == "topicsinheap")   // topics other than Voice with their responses in the heap now (topicstore.cpp)
+	{
+		v = 0;
+		for (const Topic& t : w.game.topics)
+			if (t.type != TOPIC_VOICE && !t.infos.empty())
+				v++;
+	}
+	else if (what == "gridloaded")  // <gx>,<gy>: 1 when that exterior cell's geometry is loaded (-1: no such cell)
+	{
+		int gx = 0, gy = 0;
+		if (sscanf(arg.c_str(), "%d,%d", &gx, &gy) != 2)
+			return false;
+		int ci = w.gridCell(gx, gy);
+		v = ci < 0 ? -1.0f : w.cells[ci].live ? 1.0f : 0.0f;
+	}
 	else if (what == "savevalid")   // <name>: 1 when test_<name>.sav reads whole (a damaged one is refused)
 		v = World::savedCell(("sdmc:/3ds/mw3ds/test_" + arg + ".sav").c_str()).empty() ? 0.0f : 1.0f;
 	else if (what == "saveneeds")   // <name>: 1 when test_<name>.sav was made with an add-on the data lacks (refused)
 		v = w.saveMissingAddon(("sdmc:/3ds/mw3ds/test_" + arg + ".sav").c_str()).empty() ? 0.0f : 1.0f;
+	else if (what == "batchdepthwrite")   // <flags>: 1 if a batch with those BATCH_* flags writes depth (3: blended and tested)
+		v = batchWritesDepth((u8)atoi(arg.c_str())) ? 1.0f : 0.0f;
 	else if (what == "shotluma")    // <n>: how bright step shot n's top screen is, 0..255 (its pixels' mean; -1: no such shot)
 		v = shotLuma(atoi(arg.c_str()));
+	else if (what == "shotlumabox") // <n>,<x>,<y>,<w>,<h>: how bright that box of step shot n's bottom screen is, 0..255
+	{
+		int n = -1, x = 0, y = 0, bw = 0, bh = 0;
+		v = sscanf(arg.c_str(), "%d,%d,%d,%d,%d", &n, &x, &y, &bw, &bh) == 5 ? shotLumaBox(n, x, y, bw, bh) : -1.0f;
+	}
 	else if (what == "shotspread")  // <n>: how far step shot n's top screen's pixels stray from its mean brightness (-1: none)
 		v = shotLuma(atoi(arg.c_str()), 1);
 	else if (what == "shotdark")    // <n>: the percentage of step shot n's top screen darker than 0.6 x its mean (-1: none)
 		v = shotLuma(atoi(arg.c_str()), 2);
+	else if (what == "shotblack")   // <n>: the percentage of step shot n's top screen all but black (under 16 of 255)
+		v = shotLuma(atoi(arg.c_str()), 3);
 	else if (what == "vmalpha")     // how solid the first-person arms are drawn (1; less under Invisibility, Chameleon)
 		v = s.vm.set.actors.empty() ? -1.0f : s.vm.set.actors[0].alpha;
 	else if (what == "bodyalpha")   // how solid the player's third-person body is drawn (1; less under Invisibility, Chameleon)
@@ -362,11 +438,44 @@ std::optional<bool> numberOfWorld(Session& s, const std::string& what, const std
 		s.updateSky();
 		v = what == "moonx" ? s.moonDir[m][0] : what == "moonz" ? s.moonDir[m][2] : s.moonAlpha[m];
 	}
+	else if (what == "moonred") v = w.moonRed ? 1.0f : 0.0f;          // TurnMoonRed's state
+	else if (what == "moontint")        // <0 Masser | 1 Secunda>,<0 r | 1 g | 2 b>: the colour its picture is drawn in (0..255)
+	{
+		size_t comma = arg.find(',');
+		int m = atoi(arg.c_str()) ? 1 : 0, k = comma == std::string::npos ? 0 : std::max(0, std::min(2, atoi(arg.c_str() + comma + 1)));
+		s.updateSky();
+		v = (float)s.moonTint[m][k];
+	}
 	else if (what == "sunside")     // <0..3>: the light from the side now (World::sunSide): r, g, b on a wall facing it, w +1 east
 	{
 		float side[4];
 		w.sunSide(side);
 		v = side[std::clamp(atoi(arg.c_str()), 0, 3)];
+	}
+	else if (what == "sharedmodels")   // the loaded cells' shared models (format 11: Solstheim's pines) and their placements
+	{
+		v = 0.0f;
+		for (LoadedCell* l : w.loaded)
+			v += arg == "places" ? (float)l->cell.places.size() : (float)l->cell.models.size();
+	}
+	else if (what == "shareddrawn")    // shared models' placements the last view drew
+		v = (float)g_sharedDrawn;
+	else if (what == "worlddraws")     // draws the last view of the world made (each one CPU time on the console)
+		v = (float)g_worldDraws;
+	else if (what == "totalposes")     // poses made so far by every loaded person and creature (the CPU's animation work)
+	{
+		v = 0.0f;
+		for (LoadedCell* l : w.loaded)
+			for (const Actor& a : l->actors.actors)
+				v += (float)a.poses;
+	}
+	else if (what == "detailbatches")  // this cell's batches and shared placements that stop at a distance by their size
+	{
+		v = 0.0f;
+		for (const CellBatch& b : w.here().batches)
+			v += b.maxDist > 0.0f ? 1.0f : 0.0f;
+		for (const auto& p : w.here().places)
+			v += p.maxDist > 0.0f ? 1.0f : 0.0f;
 	}
 	else if (what == "sidebatches")  // this cell's batches lit from the side by the low sun (their colours' alpha the facing)
 	{
@@ -494,7 +603,24 @@ std::optional<bool> numberOfWorld(Session& s, const std::string& what, const std
 		if (!any)
 			return false;
 	}
+	else if (what == "texlevels")   // <text>: the most levels (1: no smaller copies) of this cell's textures whose names have it
+	{
+		const Cell& c = w.here();
+		std::string want = lower(arg);
+		bool any = false;
+		for (size_t i = 0; i < c.textureNames.size(); i++)
+			if (i < c.textures.size() && c.textures[i] && lower(c.textureNames[i]).find(want) != std::string::npos)
+			{
+				float n = (float)(c.textures[i]->maxLevel + 1);
+				v = any ? fmaxf(v, n) : n;
+				any = true;
+			}
+		if (!any)
+			return false;
+	}
 	else if (what == "wwind") v = w.windNow;
+	else if (what == "wloopis") v = lower(s.weatherSound) == lower(spaced(arg)) ? 1.0f : 0.0f;   // <sound, '_' a space>: the weather's loop now
+	else if (what == "loadspeed") v = w.player.loadSpeed;     // the player's speed factor from the load and a storm blowing against them
 	else if (what == "wstorm") v = w.weatherStorm() ? 1.0f : 0.0f;
 	else if (what == "wprecip") v = w.weatherPrecip() ? 1.0f : 0.0f;
 	else if (what == "wtorches") v = w.useTorches() ? 1.0f : 0.0f;

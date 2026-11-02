@@ -13,6 +13,7 @@
 #include "components/debug/debuglog.hpp"
 
 extern const char* g_playerBlock;
+extern const char* g_playerPushed;
 #include "testdrive/testhelpers.hpp"
 
 bool g_testFailed = false;          // a drive or expect FAIL happened (MW3DS_FAILFAST: the run stops at the first)
@@ -89,20 +90,21 @@ float doorWalkRank(Session& s, const Ref& r, float d3)
 // Numbers the checks compare. Kinds with an argument (a[1]) and those without; false: not a number kind
 bool hasArg(const std::string& what)
 {
-	return what == "mapnotehas" || what == "playerdist" || what == "levcandidates" || what == "levpick" || what == "levrolls" || what == "soulcapacity" || what == "stackcount"
+	return what == "mapnotehas" || what == "vmbone" || what == "combatspell" || what == "silveron" || what == "labelis" || what == "refmeleereach" || what == "playerdist" || what == "levcandidates" || what == "levpick" || what == "levrolls" || what == "soulcapacity" || what == "stackcount"
 		|| what == "refexists" || what == "refenabled" || what == "refstock" || what == "merchantgold" || what == "followset"
 		|| what == "journalentries" || what == "questfinished" || what == "skill" || what == "skillprog" || what == "attr" || what == "attrups" || what == "attrdamage" || what == "effect"
 		|| what == "refhealth" || what == "refrank" || what == "reflevel" || what == "refspell" || what == "reffatigue" || what == "refmagicka" || what == "refdisp" || what == "refflee"
 		|| what == "refattr" || what == "refskill" || what == "refhealthmax" || what == "refmagickamax" || what == "refcommanded"
 		|| what == "effectarg" || what == "locklevel" || what == "summoned" || what == "itemhealth" || what == "spellmagicka"
-		|| what == "refcell" || what == "refforcesneak" || what == "reflegframes" || what == "refsidemax" || what == "refpkg" || what == "refpkgdone" || what == "refvfx" || what == "refvfxhands" || what == "refvfxhandz" || what == "reflhandz" || what == "refcombat" || what == "refduel" || what == "refrun" || what == "refdying" || what == "reflying" || what == "refknock" || what == "refsidesteps" || what == "refskate" || what == "refyaw" || what == "refidlevoice" || what == "refheadyaw" || what == "refheadpitch" || what == "refsoultrap" || what == "refally" || what == "refdist" || what == "refaimed" || what == "refabove" || what == "refhiddenparts" || what == "refweaponrating" || what == "reftorch" || what == "reftorchfire" || what == "refcpuskin" || what == "refblendskin" || what == "refmeshes" || what == "refdressed" || what == "refz" || what == "refclimb" || what == "reftorcharm" || what == "refshield" || what == "refglow" || what == "refalpha" || what == "reftint" || what == "reflampnow" || what == "refheldlight" || what == "reftalk" || what == "refposes" || what == "refmorpht" || what == "refgroupstarts" || what == "refposehz" || what == "refanimtime" || what == "refabovefeet" || what == "refadditive" || what == "refwater" || what == "refaimable" || what == "refbox" || what == "refitem" || what == "refgap" || what == "reflock" || what == "reftrap" || what == "scripttarget" || what == "reflocal" || what == "reflocalfrac" || what == "scriptlocal" || what == "itemscriptrunning" || what == "refloopvol" || what == "soundstarted" || what == "soundvolume" || what == "voicesecs" || what == "spellcost" || what == "castchance" || what == "brewedmag" || what == "brewedduration" || what == "charge"
+		|| what == "refcell" || what == "refforcesneak" || what == "reflegframes" || what == "refsidemax" || what == "refpkg" || what == "refpkgdone" || what == "refvfx" || what == "refvfxhands" || what == "refvfxhandz" || what == "reflhandz" || what == "refcombat" || what == "refduel" || what == "refrun" || what == "refdying" || what == "reflying" || what == "refknock" || what == "refsidesteps" || what == "refskate" || what == "refyaw" || what == "refidlevoice" || what == "refheadyaw" || what == "refheadpitch" || what == "refsoultrap" || what == "refally" || what == "refdist" || what == "refsight" || what == "refaimed" || what == "refabove" || what == "refhiddenparts" || what == "refweaponrating" || what == "reftorch" || what == "reftorchfire" || what == "refcpuskin" || what == "refblendskin" || what == "refmeshes" || what == "refdressed" || what == "refz" || what == "refclimb" || what == "refwerewolf" || what == "reftorcharm" || what == "refshield" || what == "refglow" || what == "refalpha" || what == "reftint" || what == "refsize" || what == "reflampnow" || what == "refheldlight" || what == "reftalk" || what == "refposes" || what == "refmorpht" || what == "refgroupstarts" || what == "refposehz" || what == "refanimtime" || what == "refabovefeet" || what == "refadditive" || what == "refwater" || what == "refaimable" || what == "refbox" || what == "refitem" || what == "refgap" || what == "reflock" || what == "refowned" || what == "reftrap" || what == "scripttarget" || what == "reflocal" || what == "reflocalfrac" || what == "scriptlocal" || what == "itemscriptrunning" || what == "refloopvol" || what == "loopsheard" || what == "soundstarted" || what == "soundvolume" || what == "closestpair" || what == "cellreads" || what == "cellinmemory" || what == "voicesecs" || what == "spellcost" || what == "castchance" || what == "brewedmag" || what == "brewedduration" || what == "charge"
 		|| what == "count" || what == "repairamount" || what == "rechargegain" || what == "lockchance" || what == "trapchance"
 		|| what == "persuadechance" || what == "persuadepart" || what == "enchantcastcost" || what == "resistbase"
 		|| what == "crimebounty" || what == "skillneed" || what == "attackterm" || what == "knockodds" || what == "falldamage" || what == "poseevery" || what == "skinevery"
 		|| what == "blockchance" || what == "elemshield" || what == "runspeedfor" || what == "jumpspeedfor" || what == "npcwalk"
 		|| what == "npcrun" || what == "refeffect" || what == "fleerating" || what == "fightterm" || what == "hagglechance" || what == "barterprice" || what == "trainprice" || what == "travelprice" || what == "mapseen"
-		|| what == "wcolor" || what == "cellfog" || what == "fogrange" || what == "savevalid" || what == "saveneeds" || what == "shotluma" || what == "shotlumagain" || what == "shotspread" || what == "shotdark" || what == "cloudtex" || what == "clouduv" || what == "glyph" || what == "glyphsame" || what == "sunside" || what == "saverow" || what == "moonx" || what == "moonz" || what == "moonalpha" || what == "texlow" || what == "texside" || what == "texlod" || what == "regionchance" || what == "regionweather"
-		|| what == "equipped" || what == "canequip" || what == "armorparts" || what == "pickpocketchance" || what == "tooluses" || what == "lighttime" || what == "gyrodps" || what == "gyroyaw" || what == "gyropitch" || what == "gyrosoft" || what == "gyrodrift" || what == "gyrocal" || what == "gyrolevel" || what == "stick" || what == "vmpiece" || what == "vfxpiece" || what == "vfxfxsprites" || what == "vfxdark" || what == "vfxlife" || what == "refsprites" || what == "gamma" || what == "setting" || what == "savedsetting" || what == "conhas" || what == "mapknown" || what == "precip";
+		|| what == "wcolor" || what == "cellfog" || what == "fogrange" || what == "gridloaded" || what == "savevalid" || what == "saveneeds" || what == "shotluma" || what == "shotlumabox" || what == "batchdepthwrite" || what == "shotlumagain" || what == "shotspread" || what == "shotdark" || what == "shotblack" || what == "cloudtex" || what == "clouduv" || what == "glyph" || what == "glyphsame" || what == "sunside" || what == "saverow" || what == "moonx" || what == "moonz" || what == "moonalpha" || what == "texlow" || what == "sharedmodels" || what == "texside" || what == "texlod" || what == "texlevels" || what == "regionchance" || what == "regionweather"
+		|| what == "equipped" || what == "canequip" || what == "armorparts" || what == "pickpocketchance" || what == "tooluses" || what == "lighttime" || what == "gyrodps" || what == "gyroyaw" || what == "gyropitch" || what == "gyrosoft" || what == "gyrodrift" || what == "gyrocal" || what == "gyrolevel" || what == "stick" || what == "vmpiece" || what == "vfxpiece" || what == "vfxfxsprites" || what == "vfxdark" || what == "vfxlife" || what == "refsprites" || what == "gamma" || what == "setting" || what == "savedsetting" || what == "conhas" || what == "mapknown" || what == "precip"
+		|| what == "refscale" || what == "refdrawscale" || what == "refradius" || what == "stormdir" || what == "moontint" || what == "subtitlehas" || what == "wloopis";
 }
 
 // "@": the value SNAP recorded for the same check; "@1" / "@-2.5": that plus / minus so much
@@ -156,14 +158,14 @@ bool TestDriver::playerToken(const std::string& tok)
 		"A", "B", "X", "Y", "L", "R", "UP", "DOWN", "LEFT", "RIGHT", "SELECT", "START", "ZL", "ZR", "FRAMECAP", "GYRO", "CONTROLS", "GYROAIM", "TAP", "DRAG", "TOUCH", "STICKDOWN",
 		// (SEED: the dice made repeatable from there, nothing given or set: a long run seeds a section whose outcome is a
 		// script's roll, so a change before it doesn't flip it)
-		"STICKUP", "STICKRIGHT", "STICKLEFT", "MSG", "SHOT", "SAVE", "LOAD", "SAVESEL", "LEGIT", "SEED",
+		"STICKUP", "STICKRIGHT", "STICKLEFT", "MSG", "SHOT", "SAVE", "LOAD", "SAVESEL", "LEGIT", "SEED", "RANDSEED",
 		"EXPECT", "SNAP", "CHECK", "PROBE",
-		"WALKTO", "FLYTO", "HOPTO", "ESCORT", "DOORTO", "ACTIVATE", "PICKUP", "LOOT", "PUT", "KILL", "STRIKE", "FACE", "SNEAK",
+		"WALKTO", "FLYTO", "HOPTO", "ESCORT", "DOORTO", "ACTIVATE", "PICKUP", "LOOT", "PUT", "KILL", "FIGHT", "SKYTO", "OPEN", "BRING", "WAYTO", "STRIKE", "FACE", "SNEAK",
 		"TOPIC", "CHOICE", "CHOICEVAL", "PERSUADE", "TRAVEL", "BARTER", "BARTERSEL", "INVSEL", "BUY", "SELL", "TRAIN", "SPELLMAKE", "MAKEPICK", "MAKETARGET",
 		"SHARE", "SHAREPUT", "SHARETAKE", "SHAREDONE", "MAPNOTE",
 		"ENCHANTAT", "ENCHANT", "ENCHITEM", "ENCHGEM", "ENCHTYPE", "ADDEFFECT", "CONFIRM", "TYPE", "LEVELUP",
-		"EQUIP", "USE", "READ", "DROP", "QUICKSET", "CAST", "CASTAT", "CASTMADESPELL", "USEMADE", "EQUIPMADE",
-		"RECHARGEMADE", "RECHARGE", "REPAIR", "REPAIRAT", "REPAIRWITH", "BUYSPELL", "BREW", "DRINKBREWED", "USELOCKPICK", "USEPROBE", "SLEEP", "SLEEPUNTIL", "UNSEEN", "UNTIL", "FLOAT", "HIDE",
+		"EQUIP", "UNEQUIP", "USE", "READ", "DROP", "QUICKSET", "CAST", "CASTAT", "CASTMADESPELL", "USEMADE", "EQUIPMADE",
+		"RECHARGEMADE", "RECHARGE", "REPAIR", "REPAIRAT", "REPAIRWITH", "BUYSPELL", "BREW", "DRINKBREWED", "USELOCKPICK", "USEPROBE", "SLEEP", "SLEEPUNTIL", "SLEEPTO", "UNSEEN", "UNTIL", "FLOAT", "HIDE", "SPEEDBOOST",
 	};
 	size_t colon = tok.find(':');
 	std::string name = tok.substr(0, colon);
@@ -192,8 +194,125 @@ void TestDriver::fail(const char* why)
 	kind = NONE;
 }
 
+bool TestDriver::startFight(Session& s, const std::string& token)
+{
+	std::string kill = "KILL" + token.substr(5);
+	bool started = start(s, kill);
+	fightToken = started ? retryToken : "";
+	if (started)
+		logf("drive: FIGHT %s: struck from wherever a blow lands", id.c_str());
+	return started;
+}
+
+// The swing from here would strike it (the game's own pick: the nearest living actor in the arc, within the weapon's
+// reach from both bodies' edges), and it is still alive
+bool TestDriver::blowLandsFromHere(Session& s, int ref)
+{
+	return ref >= 0 && !s.w.refs[ref].dead && s.swingTarget() == ref;
+}
+
+bool TestDriver::startSky(Session& s, const std::string& token)
+{
+	std::string fly = "FLYTO" + token.substr(5);
+	World& w = s.w;
+	Player& p = w.player;
+	// a ceiling over us, or over the ground round about: still coming down from the last flight, the landing drifts a
+	// hundred units on, under the overhang where the sky straight up was open when the step began
+	bool ceiling = false;
+	for (int k = 0; k <= 8 && !ceiling; k++)
+	{
+		float ox = k == 0 ? 0.0f : 150.0f * sinf(k * 0.7854f), oy = k == 0 ? 0.0f : 150.0f * cosf(k * 0.7854f);
+		float a[3] = { p.feet[0] + ox, p.feet[1] + oy, playerEyeZ(p) }, b[3] = { a[0], a[1], p.feet[2] + 3000.0f };
+		ceiling = !w.lineOfSight(a, b, false);
+	}
+	float spot[2];
+	if (w.current >= 0 && !w.cells[w.current].interior && ceiling && spotBeside(s, p.feet, p.feet[2] + 3000.0f, spot))
+	{
+		char walk[96];
+		snprintf(walk, sizeof(walk), "WALKTO:@%.0f,%.0f,%.0f", spot[0], spot[1], p.feet[2]);
+		logf("drive: SKYTO: a ceiling over us at %.0f %.0f %.0f: walking out to the open sky at %.0f %.0f first", p.feet[0],
+			p.feet[1], p.feet[2], spot[0], spot[1]);
+		if (start(s, walk))
+		{
+			thenDo = fly;
+			return true;
+		}
+	}
+	return start(s, fly);
+}
+
+bool TestDriver::startOpen(Session& s, const std::string& token)
+{
+	std::vector<std::string> a = split(token);
+	int d = a.size() >= 2 ? findTarget(s, "ACTIVATE", a[1]) : -1;
+	if (d >= 0)
+	{
+		const Ref& r = s.w.refs[d];
+		if (r.recType == REC_DOOR && !r.hasDest && (r.doorTarget != 0.0f || r.doorAngle != 0.0f))
+		{
+			logf("drive: OPEN %s: open already", a[1].c_str());
+			openToken.clear();
+			return false;
+		}
+	}
+	bool started = start(s, "ACTIVATE" + token.substr(4));
+	openToken = started ? retryToken : "";
+	return started;
+}
+
+bool TestDriver::startBring(Session& s, const std::string& token)
+{
+	std::vector<std::string> a = split(token);
+	if (a.size() < 2)
+		return false;
+	World& w = s.w;
+	int n = findTarget(s, "ACTIVATE", a[1]);
+	if (n < 0 || w.refs[n].dead)
+	{
+		logf("drive: BRING %s: not here", a[1].c_str());
+		return false;
+	}
+	float d = w.distanceToPlayer(n);
+	if (d <= 250.0f)
+	{
+		logf("drive: BRING %s: with us already (%.0f away)", a[1].c_str(), d);
+		return false;
+	}
+	const Player& p = w.player;
+	const Ref& r = w.refs[n];
+	// (up to them as a walk to a person goes, within 120: where they stand is often against a counter or a wall, and a walk
+	// to a spot wants us within 30 of it; Huleeya at Jobasha's, held 50 off hers)
+	std::string there = "WALKTO:" + a[1];
+	char back[96];
+	snprintf(back, sizeof(back), "WALKTO:@%.0f,%.0f,%.0f", p.feet[0], p.feet[1], p.feet[2]);
+	logf("drive: BRING %s: %.0f away, going back for them", a[1].c_str(), d);
+	escort = a[1];
+	if (!start(s, there))
+		return false;
+	thenDo = back;
+	return true;
+}
+
+bool TestDriver::startWay(Session& s, const std::string& token)
+{
+	bool started = start(s, "WALKTO" + token.substr(5));
+	wayOn = started && kind == WALK;
+	return started;
+}
+
 bool TestDriver::start(Session& s, const std::string& token)
 {
+	wayOn = false;
+	if (token.compare(0, 6, "WAYTO:") == 0)
+		return startWay(s, token);
+	if (token.compare(0, 6, "BRING:") == 0)
+		return startBring(s, token);
+	if (token.compare(0, 5, "OPEN:") == 0)
+		return startOpen(s, token);
+	if (token.compare(0, 6, "FIGHT:") == 0)
+		return startFight(s, token);
+	if (token.compare(0, 6, "SKYTO:") == 0)
+		return startSky(s, token);
 	if (!retrying)
 	{
 		viewTries = talkTries = takeTries = 0;
@@ -260,6 +379,23 @@ bool TestDriver::start(Session& s, const std::string& token)
 	}
 	if (mechanicsOp(s, a))
 		return false;
+	// UNEQUIP:<item>: take a worn or held item off, as tapping it on the Inventory page does (a fistfight: the weapon
+	// put away)
+	if (verb == "UNEQUIP" && a.size() >= 2)
+	{
+		std::string want = lower(spaced(a[1])), want2 = lower(a[1]);
+		for (size_t k = 0; k < s.w.inventory.size(); k++)
+			if (s.w.inventory[k].equipped && (lower(s.w.inventory[k].id) == want || lower(s.w.inventory[k].id) == want2))
+			{
+				s.w.inventory[k].equipped = false;
+				s.playSound(-1, "Item Misc Up");
+				s.w.refreshStats();
+				logf("test: unequipped %s", s.w.inventory[k].id.c_str());
+				return false;
+			}
+		logf("drive: FAIL unequip %s: not worn or held", a[1].c_str());
+		return false;
+	}
 	if (verb == "EQUIP" && a.size() >= 2)
 	{
 		std::string want = lower(spaced(a[1])), want2 = lower(a[1]);
@@ -625,6 +761,16 @@ bool TestDriver::update(Session& s, PlayerInput& in, u32& down, float dt)
 	float dx = tx - p.feet[0], dy = ty - p.feet[1];
 	float dist = sqrtf(dx * dx + dy * dy);
 	float want = kind == WALK ? (pointGoal ? 30.0f : 120.0f) : kind == KILL ? 90.0f : 100.0f;
+	// (FIGHT: once the way in has stalled, a blow that lands from here is struck from here)
+	if (kind == KILL && !fightToken.empty() && fightToken == retryToken && dist > want && (stuckTries > 0 || progressTimer >= 1.5f)
+		&& blowLandsFromHere(s, ref))
+		dist = want;
+	// a creature's own box keeps us off it further than a person's (a mudcrab's 89 to 129 from its middle, by the side
+	// met): pressed against it (it is what pushed us back this frame), there; as far off as its half length is over a
+	// person's at most. (Counted there at that distance from any side, the Ritual of Water's horker was never walked up to:
+	// its script wants the player within 256, and the walk stopped 238 off on the shore above it)
+	if (!pointGoal && r.recType == REC_CREA && strcasecmp(g_playerPushed, r.idLower.c_str()) == 0)
+		want += fmaxf(0.0f, s.actorHalfLength(ref) - 28.5f);
 	// a big door (a Daedric ruin's oval one): its own mesh stops us at the face, a long way from the origin; at the box is there
 	if (kind == ACTIVATE && !pointGoal && r.recType == REC_DOOR && r.hasBox && dist > want && dist < 300.0f)
 	{
@@ -752,6 +898,13 @@ bool TestDriver::update(Session& s, PlayerInput& in, u32& down, float dt)
 	{
 		logf("drive: reached %s in %.1f s", id.c_str(), elapsed);
 		kind = NONE;
+		// (WAYTO: there floating up a rise, the float ends there, as a player lands before what comes next; the 8 s float
+		// went on over the yurt's door at Urshilaku, and the press from the air missed it)
+		if (wayOn && floatWalk && floatUntil >= 0.0f)
+		{
+			logf("drive: WAYTO: there, floating: float off");
+			floatUntil = -1.0f;
+		}
 		if (!thenDo.empty())
 		{
 			std::string t = thenDo;
@@ -801,11 +954,20 @@ bool TestDriver::update(Session& s, PlayerInput& in, u32& down, float dt)
 		// someone else in the line (the crosshair is on a living person who is not the target): no swing, step aside
 		// until the line is clear, as a player does not hit a bystander. One fighting us is no bystander: a player in a
 		// melee hits whoever of them is in front (Zainsipilu: Aranwen's guards between her and the player)
-		if (s.target >= 0 && s.target != ref && (w.refs[s.target].recType == REC_NPC_ || w.refs[s.target].recType == REC_CREA) && !w.refs[s.target].dead
-			&& !(w.refs[s.target].ai == AI_COMBAT && w.refs[s.target].duelFoe < 0 && !w.refs[s.target].ally))
+		// The swing strikes the nearest actor in its arc, not the one under the crosshair: one nearer than the target in it
+		// is in the way too (the wounded bear among the rieklings of the Ritual of Beasts took the blows meant for them)
+		int inWay = s.target;
+		if (inWay < 0 || inWay == ref)
+		{
+			int sw = s.swingTarget();
+			if (sw >= 0 && sw != ref)
+				inWay = sw;
+		}
+		if (inWay >= 0 && inWay != ref && (w.refs[inWay].recType == REC_NPC_ || w.refs[inWay].recType == REC_CREA) && !w.refs[inWay].dead
+			&& !(w.refs[inWay].ai == AI_COMBAT && w.refs[inWay].duelFoe < 0 && !w.refs[inWay].ally))
 		{
 			if (lineTimer <= 0.0f)
-				logf("drive: %s is in the way to %s, stepping aside", w.refs[s.target].id.c_str(), id.c_str());
+				logf("drive: %s is in the way to %s, stepping aside", w.refs[inWay].id.c_str(), id.c_str());
 			lineTimer += dt;
 			// (a short step either way does not clear a big one, a queen: after 3 s walk round it, facing the target, one way for
 			// 6 s then the other, as a player goes round to another side)
@@ -1018,6 +1180,9 @@ bool TestDriver::update(Session& s, PlayerInput& in, u32& down, float dt)
 		const float* f = aimK < 14 ? kAim[aimK] : kFace[aimK - 14];
 		float ax = r.boxMin[0] + (r.boxMax[0] - r.boxMin[0]) * f[0], ay = r.boxMin[1] + (r.boxMax[1] - r.boxMin[1]) * f[1];
 		float az = r.boxMin[2] + (r.boxMax[2] - r.boxMin[2]) * f[2];
+		// (a body: within the lowest kCorpsePickHeight of its box, where worldPick finds it)
+		if (r.actor >= 0 && r.dead)
+			az = r.boxMin[2] + kCorpsePickHeight * (0.25f + 0.5f * f[2]);
 		float hx = ax - p.feet[0], hy = ay - p.feet[1];
 		p.yaw = atan2f(hx, hy);
 		p.pitch = atan2f(az - eyeZ, fmaxf(sqrtf(hx * hx + hy * hy), 1.0f));
@@ -1116,8 +1281,11 @@ bool TestDriver::update(Session& s, PlayerInput& in, u32& down, float dt)
 			float eye[3] = { cx, cy, fz + PLAYER_EYE_HEIGHT - p.eyeDrop };
 			for (const float* f : kLook)
 			{
+				// (a body lies in its standing box, picked only by its lowest kCorpsePickHeight (worldPick): looked at there.
+				// Looked at higher, Khash's body at the foot of his dais in the Citadel of Myn Dhrur was never found)
+				float az = r.actor >= 0 && r.dead ? r.boxMin[2] + kCorpsePickHeight * 0.5f : r.boxMin[2] + (r.boxMax[2] - r.boxMin[2]) * f[2];
 				float d[3] = { r.boxMin[0] + (r.boxMax[0] - r.boxMin[0]) * f[0] - eye[0], r.boxMin[1] + (r.boxMax[1] - r.boxMin[1]) * f[1] - eye[1],
-					r.boxMin[2] + (r.boxMax[2] - r.boxMin[2]) * f[2] - eye[2] };
+					az - eye[2] };
 				float len = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
 				if (len < 1.0f)
 					continue;
@@ -1144,7 +1312,10 @@ bool TestDriver::update(Session& s, PlayerInput& in, u32& down, float dt)
 		found = found || seen;
 		if (!found)
 		{
-			fail("hidden from here, and no spot round it where the crosshair finds it");
+			char why[160];
+			snprintf(why, sizeof(why), "hidden from here (%.0f %.0f %.0f, it at %.0f %.0f %.0f), and no spot round it where the crosshair finds it",
+				p.feet[0], p.feet[1], p.feet[2], r.pos[0], r.pos[1], r.pos[2]);
+			fail(why);
 			return false;
 		}
 		char walk[96];

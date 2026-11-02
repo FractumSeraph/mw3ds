@@ -18,6 +18,11 @@ return {
 		MW3DS_SBS_Play = function(d)
 			anim.playQueued(self, d.group, {})
 		end,
+		-- a scene step: it goes for the player (d.target) on its own AI
+		MW3DS_SBS_Attack = function(d)
+			I.AI.removePackages()
+			I.AI.startPackage({ type = 'Combat', target = d.target })
+		end,
 		-- a scene step: calm (Fight 0: no turning on the player) and walking to d.pos on its own AI
 		MW3DS_SBS_Travel = function(d)
 			types.Actor.stats.ai.fight(self).base = 0
@@ -25,9 +30,14 @@ return {
 			I.AI.startPackage({ type = 'Travel', destPosition = d.pos })
 		end,
 		MW3DS_SBS_Pose = function(d)
+			-- (calm too: a hostile creature started a fight with the player again, turned to it and walked off its spot)
+			types.Actor.stats.ai.fight(self).base = 0
 			I.AI.removePackages()
 			h = d
-			if h.group and not anim.hasGroup(self, h.group) then
+			-- (one with no animation at all, a disabled actor such as Glenmoril's raven before its quest, stands as it is:
+			-- an error here stopped the shots after it)
+			local ok, has = pcall(anim.hasGroup, self, h.group or '')
+			if h.group and not (ok and has) then
 				print(string.format('MW3DS-SBS %s has no group %s', self.recordId, h.group))
 				h.group = nil
 			end

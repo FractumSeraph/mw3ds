@@ -17,18 +17,20 @@
 // The tutorial's console wording (Xbox returns 1), said with the 3DS's controls
 static std::string for3ds(std::string t)
 {
-	// (GoldenEye keeps the Xbox layout's buttons)
-	bool xbox = g_controlLayout == CONTROLS_XBOX || g_controlLayout == CONTROLS_GOLDENEYE;
+	// (GoldenEye keeps the Xbox layout's buttons, and the stylus layout GoldenEye's)
+	bool xbox = g_controlLayout == CONTROLS_XBOX || g_controlLayout == CONTROLS_GOLDENEYE || stylusLayout();
+	bool stylus = stylusLayout();
 	const char* swap[][2] = {
 		{ "The LEFT THUMBSTICK moves you, and the RIGHT THUMBSTICK looks around.",
-		  g_controlLayout == CONTROLS_GOLDENEYE
+		  stylus ? "The Circle Pad moves you; slide the stylus on the bottom screen to look around."
+			: g_controlLayout == CONTROLS_GOLDENEYE
 			? "The Circle Pad walks and turns; hold X (or R, winding up a blow) and it aims instead, up and down too."
 			: "The Circle Pad moves you, and the C-Stick looks around (the D-Pad looks up and down)." },
 		{ "Press B to use your menus. When you are done with them, press B again to close them.",
 		  "Tap the buttons on the bottom screen to use your menus (START for saves). Press B to close them." },
 		{ "Press the WHITE button to use your journal", "Tap Journal on the bottom screen to use your journal" },
 		{ "Press the X button to pull out your weapon. Once your weapon is readied, hold and release the RIGHT TRIGGER to swing it.",
-		  g_controlLayout == CONTROLS_GOLDENEYE ? "Equip your weapon, then tap X to ready it, and hold and release R to swing it."
+		  stylus || g_controlLayout == CONTROLS_GOLDENEYE ? "Equip your weapon, then tap X to ready it, and hold and release R to swing it."
 			: xbox ? "Equip your weapon, then press X to ready it, and hold and release R to swing it."
 			: "Equip your weapon, then hold and release X to swing it." },
 		{ "Equip the dagger by dropping it on your picture in your inventory menu.",

@@ -40,7 +40,12 @@ std::optional<float> dialogueExtensions(Ctx& c, const Node& n, World& w, bool on
 		c.host.dialogueChoice(choices);
 		return 0.0f;
 	}
-	case F_FORCEGREETING: if (ref >= 0) c.host.forceGreeting(ref); return 0.0f;
+	// (not to a werewolf, unless the speaker's script has a local allowwerewolfforcegreeting: Bloodmoon's hunters
+	// and the Skaal talk to the wolf; OpenMW's OpForceGreeting)
+	case F_FORCEGREETING:
+		if (ref >= 0 && (!w.stats.werewolf || (r && r->script >= 0 && w.scripts[r->script].local("allowwerewolfforcegreeting"))))
+			c.host.forceGreeting(ref);
+		return 0.0f;
 	// An actor's reputation is its record's (r->reputation is the script's change on top of it)
 	case F_MODREPUTATION:
 		if (onPlayer || !r)
@@ -61,7 +66,7 @@ std::optional<float> dialogueExtensions(Ctx& c, const Node& n, World& w, bool on
 	case F_CLEARINFOACTOR:
 		// (OpenMW) takes the actor's last answer to the topic out of the journal's Topics index
 		if (r && w.currentInfo >= 0)
-			w.topicLogRemoveLast(w.currentTopic, r->actor >= 0 ? w.game.actors[r->actor].name : r->id.str());
+			w.topicLogRemoveLast(w.currentTopic, r->actor >= 0 ? w.game.actors[r->actor].name.str() : r->id.str());
 		return 0.0f;
 	// FillJournal: every quest's every entry, and every topic known (OpenMW also fills each topic's page with all its
 	// answers: left out here)

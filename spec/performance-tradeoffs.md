@@ -29,6 +29,18 @@ Each entry: what we do, what OpenMW does, why, and where it lives.
   instructions, no memory. Terrain and see-through or alpha-tested things (leaves, fences) keep the noon pattern all
   day, tinted by the hour; OpenMW lights every vertex by its normal. (`convert_cell.py side_facing`, `World::sunSide`,
   `shaders/cell.v.pica sideLight`)
+- **In the heaviest outdoor spots a tree takes one baked light for all its placements in a cell.** Where a 3 x 3 spot's
+  placed models pass 600 k vertices (Solstheim's pine forests and Raven Rock; never Vvardenfell, whose busiest is
+  554 k), a static or activator placed 3 or more times in a cell keeps its vertices once and is drawn once a placement
+  with its own transform (cell format 11, shared models). A rock or a wall keeps each placement's baked colours (4
+  bytes a vertex); a tree or plant (`flora_*`) shares one, the model lit unturned by the cell's ambient light and the
+  noon sun, so a turned tree's lit side and the low sun's side light don't follow its turn. Side by side the forest
+  looked the same (`bm-shared-pines` shots: about 5 % of the top screen's pixels moved by more than 16 of 255, the
+  trees' shading). Gain of the one light: the Hirstaang Forest's spot from 26.0 to 23.6 MB of linear memory (level.py's
+  report; 36.2 with the trees copied into the batches); natively the Old 3DS profile kept 4.7 MB free there with
+  every cell in, where each placement's own colours left 1.8. A placement a lamp lights stays baked. The cost is draw calls: the forest's view drew 210 things instead of 146, Raven Rock's 395 instead of 289.
+  OpenMW lights every vertex of every placement. (`convert_cell.py share_models`, `SHARE_ONE_LIGHT`, `level.py
+  heavy_spots`, `mwrender/renderingmanager.cpp`)
 - **NPCs are drawn from a library the converter dressed** (their race's body, head, hair and what they wear, merged:
   about 29 meshes each, against about 35 put together from parts). One whose clothes leave its pack (a stripped
   corpse) is put together from the shared third-person pieces at run time instead (`npcDress`): about 6 more draws
@@ -49,13 +61,23 @@ Each entry: what we do, what OpenMW does, why, and where it lives.
   stops it at 0.8 of that (the tiers' 2500 / 5000 / 10000 units as 2000 / 4000 / 8000): side by side
   (`trial-detail-distance`, `trial-detail-balmora`) little was lost but far fence posts.
   (`convert_cell.py detail_distance`, `ConsoleProfile::detailScale`)
+- **Mournhold's big areas under the sky are treated as outdoors** (user, 2026-10-27, after the Great Bazaar ran about
+  20 fps in 3D): the dynamic view and its fog close in there when frames run long, small clutter stops by its size
+  (the Bazaar from its entrance in 3D: 199000 triangles to 178000; the dynamic view takes little more, the whole area
+  fits in its shortest reach), and the cell is cut in 2048-unit pieces for culling. Shared models don't reach them:
+  every placement there is lamp lit, and a shared model has no lamp light. OpenMW draws them whole. Other interiors
+  keep their whole view. (`Session::adaptView`, `engine.cpp` fogScale, `convert_cell.py` sky interiors;
+  `perf-mournhold-sky-interiors`, `bug-bazaar-3d-view`)
 - **People and creatures past 6000 (4000 on an Old 3DS) aren't drawn; small pieces of them stop sooner.**
   (`kActorViewDistance`, `actorViewLimit`, `kActorDetailDistance`)
-- **People are re-posed on a cadence**, often up close, less often the smaller they are on screen. A New 3DS every
-  2nd, 3rd and 4th frame near, middle and far (at up to 60 fps). An Old 3DS (and 2DS) by time: 20 poses a second
-  for the two people nearest and most in view, 10 for the rest near and the middle distance, 6.7 far and out of
-  view (counted in frames it was every 2nd, 4th and 6th, 10, 5 and 3 a second at 20 fps: choppy). OpenMW poses
-  everyone every frame. (`World::update`, `actorSkinEvery`, `ConsoleProfile::poseHz`, `perf-o3ds-smooth-poses`)
+- **People are re-posed on a budget, by time, not every frame.** A New 3DS: 30 poses a second for the three people
+  most in view, 15 for the rest near and the middle distance, 10 far and out of view (user, 2026-10-27: the Old 3DS's
+  way a step up). Counted in frames it was every 2nd, 3rd and 4th frame, tuned for 60 fps: at 30 fps the nearest moved
+  at 15 a second and looked slow; shortening the steps below 50 fps fixed that but posed a Balmora street 1.8 x as
+  often (6772 poses in 20 s against 3715) and the town ran slower; the budget makes 4467. An Old 3DS (and 2DS): 20 a
+  second for the two most in view, 10 for the rest near and the middle, 6.7 far and out of view (counted in frames it
+  was 10, 5 and 3 a second at 20 fps: choppy). OpenMW poses everyone every frame. (`World::update`,
+  `ConsoleProfile::poseHz`, `perf-new3ds-pose-budget`, `perf-o3ds-smooth-poses`, `bug-poses-at-30fps`)
 
 ## Rain and storms
 
@@ -65,6 +87,16 @@ Each entry: what we do, what OpenMW does, why, and where it lives.
   built on the CPU in one pass a frame and drawn in a few draws (about 0.5 ms of an Old 3DS's CPU). The dust clouds
   fade out within 400 units of the eye: a 400-unit cloud near the eye is a see-through layer over most of the screen,
   and blending costs the GPU per pixel covered. (`Session::drawPrecipitation`)
+- **Bloodmoon's snow and blizzard: 240 flake sheets on a New 3DS, 120 on an Old one; the blizzard's view a quarter
+  of the whole.** (Agreed 2026-10-25: snow budgeted like ash.) Morrowind.ini asks for 750 flakes and OpenMW's snow.nif
+  / blizzard.nif emit 2000 particles of a 75 (150)-unit sheet of a few dozen specks each, plus 600 blizzard clouds. Ours
+  take the ash flakes' places in the box round the eye: each a 60-unit sheet of four dozen of the original's specks
+  (`artassets.py snow_sheet`: the original sheet is mostly empty texels the GPU would blend for nothing), turned to the
+  eye and gone within 40 units of it (a near sheet would fill the screen); about 10,000 specks in view on a New 3DS, the
+  CPU's work that of 240 ash flakes. An Old 3DS has half (`ConsoleProfile::snowFlakes`). The blizzard's clouds are the
+  ash storm's 24 dust clouds with its picture, at half their strength. The blizzard's Land Fog Depth 2.8 puts the view
+  at `World::weatherFogScale`'s floor, a quarter of the whole drawn, fogged from the eye: less to draw, as in blight.
+  (`Session::drawPrecipitation`, `bm-weather-snow`, `bm-weather-blizzard`, `bm-o3ds-snow`)
 - **On an Old 3DS, the streaks alone; a New 3DS adds two far-rain rings and ripples.** The rings are bands of falling
   drops round the horizon: one 450 out, about 0.4 of the screen blended, and a fainter, narrower one 900 out, about 0.2
   of it (rain behind rain: depth to a storm, in 3D most of all). A whole ring covered the screen, two of them about 2 ms
@@ -81,6 +113,19 @@ Each entry: what we do, what OpenMW does, why, and where it lives.
   same share. (`platform/console.cpp spriteBudget`, `Session` frame pacing, `mwrender/renderingmanager.cpp`)
 - **Far cells' objects are dropped from memory** past a reference budget, and read again when needed.
   (`platform/console.cpp refBudget`, `World::evictCells`)
+- **An Old 3DS frees the place it leaves on a far trip** (Recall, an Intervention, a boat, a coc; not a building's own
+  door), and the rest it left at a door, before the new place is read. OpenMW keeps a cell's objects until its cache
+  is full. What changed there is kept as it is when any far cell's objects go (people where they walked to, the dead,
+  dropped items, opened locks) and put back when the place is read from the card again on the way back: the cost is
+  that read. A New 3DS keeps them: its heap has room. A save loads the same way on an Old 3DS: the far places read to put
+  its changes in go again before play. On both consoles a place whose people a quest moved elsewhere (Mehra Milo to
+  Holamayan) is read back only when the place they stand in loads, and goes again with the rest; OpenMW keeps every
+  cell with a moved reference loaded. (`platform/console.cpp cleanAtDoors`, `mwgui/travelwindow.cpp
+  Session::finishTravel`, `mwworld/cellstore.cpp World::readMovedIn`)
+- **A sound too faint to hear isn't started.** OpenMW plays every sound in earshot however faint (a script's loop past its
+  maximum range holds at minimum / maximum, often a few percent, out to 2000 units). We don't start one whose gain would be under 1 % of full,
+  and a loop that faint stays unstarted: the 3DS's mixer has 24 channels for everything. (`mwsound/soundmanagerimp.cpp
+  playSound`, `updateLoopSounds`)
 - **The sound cache holds 1 MB on an Old 3DS, 3 MB on a New 3DS** (sounds heard lately; the rest read from the card
   again). OpenMW keeps far more. The sounds are DSP-ADPCM, a little over a quarter of PCM16, so this still holds nearly
   twice the sounds the old 2 / 6 MB of decoded ones did. (`platform/console.cpp soundCacheBytes`,
@@ -89,15 +134,41 @@ Each entry: what we do, what OpenMW does, why, and where it lives.
   picture in it, its short side, the long side up to 1024: a 256 x 2048 sheet of eight pictures is 128 x 1024, the
   memory of the eight at 128 apiece (taken on the long side it was 16 x 128, each wall 16 texels across). Seyda Neen:
   about 480 KB more texture memory. (`textures.py is_sheet`, `build_cia.py ATLAS_OVERLAYS`)
-- **An Old 3DS draws every world texture at full size, never its smaller copies (mipmaps).** A sheet's smaller copies
-  blend its pictures into each other (Hlaalu's wall bleeds into the dark trim packed under it), and far walls and
-  walkways showed dark patches flickering in and out. Far ground shimmers a little more and reads more texture memory
-  a frame; the Old 3DS's GPU has the room (about 15 ms of its 50). The New 3DS keeps them: no sheets there.
-  (`ConsoleProfile::textureMips`, `mwrender/objects.cpp loadTexture`)
+  Creatures' pictures are the exception: 256 (a bear's one 512 sheet of fur, face, mouth and claws was a blur at
+  128). One picture a kind of creature, a few kinds in view: about 65 KB more each. People, their clothes and the
+  world stay at 128. (`texpad.py CREATURE_CAP`, `textures.py encode`)
+- **An Old 3DS's data carries smaller copies (mipmaps) only for the ground.** Far off it covers most of the screen;
+  drawn at full size every pixel read texels far apart, which cost frames. Everything else stays one level: a third
+  less memory, at a little more shimmer far off. The ground's copies are 77 KB of Balmora's textures. Project Atlas's
+  sheets had copies too: 143 KB more there, with the console's linear memory at the 5 MB where it holds cells back,
+  and a trim packed in a sheet ran into the canal walk beside it far off. (`tools/convert/texencode.py`,
+  `level.py --mips few`)
+- **No texture under 64 texels on a side has smaller copies** (both consoles). A strip's three levels (a step's edge,
+  a moulding, a column) were each unlike the next, and a face split between two of them showed its ETC1 blocks
+  shifted along the triangle's edge; at 2 to 4 KB a strip sits in the GPU's texture cache whole anyway.
+  (`texencode.py MIN_MIP_SIDE`)
+- **A few named textures have no smaller copies either** (`texencode.py NO_MIPS`): Fort Frostmoth's square pillars and
+  the Imperial guards' boots showed their copies as triangles on the New 3DS, one triangle of a face drawn from
+  another level than the next. Everything else draws at the GPU's own pick of level (bias 0): finer cost GPU time (the
+  player's measure, about 3 fps from that pick to the full picture everywhere) for the few textures that showed it.
 - **An Old 3DS leaves a neighbouring cell unloaded while under 5 MB of linear memory is left** (the distant land stands
   in until it comes). Its 22 MB ran dry with Seyda Neen's nine cells in: the actors, the cells' last batches (white
   walls), the item icons and a book's pages had none. Seyda Neen now holds six or seven of its nine cells.
   (`World::streamExterior`, `bug-o3ds-seyda-linear`)
+
+- **Dialogue answers and script trees wait on the card.** Outside a talk only the Voice topics' answers are in the
+  heap; a talk reads back the topics it looks at from `dialogue.bin` and lets them go when it ends. A script's tree is
+  read back from `scripts.bin` when it runs and goes again ten seconds after it last ran. OpenMW keeps all of both in
+  memory. Together they were about 4 MB of an Old 3DS's 39 MB heap (on Bloodmoon's data): room for two more cells. The
+  cost is a card read as a talk opens and when a script first runs. (`mwdialogue/topicstore.cpp`,
+  `mwscript/scriptstore.cpp`, `bug-dialogue-heap`, `bug-script-heap`)
+- **On an Old 3DS the cell ahead can stream in first, and one behind go to make room for it (off for now).** Neighbours load nearest
+  edge first, the one in the direction of travel counting up to 1500 nearer; with no room and the player within 2000
+  of the wanted cell's edge, the loaded neighbour farthest off (past the fog's start, 3000 farther, in for 5 s) is let
+  go. Turning back reloads it (the distant land stands in meanwhile). OpenMW keeps its whole grid loaded. Off in the
+  game (`World::streamAhead`) until the fall through the Hlaalu Council Manor's floor that the changed order led to is
+  understood; tests turn it on with `STREAMAHEAD:on`.
+  (`World::streamExterior`, `bug-stream-ahead`)
 
 ## Movement
 

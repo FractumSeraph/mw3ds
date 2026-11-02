@@ -163,7 +163,8 @@ struct C3D_TexEnv
 	u32 color;
 };
 struct C3D_AttrInfo { int count; int format[8]; int elements[8]; };
-struct C3D_BufInfo { const void* data; int stride; };
+// (up to two vertex buffers: the second holds the attributes from `split` on, a shared model's colours)
+struct C3D_BufInfo { const void* data; int stride; const void* data2; int stride2; int split; };
 struct Tex3DS_SubTexture { u16 width, height; float left, top, right, bottom; };
 typedef void* Tex3DS_Texture;
 struct C2D_Image { C3D_Tex* tex; const Tex3DS_SubTexture* subtex; };
@@ -188,7 +189,7 @@ void C3D_FrameEnd(u8 flags);
 void C3D_FrameDrawOn(C3D_RenderTarget* t);
 inline float C3D_GetCmdBufUsage() { return 0; }
 inline float C3D_GetProcessingTime() { return 0; }
-inline float C3D_GetDrawingTime() { return 0; }
+float C3D_GetDrawingTime();     // native_gpu.cpp: 0, or the GPU estimate with GPUMODEL:on
 C3D_RenderTarget* C3D_RenderTargetCreate(int width, int height, int colorFmt, int depthFmt);
 C3D_RenderTarget* C3D_RenderTargetCreateFromTex(C3D_Tex* tex, int face, int level, int depthFmt);
 void C3D_RenderTargetSetOutput(C3D_RenderTarget* t, int screen, int side, u32 flags);

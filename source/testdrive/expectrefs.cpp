@@ -75,6 +75,23 @@ std::optional<bool> numberOfRefs(Session& s, const std::string& what, const std:
 		v = (float)w.refs[most].lockLevel;
 		return true;
 	}
+	if (what == "refowned")
+	{
+		// refowned:<cell or id>: 2 if its name shows red under the crosshair, 1 if owned by someone else but not shown so
+		// (an unlocked door), 0 if not owned; a cell names the door leading there
+		int ri = -1;
+		std::string dest = lower(spaced(arg));
+		w.forLoadedRefs([&](int i) {
+			if (ri < 0 && w.refs[i].recType == REC_DOOR && w.refs[i].hasDest && lower(w.refs[i].destCell) == dest)
+				ri = i;
+		});
+		if (ri < 0)
+			ri = findRef(s, arg);
+		if (ri < 0)
+			return false;
+		v = w.shownOwned(ri) ? 2.0f : w.ownedByOther(ri) ? 1.0f : 0.0f;
+		return true;
+	}
 	if (what == "scripttarget")
 	{
 		// scripttarget:<global script>,<reference id>: 1 when that script is running on that reference (StartScript from it)
@@ -139,6 +156,45 @@ std::optional<bool> numberOfRefs(Session& s, const std::string& what, const std:
 			: w.game.voiceFile(lower(arg), &voice) ? audioStartedCount(voice) : -1;
 		return true;
 	}
+	if (what == "closestpair")
+	{
+		// closestpair:<id>: the least distance across the ground between two living actors of that id that are loaded (-1:
+		// fewer than two): a pack kept apart by each other's bodies, not stood in one spot
+		std::string id = lower(spaced(arg)), id2 = lower(arg);
+		std::vector<int> pack;
+		for (int i : w.loadedActors)
+			if (!w.refs[i].dead && (w.refs[i].idLower == id || w.refs[i].idLower == id2))
+				pack.push_back(i);
+		v = -1.0f;
+		for (size_t a = 0; a < pack.size(); a++)
+			for (size_t b = a + 1; b < pack.size(); b++)
+			{
+				float dx = w.refs[pack[a]].pos[0] - w.refs[pack[b]].pos[0], dy = w.refs[pack[a]].pos[1] - w.refs[pack[b]].pos[1];
+				float d = sqrtf(dx * dx + dy * dy);
+				if (v < 0.0f || d < v)
+					v = d;
+			}
+		return true;
+	}
+	if (what == "cellreads")
+	{
+		// cellreads:<cell>: times its objects were read into memory (-1: no such cell): one a script asks after, not read
+		// back over and over
+		int ci = w.cellIndex(arg);
+		if (ci < 0)
+			ci = w.cellIndex(spaced(arg));
+		v = ci < 0 ? -1.0f : (float)w.cells[ci].reads;
+		return true;
+	}
+	if (what == "cellinmemory")
+	{
+		// cellinmemory:<cell>: 1 when its objects are in memory (read, not let go), 0 when not, -1: no such cell
+		int ci = w.cellIndex(arg);
+		if (ci < 0)
+			ci = w.cellIndex(spaced(arg));
+		v = ci < 0 ? -1.0f : w.cells[ci].refsLoaded ? 1.0f : 0.0f;
+		return true;
+	}
 	if (what == "soundvolume")
 	{
 		// soundvolume:<sound id>: the volume that sound last started at (its record's, the caller's and the 3D mix's)
@@ -154,6 +210,11 @@ std::optional<bool> numberOfRefs(Session& s, const std::string& what, const std:
 	if (what == "vmmeshes")           // meshes the first-person view model draws now (arms, then what they hold)
 	{
 		v = s.vm.ready && !s.vm.set.actors.empty() ? (float)s.vm.set.actors[0].meshes.size() : 0.0f;
+		return true;
+	}
+	if (what == "piecereads")         // first-person and body pieces read from the card so far (fpLoadPiece)
+	{
+		v = (float)g_fpPieceReads;
 		return true;
 	}
 	if (what == "vmpiece")            // vmpiece:<text>: 1 if a first-person piece's name has that text (robe_extrav)
@@ -172,6 +233,12 @@ std::optional<bool> numberOfRefs(Session& s, const std::string& what, const std:
 			if (s.vm.boneFromEye(hand, p) && p[1] > 5.0f && fabsf(p[0]) < p[1] * tanX && fabsf(p[2]) < p[1] * tanY)
 				v += 1.0f;
 		}
+		return true;
+	}
+	if (what == "vmbone")             // vmbone:<bone>: how far a first-person bone is from the eye as drawn (camera: 0)
+	{
+		float p[3];
+		v = s.vm.boneFromEye(lower(arg).c_str(), p) ? sqrtf(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]) : -1.0f;
 		return true;
 	}
 	if (what == "bowstring")          // how far back the held bow's string is drawn (0 at rest, 1 fully back)
@@ -239,6 +306,27 @@ std::optional<bool> numberOfRefs(Session& s, const std::string& what, const std:
 				v = l.volume * (rec != w.game.sounds.end() ? rec->second.volume : 1.0f) * 100.0f;
 		return true;
 	}
+	if (what == "loopsheard")
+	{
+		// loopsheard:<sound id>[,<units>]: how many loops of that sound (PlayLoopSound3D[VP]) are heard now (the mixer gives
+		// them a channel), counting only those at least <units> from the player
+		// (the id as written, or with _ as spaces: Cave_Waterfall has a real underscore, Water_Layer a space)
+		size_t comma = arg.find(',');
+		std::string raw = lower(arg.substr(0, comma)), snd = lower(spaced(raw));
+		float far = comma == std::string::npos ? 0.0f : (float)atof(arg.c_str() + comma + 1);
+		int n = 0;
+		for (auto& l : s.loopSounds)
+		{
+			if ((l.id != snd && l.id != raw) || !l.heard)
+				continue;
+			float dx = w.refs[l.ref].pos[0] - w.player.feet[0], dy = w.refs[l.ref].pos[1] - w.player.feet[1],
+				dz = w.refs[l.ref].pos[2] - w.player.feet[2];
+			if (sqrtf(dx * dx + dy * dy + dz * dz) >= far)
+				n++;
+		}
+		v = (float)n;
+		return true;
+	}
 	if (what == "refgap")
 	{
 		// refgap:<a>,<b>: how far apart two actors stand, middle to middle, across
@@ -300,10 +388,28 @@ std::optional<bool> numberOfRefs(Session& s, const std::string& what, const std:
 	if (what.compare(0, 3, "ref") == 0)
 	{
 		int ri = findRef(s, arg);
+		// (not in combat: someone in a cell that is not loaded is not simulated, as OpenMW's; an Old 3DS lets the
+		// last interior go once the player is in the next, the New 3DS keeps it)
+		if (ri < 0 && what == "refcombat" && std::any_of(w.game.actors.begin(), w.game.actors.end(), [&](const ActorDef& d) { return lower(d.id) == lower(spaced(arg)); }))
+		{
+			v = 0.0f;
+			return true;
+		}
 		if (ri < 0)
 			return false;
 		const Ref& r = w.refs[ri];
 		if (what == "refhealth") v = r.health;
+		else if (what == "refscale") v = r.scale;                          // GetScale's
+		else if (what == "refdrawscale")     // the size its drawing has (its place's scale over the level's: SetScale)
+		{
+			const Actor* a = w.actorOf(ri);
+			v = a ? a->scaleFactor : -1.0f;
+		}
+		else if (what == "refradius")        // its collision cylinder's radius (0: a corpse, -1: none)
+		{
+			const Cell* c = r.cellActor >= 0 ? w.cellOf(ri) : nullptr;
+			v = c ? c->actors[r.cellActor].radius : -1.0f;
+		}
 		else if (what == "refrank") v = r.actor >= 0 ? (float)w.game.actors[r.actor].rank : -1.0f;   // RaiseRank / LowerRank
 		else if (what == "reflevel") v = r.actor >= 0 ? (float)w.game.actors[r.actor].level : -1.0f;
 		else if (what == "reffatigue") v = r.fatigue;
@@ -376,6 +482,12 @@ std::optional<bool> numberOfRefs(Session& s, const std::string& what, const std:
 		else if (what == "refally") v = r.ally ? 1.0f : 0.0f;
 		else if (what == "refdist") v = w.distanceToPlayer(ri);      // 100000: in another interior
 		else if (what == "refaimed") v = s.target == ri ? 1.0f : 0.0f;   // the crosshair is on it
+		else if (what == "refsight")        // 1: nothing solid (the world, a shut door) between the player's waist and its
+		{
+			float a[3] = { w.player.feet[0], w.player.feet[1], w.player.feet[2] + 60.0f };
+			float b[3] = { r.pos[0], r.pos[1], r.pos[2] + 60.0f };
+			v = w.lineOfSight(a, b, true) ? 1.0f : 0.0f;
+		}
 		else if (what == "refabove")        // units over the floor under it, as it is drawn (99999: no floor)
 		{
 			float floorZ = -1e9f;
@@ -408,6 +520,11 @@ std::optional<bool> numberOfRefs(Session& s, const std::string& what, const std:
 		{
 			const Actor* a = w.actorOf(ri);
 			v = a ? (a->tint[0] + a->tint[1] + a->tint[2]) / (3.0f * 64.0f) : -1.0f;
+		}
+		else if (what == "refsize")         // the size it is drawn at (its draw matrix's scale: record x reference x SetScale)
+		{
+			const Actor* a = w.actorOf(ri);
+			v = a ? sqrtf(a->place[0] * a->place[0] + a->place[4] * a->place[4] + a->place[8] * a->place[8]) : -1.0f;
 		}
 		else if (what == "reflampnow")      // the lamps' and others' torches' light where it stands now (Actor::lampNow, 1: 0.5)
 		{
@@ -496,6 +613,8 @@ std::optional<bool> numberOfRefs(Session& s, const std::string& what, const std:
 					v += what == "refmeshes" ? 1.0f : what == "refcpuskin" ? (m.kind == ACTOR_SKINNED && !m.gpuSkin ? (float)m.numVerts : 0.0f)
 						: (m.gpuSkin && (m.flags & BATCH_BLEND) ? 1.0f : 0.0f);
 		}
+		else if (what == "refwerewolf")     // in wolf form (BecomeWerewolf), and drawn as the werewolf body (2) or not (1)
+			v = !w.isWerewolf(ri) ? 0.0f : w.refs[ri].humanAnim >= 0 ? 2.0f : 1.0f;
 		else if (what == "refclimb")        // the steepest land it walks up now, degrees (npcClimbSlope)
 			v = npcClimbSlope(w, w.refs[ri]);
 		else if (what == "refz")            // the height of its feet

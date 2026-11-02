@@ -330,8 +330,20 @@ float Session::fallDamage(float height, int acrobatics, float jump)
 
 // ---- Movement (spec/movement.md; OpenMW mwclass/npc.cpp / creature.cpp getWalkSpeed, getRunSpeed)
 
+// What a person's race does to how fast they move (OpenMW's CharacterController::update: the movement is scaled by the
+// race's weight for their sex, unless the "normalise race speed" setting is on, which this game doesn't have): an Orc
+// man 1.35, a Wood Elf woman 0.9
+float Session::raceWeight(const std::string& race, bool female)
+{
+	for (const RaceDef& rc : w.game.races)
+		if (strcasecmp(rc.id.c_str(), race.c_str()) == 0)
+			return rc.weight[female ? 1 : 0];
+	return 1.0f;
+}
+
 // NPCs: fMinWalkSpeed + 0.01 x Speed x (fMaxWalkSpeed - fMinWalkSpeed); creatures the same with the ...Creature GMSTs;
-// NPCs carry nothing that slows them here (their encumbrance is not tracked)
+// then x the reference's own scale (everyone) x their race's weight (people). NPCs carry nothing that slows them here
+// (their encumbrance is not tracked)
 float Session::actorWalkSpeed(int ri)
 {
 	const Ref& r = w.refs[ri];
@@ -340,15 +352,38 @@ float Session::actorWalkSpeed(int ri)
 	const ActorDef& def = w.game.actors[r.actor];
 	float lo = w.game.gmstf(def.creature ? "fminwalkspeedcreature" : "fminwalkspeed", def.creature ? 5.0f : 100.0f);
 	float hi = w.game.gmstf(def.creature ? "fmaxwalkspeedcreature" : "fmaxwalkspeed", def.creature ? 300.0f : 200.0f);
-	return lo + 0.01f * def.attributes[ATTR_SPEED] * (hi - lo);
+	float scale = r.scale > 0.0f ? r.scale : 1.0f;
+	if (!def.creature)
+		scale *= raceWeight(def.race.str(), def.female != 0);
+	return (lo + 0.01f * def.attributes[ATTR_SPEED] * (hi - lo)) * scale;
 }
 
-// NPCs: walk x (0.01 x Athletics x fAthleticsRunBonus + fBaseRunMultiplier); creatures run at their walking speed
+// NPCs: walk x (0.01 x Athletics x fAthleticsRunBonus + fBaseRunMultiplier). A creature on its feet runs as fast as
+// its run cycle goes when sped up by its walking speed over its walk cycle's pace: OpenMW (and vanilla) scale the run
+// by the walk's velocity, so a wolf (Speed 40, 123 a second walking) runs about 400 (case bug-creature-run-speed).
+// Without a walk cycle that moves, the run plays at its own pace; one that flies, or without a run that moves, runs
+// at its walking speed
 float Session::actorRunSpeed(int ri)
 {
 	const Ref& r = w.refs[ri];
-	if (r.actor < 0 || w.game.actors[r.actor].creature)
+	if (r.actor < 0)
 		return actorWalkSpeed(ri);
+	if (w.game.actors[r.actor].creature)
+	{
+		const Actor* a = w.actorOf(ri);
+		const ActorSet* set = a ? w.actorsOf(ri) : nullptr;
+		if (!a || !set || (w.game.actors[r.actor].afloat & 0x20))
+			return actorWalkSpeed(ri);
+		const Skeleton& sk = actorSkeleton(*set, a->skeleton);
+		int run = actorFindGroup(sk, "RunForward"), walk = actorFindGroup(sk, "WalkForward");
+		float runV = run >= 0 && run < (int)sk.groupSpeed.size() ? sk.groupSpeed[run] : 0.0f;
+		float walkV = walk >= 0 && walk < (int)sk.groupSpeed.size() ? sk.groupSpeed[walk] : 0.0f;
+		if (runV <= 1.0f)
+			return actorWalkSpeed(ri);
+		if (walkV <= 1.0f)
+			return runV * sqrtf(a->place[0] * a->place[0] + a->place[4] * a->place[4] + a->place[8] * a->place[8]);
+		return actorWalkSpeed(ri) * runV / walkV;
+	}
 	const ActorDef& def = w.game.actors[r.actor];
 	return actorWalkSpeed(ri) * (0.01f * def.skills[8] * w.game.gmstf("fathleticsrunbonus", 1.0f) + w.game.gmstf("fbaserunmultiplier", 1.75f));
 }
@@ -412,6 +447,9 @@ float Session::fleeRatingOf(int ri, float distance)
 		return (float)flee;
 	float health = r.healthMax > 0.0f ? fmaxf(0.0f, r.health) / r.healthMax : 1.0f;
 	float rating = (1.0f - health) * w.game.gmstf("faifleehealthmult", 7.0f) + flee * w.game.gmstf("faifleefleemult", 0.3f);
+	// A person under iWereWolfLevelToAttack rates fleeing a werewolf player at iWereWolfFleeMod (OpenMW's vanillaRateFlee)
+	if (!def.creature && w.stats.werewolf && def.level < (int)w.game.gmstf("iwerewolfleveltoattack", 20.0f))
+		rating = w.game.gmstf("iwerewolffleemod", 100.0f);
 	if (rating != 0.0f)
 		rating += w.game.gmstf("ifightdistancebase", 20.0f) - w.game.gmstf("ffightdistancemultiplier", 0.005f) * distance;
 	return rating;
@@ -426,7 +464,16 @@ float Session::fightTermOf(int ri, float distance)
 	float bias = w.game.gmstf("ifightdistancebase", 20.0f) - w.game.gmstf("ffightdistancemultiplier", 0.005f) * distance;
 	if (!def.creature)
 		bias += (50.0f - w.disposition(ri)) * w.game.gmstf("ffightdispmult", 0.2f);
-	return (float)((r.fight >= 0 ? r.fight : def.fight) + (int)bias);
+	int fight = (r.fight >= 0 ? r.fight : def.fight) + (int)bias;
+	// People are iWerewolfFightMod readier to attack the player in wolf form, or once known as one (PCKnownWerewolf;
+	// OpenMW's isAggressive)
+	if (!def.creature)
+	{
+		auto known = w.globals.find("pcknownwerewolf");
+		if (w.stats.werewolf || (known != w.globals.end() && known->second >= 1.0f))
+			fight += (int)w.game.gmstf("iwerewolffightmod", 100.0f);
+	}
+	return (float)fight;
 }
 
 // ---- Trading (spec/trading-and-services.md; OpenMW tradewindow.cpp haggle)

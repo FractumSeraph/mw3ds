@@ -7,7 +7,7 @@
 # Ebonheart, Asciene Rane's transport to the Royal Palace; then the Brotherhood's hideout in Old Mournhold (TR_DBHunt),
 # which makes Tienius Delitian talk of official matters.
 3 0 0 0 0 MSG
-0.3 0 0 0 0 SEED:7
+0.3 0 0 0 0 SEED:2/3
 0.3 0 0 0 0 GOD:2
 0.3 0 0 0 0 LEVEL:30
 0.3 0 0 0 0 BOOST:100
@@ -21,6 +21,7 @@
 0.3 0 0 0 0 GIVE:sc_almsiviintervention:20
 0.3 0 0 0 0 GIVE:pick_grandmaster
 0.3 0 0 0 0 GIVE:probe_grandmaster
+0.3 0 0 0 0 GIVE:repair_grandmaster_01:5
 0.3 0 0 0 0 SPELL:mark
 0.3 0 0 0 0 SPELL:recall
 0.3 0 0 0 0 HOUR:22
@@ -934,7 +935,9 @@
 120 0 0 0 0 DOORTO:Mournhold,_Plaza_Brindisi_Dorom
 10 0 0 0 0 UNTIL:cell:Mournhold,_Plaza_Brindisi_Dorom
 0.5 0 0 0
-120 0 0 0 0 WALKTO:@0,-126,405
+# (from -50 -110: at 0 -126 a High Ordinator of the attack came to stand beside the player, his body in the line down to
+# the ladder, and the press opened his talk)
+120 0 0 0 0 WALKTO:@-50,-110,405
 0.3 0 0 0 0 FACE:@28,-62
 0.5 0 0 0 0 DOWN
 0.3 0 0 0
@@ -1197,11 +1200,22 @@
 0.5 0 0 0 0 B
 2 0 0 0 0 UNTIL:screen:none
 0.3 0 0 0 0 EQUIP:daedric_longsword
-# (strikes, not a kill: the guards are pacified for the duel, and Karrod's script ends it at 100 health)
-120 0 0 0 0 STRIKE:karrod:6
-120 0 0 0 0 STRIKE:karrod:6
-120 0 0 0 0 STRIKE:karrod:6
-120 0 0 0 0 STRIKE:karrod:6
+# (strikes, not a kill: the guards are pacified for the duel, and Karrod's script ends it at 100 health; the sword mended
+# first, worn down by the fights where followers take on whoever attacks the player)
+0.5 0 0 0 0 REPAIRWITH:repair_grandmaster_01:daedric_longsword
+0.5 0 0 0 0 REPAIRWITH:repair_grandmaster_01:daedric_longsword
+0.5 0 0 0 0 REPAIRWITH:repair_grandmaster_01:daedric_longsword
+0.5 0 0 0 0 REPAIRWITH:repair_grandmaster_01:daedric_longsword
+0.5 0 0 0 0 REPAIRWITH:repair_grandmaster_01:daedric_longsword
+0.5 0 0 0 0 REPAIRWITH:repair_grandmaster_01:daedric_longsword
+0.5 0 0 0 0 REPAIRWITH:repair_grandmaster_01:daedric_longsword
+0.5 0 0 0 0 REPAIRWITH:repair_grandmaster_01:daedric_longsword
+0.5 0 0 0 0 REPAIRWITH:repair_grandmaster_01:daedric_longsword
+0.5 0 0 0 0 REPAIRWITH:repair_grandmaster_01:daedric_longsword
+240 0 0 0 0 STRIKE:karrod:60:karrodbeaten
+3 0 0 0
+0.5 0 0 0 0 B
+0.5 0 0 0 0 B
 3 0 0 0
 0.1 0 0 0 0 EXPECT:global:karrodbeaten:ge:1
 0.1 0 0 0 0 EXPECT:bounty:eq:0

@@ -10,6 +10,8 @@
 #include <tuple>
 #include "testdrive/testdrive.hpp"
 #include "mwbase/session.hpp"
+#include "mwmechanics/magichelpers.hpp"
+#include "mwmechanics/magiceffects.hpp"
 #include "components/debug/debuglog.hpp"
 
 extern const char* g_playerBlock;
@@ -122,6 +124,34 @@ std::optional<bool> opsItems(Session& s, const std::vector<std::string>& a)
 		logf("test: ENHANCEV2: Strength %d, Speed %d, schools +%d, magicka %.0f; run %.0f, fly %.0f units a second",
 			(int)w.stats.attributes[ATTR_STRENGTH], (int)w.stats.attributes[ATTR_SPEED], schools, (float)w.stats.magickaMax,
 			s.runSpeedFor((int)w.stats.attributes[ATTR_SPEED], (int)w.stats.skills[8]), flySpeed);
+		return true;
+	}
+	// SPEEDBOOST:<points>: the kit's Fortify Speed set to that many points from now on (0: none), in place of ENHANCEV2's
+	// speed= (400 by default, which with the race weight carries the player past a ledge or a ramp's top: up the ramps of
+	// Sotha Sil he ran off and fell out of the world). Only that effect is changed: the rest of the kit keeps its own
+	if (verb == "SPEEDBOOST" && a.size() >= 2)
+	{
+		int points = std::max(0, atoi(a[1].c_str()));
+		for (size_t i = 0; i < w.effects.size();)
+		{
+			ActiveEffect& e = w.effects[i];
+			if (e.effect == EFF_FORTIFY_ATTRIBUTE && e.attribute == ATTR_SPEED && e.source == "uber ring")
+			{
+				ActiveEffect gone = e;
+				w.effects.erase(w.effects.begin() + i);
+				applyFortify(w, gone, -1.0f);
+			}
+			else
+				i++;
+		}
+		if (points > 0)
+		{
+			ActiveEffect boost = { EFF_FORTIFY_ATTRIBUTE, ATTR_SPEED, -1, (float)points, 1000000.0f, "uber ring" };
+			applyFortify(w, boost, 1.0f);
+			w.effects.push_back(boost);
+		}
+		logf("test: SPEEDBOOST %d: Speed %d, run %.0f units a second", points, (int)w.stats.attributes[ATTR_SPEED],
+			s.runSpeedFor((int)w.stats.attributes[ATTR_SPEED], (int)w.stats.skills[8]));
 		return true;
 	}
 	if (verb == "USEMADE" || verb == "EQUIPMADE" || verb == "RECHARGEMADE")
@@ -272,6 +302,24 @@ std::optional<bool> opsItems(Session& s, const std::vector<std::string>& a)
 		s.killNpc(ri, false);
 		return true;
 	}
+	if (verb == "SLAYALL" && a.size() >= 2)
+	{
+		// SLAYALL:<id>: every loaded actor with that id dies where it stands, none loaded is no failure (the water's
+		// creatures a walk through shallows meets on one profile and not another)
+		std::string want = lower(spaced(a[1])), want2 = lower(a[1]);
+		std::vector<int> found;
+		w.forLoadedRefs([&](int i) {
+			if (w.refs[i].actor >= 0 && !w.refs[i].dead && (w.refs[i].idLower == want || w.refs[i].idLower == want2))
+				found.push_back(i);
+		});
+		for (int i : found)
+		{
+			w.refs[i].health = 0.0f;
+			s.killNpc(i, false);
+		}
+		logf("test: %d %s slain", (int)found.size(), a[1].c_str());
+		return true;
+	}
 	if (verb == "SETHEALTH" && a.size() >= 2)
 	{
 		w.stats.health = w.stats.healthMax * (float)atof(a[1].c_str());
@@ -281,11 +329,19 @@ std::optional<bool> opsItems(Session& s, const std::vector<std::string>& a)
 	{
 		// KNOW:<topic>: the player knows the topic, as dialogue the test skipped would have taught it (TOPIC
 		// asks only what the list offers: this says where a test leans on history it didn't play)
+		// KNOW:*: every topic, as a player far into the game knows hundreds
 		std::string t = lower(spaced(a[1]));
-		w.knownTopics.insert(t);
+		if (t == "*")
+		{
+			for (const Topic& tp : w.game.topics)
+				if (tp.type == TOPIC_TOPIC)
+					w.knownTopics.insert(tp.lower);
+		}
+		else
+			w.knownTopics.insert(t);
 		if (s.dlg.open)
 			dialogueRefreshTopics(s.dlg, w);      // a conversation already open lists it now
-		logf("test: knows topic %s", t.c_str());
+		logf("test: knows topic %s (%d known)", t.c_str(), (int)w.knownTopics.size());
 		return true;
 	}
 	if (verb == "SETBOUNTY" && a.size() >= 2)

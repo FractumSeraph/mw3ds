@@ -221,6 +221,11 @@
 0.3 0 0 0 0 B
 0.5 0 0 0 0 B
 2 0 0 0 0 UNTIL:screen:none
+# (the guild's stairs up out of the lower floor: their foot holds a walk back at the lip, a fast one at an angle;
+# walked to their foot and jumped onto them, as a player would)
+60 0 0 0 0 WALKTO:@1598,-2,-640
+0.3 0 0 0 0 FACE:@1243,-7
+1.5 0 1 0 1
 120 0 0 0 0 DOORTO:outside
 3 0 0 0
 120 0 0 0 0 DOORTO:Ald-ruhn,_The_Rat_In_The_Pot
@@ -1428,6 +1433,10 @@
 30 0 0 0 0 WALKTO:@225,2162,-1182
 60 0 0 0 0 WALKTO:@390,1844,-1182
 30 0 0 0 0 WALKTO:@417,1833,-1281
+# (the two fought here, before the way down: they reach the player sooner now people run by their race's weight, and
+# their blows on the way down pushed the player west onto the pit's wall)
+120 0 0 0 0 KILL:meryaran
+120 0 0 0 0 KILL:carecalmo
 60 0 0 0 0 WALKTO:@305,1300,-1426
 120 0 0 0 0 WALKTO:@2350,749,-1168
 120 0 0 0 0 KILL:carecalmo

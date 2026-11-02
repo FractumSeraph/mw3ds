@@ -167,6 +167,11 @@ bool Engine::prepare()
 	struct stat st;
 	logf("memory: %s, heap %lu KB, linear %lu KB (%lu KB free)", isNew3ds ? "New 3DS" : "Old 3DS",
 		__ctru_heap_size / 1024, __ctru_linear_heap_size / 1024, linearSpaceFree() / 1024);
+	// The cells' collision and all a cell's read builds in an arena of their own, set aside while the heap is still whole
+	// (platform/cellarena.hpp): about 1.1 MB a cell, nine on an Old 3DS (at 8 MB Solstheim's seven filled it, and the
+	// rest went to the heap), nine and to spare on a New one
+	cellArenaInit(g_profile.smallHeap ? (10u << 20) : (14u << 20));
+	g_scriptArena.init(g_profile.smallHeap ? (1u << 20) : (2u << 20), "the script trees read back");
 
 	logf("display: top screen %s", g_profile.rgb565 ? "16-bit, copied RGB565 to RGB565" : "24-bit, copied RGBA8 to RGB8");
 	createTopTargets();
@@ -363,6 +368,7 @@ bool Engine::prepare()
 		{
 			logf("heap: session %d KB", mallinfo().uordblks / 1024);
 			session->vm.load(session->w);
+			session->warmWeapon();          // (the first draw reads nothing: behind this loading screen)
 			logf("heap: + view model %d KB", mallinfo().uordblks / 1024);
 			uiLoadTheme(dataDir, session->w.game.ui);
 			logf("heap: + ui theme %d KB", mallinfo().uordblks / 1024);
@@ -423,6 +429,7 @@ bool Engine::retryFromTitle(bool& loadedOut)
 		if (loadedOut)
 		{
 			session->vm.load(session->w);
+			session->warmWeapon();          // (the first draw reads nothing: behind this loading screen)
 			uiLoadTheme(dataDir, session->w.game.ui);
 			g_splashes = session->w.game.art.splash;
 		}
@@ -496,6 +503,9 @@ bool Engine::frame()
 	ui.stickY = inputIndex < autoinput.size() && loaded ? autoinput[inputIndex].stickY : readStickScroll();
 	ui.stickX = inputIndex < autoinput.size() && loaded ? autoinput[inputIndex].stickX : readStickTurn();
 	ui.dt = dt;
+	// Stylus layouts: a slide on the bottom screen in play turns the view (the HUD is the bottom screen then)
+	stylusLook(ui, in, loaded && !session->menuOpen() && !session->wantName && !session->wantText
+		&& !session->moviePlaying() && !session->playerDead);
 	uiBeginFrame(ui);
 
 	if (session->wantName)
@@ -614,6 +624,7 @@ bool Engine::frame()
 			if (loaded)
 			{
 				session->vm.load(session->w);
+				session->warmWeapon();          // (the first draw reads nothing: behind this loading screen)
 				uiLoadTheme(dataDir, session->w.game.ui);
 		g_splashes = session->w.game.art.splash;
 			}
@@ -761,13 +772,16 @@ bool Engine::frame()
 	const float kFarDepthShare = 1.0f;
 	float farDepth = fminf(1.0f, fmaxf(0.0f, (slider - kNearDepthTo) / (1.0f - kNearDepthTo)));
 	rendererSetStereoCurve(stereoOn ? kFarDepthShare * farDepth : 0.0f);
-	// Outdoors the fog closes in while frames run long, and with the weather; an interior under the sky (Mournhold)
-	// with the weather only
+	// Through a werewolf's eyes in first person the world is seen wider (OpenMW's General_Werewolf_FOV; the arms keep
+	// their own view); else the usual 60 degrees up and down
+	extern float g_worldFovY;
+	g_worldFovY = loaded && session->w.stats.werewolf && !session->thirdPerson && session->w.game.firstPerson.werewolfFov > 0.0f
+		? session->w.game.firstPerson.werewolfFov : 60.0f;
+	// Outdoors and in an interior under the sky (Mournhold's big areas) the fog closes in while frames run long, and with
+	// the weather
 	float fogScale = 1.0f;
-	if (loaded && !session->w.cells[session->w.current].interior)
+	if (loaded && session->w.cells[session->w.current].underSky())
 		fogScale = session->viewNow() * session->w.weatherFogScale();
-	else if (loaded && session->w.cells[session->w.current].underSky())
-		fogScale = session->w.weatherFogScale();
 	// (the horizon: distant land as far as the weather lets one see, not shortened with the detailed view; under
 	// water no farther than the murk)
 	rendererSetHorizon(loaded ? session->w.weatherFogScale() : 0.0f);
@@ -889,7 +903,10 @@ bool Engine::frame()
 			if (!g_hudOff)
 				session->drawTop();
 			else
+			{
+				session->drawWerewolfView();
 				session->drawHurtFlash();
+			}
 		}
 		else
 			uiTextCentered(200, 110, 0.6f, col::header, "Load failed - see sdmc:/3ds/mw3ds/log.txt");
@@ -929,6 +946,23 @@ bool Engine::frame()
 	MARK("frame end");
 	g_mainFrames++;
 	C3D_FrameEnd(0);
+	// The frame's drawing work (renderingmanager.cpp): kept for the log and the PC build's GPU estimate, counted afresh
+	extern u32 g_frameDraws, g_frameTris, g_lastDraws, g_lastTris;
+	static u32 secDraws = 0, secTris = 0;
+	g_lastDraws = g_frameDraws;
+	g_lastTris = g_frameTris;
+	// (and the CPU's time for it, update and drawing commands: on the PC build what a test scales to the console's)
+	extern float g_lastCpuMs;
+	g_lastCpuMs = (float)(svcGetSystemTick() - now) * 1000.0f / SYSCLOCK_ARM11;
+	if (g_testThrottleFps > 0)
+	{
+		float left = 1000.0f / g_testThrottleFps - (float)(svcGetSystemTick() - now) * 1000.0f / SYSCLOCK_ARM11;
+		if (left > 0.0f)
+			svcSleepThread((s64)(left * 1e6f));
+	}
+	secDraws += g_frameDraws;
+	secTris += g_frameTris;
+	g_frameDraws = g_frameTris = 0;
 	if (trace)
 		logf("frame %d: submitted", traced++);
 	// The frame rate the session asks for (an Old 3DS: 30 or 20, Session::adaptView)
@@ -943,7 +977,8 @@ bool Engine::frame()
 	{
 		session->noteRenderCost(C3D_GetProcessingTime(), C3D_GetDrawingTime(), stereoOn, eyeCmd);
 		float updateMs = (float)(workEnd - now) * 1000.0f / SYSCLOCK_ARM11;
-		if (poseIndex >= autocam.size() && inputIndex >= autoinput.size())
+		// (not while a script runs: its steps would change the view by chance; GPUMODEL:on is a test of just that)
+		if ((poseIndex >= autocam.size() && inputIndex >= autoinput.size()) || g_testGpuModel)
 			session->adaptView(fmaxf(updateMs + C3D_GetProcessingTime(), C3D_GetDrawingTime()));
 	}
 
@@ -975,7 +1010,9 @@ bool Engine::frame()
 			g_profCalls[PCALL_FLOORS] / frames, g_profCalls[PCALL_STEPS] / frames, g_profCalls[PCALL_OBJECTS] / frames,
 			g_replayCount, g_replayMissed);
 		g_replayCount = g_replayMissed = 0;
-		logf("view distance %d%%, frame work %.2fms", (int)(session->viewScale * 100.0f), session->workCost);
+		logf("view distance %d%%, frame work %.2fms, gpu work %u draws %u triangles a frame", (int)(session->viewScale * 100.0f),
+			session->workCost, secDraws / (frames ? frames : 1), secTris / (frames ? frames : 1));
+		secDraws = secTris = 0;
 		g_profActorsMs = g_profWorldMs = 0.0f;
 		for (auto& p : g_profParts)
 			p = 0.0f;
@@ -994,7 +1031,7 @@ bool Engine::frame()
 		// Never probed while a cell loads in the background: the probe briefly holds the biggest free
 		// block (real allocations), and the streaming thread's own allocation then fails for nothing —
 		// a spurious out-of-memory that purged far cells and churned the heap it was watching
-		heapNote(mallinfo().uordblks);
+		heapNote(heapInUse());          // (the arenas' spare room counted free, as the room checks count it)
 		static int heapSecs = 0;
 		if (++heapSecs >= 5 && !session->w.streamJob)
 		{

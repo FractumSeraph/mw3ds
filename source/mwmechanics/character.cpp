@@ -191,6 +191,8 @@ float Session::playerSwing(float charge, const PlayerInput& in)
 	}
 
 	Ref& t = w.refs[target];
+	if (w.playerHitAttempt < 0)
+		w.playerHitAttempt = target;
 	const ActorDef& def = w.game.actors[t.actor];
 	const int* pa = s.attributes;
 	int skill = weaponSkill(wpn);
@@ -217,11 +219,11 @@ float Session::playerSwing(float charge, const PlayerInput& in)
 			monitorOnce(("legitmiss:" + t.id).c_str(), "the player's blow at %s missed (chance %d%%) in a LEGIT run", t.id.c_str(), (int)chance);
 		if (wit && !(testGod && testGodBlows))
 			wearItem(wit, 0.0f);          // a miss still wears the weapon by 1 (OpenMW's reduceWeaponCondition)
-		bool wasPeaceful = t.ai != AI_COMBAT;
+		bool wasPeaceful = t.ai != AI_COMBAT && t.duelFoe < 0;     // (one fighting another actor: no crime)
 		if (onlinePuppet(target))
 			return 0.0f;  // (online, one of the server's people: the swing there decides, the crime too)
 		makeHostile(target);
-		if (wasPeaceful && !def.creature && !t.aggressor)
+		if (wasPeaceful && !def.creature && !t.aggressor && !t.werewolf)
 			crimeSeen(CRIME_ASSAULT, 0, target), reportCrime(target, kBountyAssault);
 		return 0.0f;      // (a miss follows through as the weakest blow: OpenMW)
 	}
@@ -235,7 +237,7 @@ float Session::playerSwing(float charge, const PlayerInput& in)
 		if (wpn->health > 0)
 			dmg *= (float)itemCondition(*wit) / wpn->health;
 		wearItem(playerWeaponItem(), dmg * w.game.gmstf("fweapondamagemult", 0.1f));
-		playerHitsNpc(target, dmg * roll.damage, skill, false, false);
+		playerHitsNpc(target, dmg * roll.damage * w.silverOnWerewolf(wpn, target), skill, false, false);
 	}
 	else    // fists: GBAC leaves the damage alone while the target still has fatigue
 	{
@@ -243,7 +245,12 @@ float Session::playerSwing(float charge, const PlayerInput& in)
 		// health damage x fHandtoHandHealthPer (OpenMW's getHandToHandDamage)
 		float lo = w.game.gmstf("fminhandtohandmult", 0.1f), hi = w.game.gmstf("fmaxhandtohandmult", 0.5f);
 		float dmg = s.skills[SKILL_HAND_TO_HAND] * (lo + (hi - lo) * charge);
-		if (t.knockTimer > 0.0f)
+		if (s.werewolf)          // a werewolf's claws wound (World::werewolfClaw), with a WolfHit
+		{
+			playerHitsNpc(target, w.werewolfClaw(dmg) * roll.damage, SKILL_HAND_TO_HAND, false, false);
+			playRandomSound(-1, "wolfhit");
+		}
+		else if (t.knockTimer > 0.0f)
 			playerHitsNpc(target, dmg * w.game.gmstf("fhandtohandhealthper", 0.1f) * roll.damage, SKILL_HAND_TO_HAND, false, false);
 		else
 			playerHitsNpc(target, dmg * (t.fatigue > 0.0f ? 1.0f : roll.damage), SKILL_HAND_TO_HAND, true, false);
@@ -253,6 +260,42 @@ float Session::playerSwing(float charge, const PlayerInput& in)
 }
 
 // ---- First-person view model
+
+// The race menu opens on the dock, after the boat's door, and building its face preview there (the race's skeleton,
+// body, head and hair read from the card) froze the screen for seconds on a console. Through that door, behind its
+// loading screen, the body is put together for what the menu opens on: the first race in its list, its first face and
+// hair. A preview read ahead and never shown (a save loaded past it) goes at the next door
+void Session::preloadRacePreview()
+{
+	if (racePreloaded && !thirdPerson)
+	{
+		body.free(w);
+		racePreloaded = false;
+	}
+	const auto cg = w.globals.find("chargenstate");
+	if (raceMenuSeen || !w.game.chargen || cg == w.globals.end() || cg->second == -1.0f || w.cells[w.current].interior)
+		return;
+	const RaceDef* first = nullptr;
+	for (auto& r : w.game.races)
+		if (r.playable)
+		{
+			first = &r;
+			break;
+		}
+	if (!first)
+		return;
+	std::string race = w.stats.race, head = w.stats.head, hair = w.stats.hair;
+	w.stats.race = first->id;
+	w.stats.head.clear();
+	w.stats.hair.clear();
+	u64 t0 = osGetTime();
+	body.rebuild(w, false);
+	logf("chargen: face preview for %s read ahead in %llu ms", first->id.c_str(), osGetTime() - t0);
+	w.stats.race = race;
+	w.stats.head = head;
+	w.stats.hair = hair;
+	racePreloaded = true;
+}
 
 // Which arms / weapon / shield the view model shows and how it reacts (hits, blocks, knockdown)
 void Session::viewModelUpdate(const PlayerInput& in, float dt)
@@ -277,7 +320,7 @@ void Session::viewModelUpdate(const PlayerInput& in, float dt)
 	const Object* ammo = show && !casting && wpn ? playerAmmo() : nullptr;
 	if (ammo && ammo != wpn && (vm.group == "Bow" || vm.group == "Xbow") && vm.ready)
 	{
-		const Skeleton& sk = vm.sk();
+		const Skeleton& sk = vm.set.skeletons[vm.set.actors[0].skeleton];
 		const Actor& arms = vm.set.actors[0];
 		const char* g = arms.group >= 0 && arms.group < (int)sk.groups.size() ? sk.groups[arms.group].name : "";
 		auto mark = [&](const char* name) {
@@ -289,8 +332,10 @@ void Session::viewModelUpdate(const PlayerInput& in, float dt)
 		if (in)
 			ammoIn = ammo->id;
 	}
-	vm.rebuild(w, show && !casting ? (wpn ? wpn->id.str() : toolItem ? toolItem->id : "") : "", show && !casting && oneHanded ? shield : "",
-		ammoIn);
+	// (not under the race menu: the arms are out of sight, and each race tried on would read its arms; once, as it closes)
+	if (screen != SCR_RACE)
+		vm.rebuild(w, show && !casting ? (wpn ? wpn->id.str() : toolItem ? toolItem->id : "") : "", show && !casting && oneHanded ? shield : "",
+			ammoIn);
 	if (weaponDrawn && w.player.knockTimer > 0.0f && vm.action != VM_KNOCKDOWN)
 		vm.play(VM_KNOCKDOWN, "KnockDown");
 	if (blockUntil > w.time && vm.action == VM_IDLE && !shield.empty())
@@ -320,9 +365,16 @@ void Session::viewModelUpdate(const PlayerInput& in, float dt)
 		thirdDistance = 0.0f;
 		body.acting = BODY_NONE;              // a blow or cast under way when the view changes starts afresh
 	}
+	bool wasPreview = previewFace;
 	previewFace = screen == SCR_RACE;          // character creation: the face being chosen
+	if (previewFace)
+		raceMenuSeen = true, racePreloaded = false;
 	if (!previewFace)
 		previewSpin = 0.0f;
+	// The face preview goes with its menu: in first person nothing else draws the body (the third-person view builds it
+	// again when it is wanted)
+	if (wasPreview && !previewFace && !thirdPerson)
+		body.free(w);
 	if (thirdPerson || previewFace)
 	{
 		body.rebuild(w, weaponDrawn);

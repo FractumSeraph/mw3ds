@@ -298,7 +298,7 @@ void Session::onlineApplyRecord()
 			w.stats.cls = str(app, "class");                  // (record ids as the record has them: "Warrior")
 		if (*str(app, "birthsign"))
 			w.stats.birthsign = str(app, "birthsign");
-		w.werewolf = cJSON_IsTrue(cJSON_GetObjectItem(app, "isWerewolf"));
+		w.stats.werewolf = cJSON_IsTrue(cJSON_GetObjectItem(app, "isWerewolf"));
 	}
 	const cJSON* spells = cJSON_GetObjectItem(rec, "spells");
 	if (cJSON_GetArraySize(spells) > 0)
@@ -392,8 +392,8 @@ void Session::onlineApplyRecord()
 					}
 			}
 	}
-	if (w.werewolf)
-		w.recomputeKeepingBars();
+	if (w.stats.werewolf)
+		w.refreshStats();
 	// Quests, topics, globals, factions, bounty
 	const cJSON* j = cJSON_GetObjectItem(rec, "journal");
 	if (cJSON_IsObject(j))
@@ -464,7 +464,7 @@ LValue appearanceOf(const World& w)
 		if (!id.empty())
 			return id;
 		const auto* list = playerHeadChoices(w, hair);
-		return list ? list->front().first : std::string();
+		return list ? list->front().first.str() : std::string();
 	};
 	a.set("head", part(false));
 	a.set("hair", part(true));
@@ -473,7 +473,7 @@ LValue appearanceOf(const World& w)
 	a.set("name", w.stats.name);
 	if (!w.stats.birthsign.empty())
 		a.set("birthsign", w.stats.birthsign);
-	if (w.werewolf)
+	if (w.stats.werewolf)
 		a.set("isWerewolf", LValue::boolean(true));
 	return a;
 }
@@ -983,10 +983,10 @@ void Session::onlineTick(float dt)
 				else if (o->recType == REC_WEAP && o->subtype < WEAP_ARROW)
 					look.weapon = id;
 			}
-		if (r.werewolf)
-			werewolfLook(look);
 		bool weaponOut = r.last.flags & 16;
-		if (og->bodyRevision[r.id] != r.lookRevision * 2 + (weaponOut ? 1 : 0) || !b.ready)
+		if (r.werewolf)
+			b.rebuildWolf(w);                // (the beast's own model, as the player's; rebuilt in each cell)
+		else if (og->bodyRevision[r.id] != r.lookRevision * 2 + (weaponOut ? 1 : 0) || !b.ready || b.wolf)
 		{
 			b.rebuildLook(w, look, weaponOut);
 			og->bodyRevision[r.id] = r.lookRevision * 2 + (weaponOut ? 1 : 0);

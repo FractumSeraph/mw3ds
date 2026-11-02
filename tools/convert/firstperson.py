@@ -39,13 +39,14 @@ from meshes import extract_shapes, walk_nif
 from npc import MIRROR_X, PART_BONES, SKIN_SLOTS, item_parts, quat_matrix, sample, skeleton_pose, text_key_time
 from nif import Nif
 from textures import texels_needed, world_per_repeat
+import mwfiles
 
 # Beast races' own first-person skeleton only animates hand-to-hand; their hands fit this one
 SKELETONS = ["meshes\\base_anim.1st.nif"]
-# Bloodmoon's werewolf in first person (OpenMW's NpcAnimation: wolf/skin.1st.nif in place of the body): its own skeleton,
-# hand-to-hand groups and skinned arms in one file; the second skeleton of skeletons.skl when the data has it
+# Bloodmoon's werewolf seen from its own eyes: its first-person skeleton (its groups are the hand-to-hand ones the view
+# plays) carrying its skin, the second skeleton in skeletons.skl when the add-on is converted (OpenMW's first-person
+# werewolf: wolf\skin.1st.nif with its keyframes)
 WEREWOLF_1ST = "meshes\\wolf\\skin.1st.nif"
-WEREWOLF_PIECE = "werewolf_1st"
 ARM_SLOTS = [6, 7, 8, 9, 10, 11, 12, 13, 14]
 ITEM_TAGS = ("WEAP", "ARMO", "CLOT", "MISC", "BOOK", "ALCH", "INGR", "APPA", "LOCK", "PROB", "REPA", "LIGH")
 SLOT_SHIELD, SLOT_WEAPON = 10, 25
@@ -140,7 +141,6 @@ class FirstPerson:
         objects = db["objects"]
         self.bodies = {r.id.lower(): r for r in objects.values() if r.tag == "BODY"}
         self.pose = {}
-        self.skeleton_paths = list(SKELETONS)
 
     def nif(self, path):
         key = path.lower()
@@ -470,22 +470,6 @@ class FirstPerson:
         self.pieces[name] = meshes or None
         return name if meshes else None
 
-    def werewolf(self):
-        """The werewolf's first-person arms (Bloodmoon): every skinned shape of its own file, on its own skeleton. None
-        without Bloodmoon."""
-        nif = self.nif(WEREWOLF_1ST)
-        if nif is None:
-            return None
-        bones = skeleton_pose(nif, text_key_time(nif, "IdleHH: Start"))
-        meshes = [self.mesh_record(s, "", False) for s in extract_shapes(self.arch, nif, skeleton=bones)
-                  if s["skinned"] and "raw" in s]
-        if not meshes:
-            return None
-        self.pieces[WEREWOLF_PIECE] = meshes
-        if WEREWOLF_1ST not in self.skeleton_paths:
-            self.skeleton_paths.append(WEREWOLF_1ST)
-        return WEREWOLF_PIECE
-
     def build(self, objects):
         """game.json "firstperson" for the level's items (objects: game.json objects)."""
         races = {}
@@ -590,10 +574,27 @@ class FirstPerson:
             if path:
                 ptex[str(struct.unpack("<i", r.get("INDX"))[0])] = self.textures.request(path, need, True)
         vfxlen = {p: self.vfx_len[p] for p in set(vfx.values()) if p in self.vfx_len}
-        wolf = self.werewolf()
-        return {"races": races, "items": items, "third": self.third_person(objects), "vfx": vfx, "ptex": ptex,
-                **({"werewolf": {"skeleton": self.skeleton_paths.index(WEREWOLF_1ST), "piece": wolf}} if wolf else {}),
-                "vfxlen": vfxlen}
+        out = {"races": races, "items": items, "third": self.third_person(objects), "vfx": vfx, "ptex": ptex,
+               "vfxlen": vfxlen}
+        if self.werewolf():
+            out["werewolf"] = {"skeleton": len(SKELETONS), "piece": "werewolf_1st"}
+        return out
+
+    def werewolf(self):
+        """Bloodmoon's first-person werewolf: its skin (the skinned shapes; the rest are markers and two claw tips the
+        skin covers) as piece "werewolf_1st" on its own skeleton. Only with the add-on (Bloodmoon.bsa is read for every
+        conversion, so the archive alone doesn't say)."""
+        if "werewolf_1st" in self.pieces:
+            return bool(self.pieces["werewolf_1st"])
+        nif = self.nif(WEREWOLF_1ST) if mwfiles.bloodmoon() else None
+        meshes = []
+        if nif is not None:
+            pose = skeleton_pose(nif, text_key_time(nif, "IdleHH: Start"))
+            for s in extract_shapes(self.arch, nif, skeleton=pose):
+                if s["skinned"] and s.get("tex") and "raw" in s:
+                    meshes.append(self.mesh_record(s, "", False))
+        self.pieces["werewolf_1st"] = meshes or None
+        return bool(meshes)
 
     def blood(self):
         """Morrowind.ini [Blood]: the splat a weapon hit throws (Blood Model 0..2: BloodSplat, BloodSplat2, BloodSplat3,
@@ -624,8 +625,9 @@ class FirstPerson:
     def write(self):
         self.out.mkdir(parents=True, exist_ok=True)
         with open(self.out / "skeletons.skl", "wb") as f:
-            f.write(b"MWS1" + struct.pack("<I", len(self.skeleton_paths)))
-            write_skeleton_list(f, [skeleton_export(self.nif(p), fp_groups(self.nif(p))) for p in self.skeleton_paths])
+            paths = SKELETONS + ([WEREWOLF_1ST] if self.werewolf() else [])
+            f.write(b"MWS1" + struct.pack("<I", len(paths)))
+            write_skeleton_list(f, [skeleton_export(self.nif(p), fp_groups(self.nif(p))) for p in paths])
         written = {"skeletons.skl"}
         for name, meshes in self.pieces.items():
             if not meshes:

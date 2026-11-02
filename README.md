@@ -79,6 +79,27 @@ disc) and an internet connection.
 If it stops, the whole log is in `work\converter-log.txt`: attach it to a
 [bug report](#testing-and-reporting). To build from source instead, follow the Quick start below.
 
+## The converter on Linux and the Steam Deck (podman)
+
+The same converter comes as a container image, with everything it needs inside: no Python, devkitPro or git. SteamOS
+ships podman, so on a Steam Deck switch to Desktop Mode, open Konsole and run (step by step, with the options and how
+to get the CIA onto the 3DS: [STEAM-DECK.md](STEAM-DECK.md)):
+
+```sh
+mkdir -p ~/mw3ds
+podman run --rm -v ~/.local/share/Steam/steamapps/common/Morrowind:/morrowind:ro -v ~/mw3ds:/out \
+    ghcr.io/3ds-conspiracy/mw3ds-converter:0.2.4 --tribunal --bloodmoon
+```
+
+The CIA lands in `~/mw3ds`. Leave out `--tribunal` / `--bloodmoon` for a game without those add-ons, and add
+`--old3ds` for an Old 3DS or 2DS. The first run downloads the image (about 80 MB, 330 MB unpacked), ffmpeg (about 30 MB) and the
+optimization mods (about 550 MB; `--no-mods` skips them) and takes an hour or more; later runs reuse what was
+converted in `~/mw3ds/work`, about 5 GB. `--help` lists the rest (the game's language, plugins).
+
+Elsewhere on Linux, point the first `-v` at your own Morrowind folder (the one holding `Data Files`). Docker works the
+same way: add `--user "$(id -u):$(id -g)"` so the files it writes are yours, and on Fedora and other SELinux systems add
+`:z` to the `/out` mount.
+
 ## Quick start
 
 ### 1. Get the code
@@ -93,7 +114,8 @@ git clone --recurse-submodules https://github.com/3ds-conspiracy/mw3ds.git
 ### 2. Install the prerequisites
 
 You need a Windows PC (Linux and macOS can build too: the scripts call `make` directly there, with devkitPro
-installed and `DEVKITPRO` set. That path has not been tried yet) with:
+installed, `DEVKITPRO` set and `sudo dkp-pacman -S 3ds-dev 3ds-zlib`. A Linux build has been played on a New 3DS)
+with:
 
 - **Morrowind**, installed anywhere. Only the base game is used; Tribunal and Bloodmoon are not needed.
 - **[Python](https://www.python.org/downloads/) 3.10 or newer.** Tick "Add Python to PATH" in the installer.
@@ -196,7 +218,30 @@ that walks and turns, on the Xbox layout's buttons, and a button that stops you 
 sessions. Choosing a speed calibrates it: lay the 3DS down for 2 seconds (it also tries once as the game starts). The
 same tab sets one look speed for the sticks, the D-pad and GoldenEye aiming, the GoldenEye turn while walking, and the
 sticks' dead zone (raise it if a stick keeps walking or turning after you let go). Layout shows the buttons and switches
-between GoldenEye, Xbox and classic (Y).
+between Xbox, classic, GoldenEye and stylus (Y).
+
+**Stylus** (Options > Controls > Layout): GoldenEye's buttons, but you hold the stylus in your right hand and slide it on
+the bottom screen to look;
+the view turns as far as the stylus moves (Stylus speed on the same tab: at 1.00x a slide across the screen turns a
+little over half way round). A slide can start anywhere on the bottom screen, on a button too. Above the HUD's buttons the screen only
+looks: setting the stylus down there taps nothing (use the Map button for the map); a line marks where that area ends.
+Over the minimap sit glass buttons laid out as on the console: round A, B, X and Y at its right, L and R in its top
+corners, doing what the console's do (but the glass B sneaks on / off). They, the quick slots and the menu buttons take
+taps. **Buttons** on the
+Layout screen (X there) hides them. Nothing needs ZL or ZR.
+
+| Button (or the glass one on the map) | Stylus |
+|---|---|
+| Circle Pad | Move (pushed far: run) |
+| Stylus (slide) | Look |
+| A | Activate: talk, open, take |
+| R (hold, release) | Wind up, strike |
+| L | Cast the selected spell |
+| X | Ready / put away the weapon |
+| Y | Jump (held: swim up) |
+| B (hold) | Sneak |
+| D-Pad | Left / right: strafe; up / down: look |
+| SELECT, START | First / third person, menu |
 
 ## Testing and reporting
 

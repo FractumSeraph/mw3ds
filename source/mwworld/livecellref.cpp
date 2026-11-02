@@ -43,24 +43,10 @@ cJSON* World::refState(int i) const
 		cJSON_AddNumberToObject(o, "talked", 1);
 	if (r.at >= 0)
 		cJSON_AddStringToObject(o, "at", cells[r.at].file.c_str());
-	// SetScale (Bloodmoon): the scale and the one it had before
-	if (r.scaleOrig > 0.0f)
+	if (r.scaleFactor != 1.0f)                     // SetScale (and the factor over the level's size)
 	{
 		cJSON_AddNumberToObject(o, "scale", r.scale);
-		cJSON_AddNumberToObject(o, "scale0", r.scaleOrig);
-	}
-	if (r.werewolf)
-		cJSON_AddNumberToObject(o, "werewolf", 1);
-	if (!r.effectBase.empty())
-	{
-		cJSON* eb = cJSON_AddArrayToObject(o, "effect_base");
-		for (auto& e : r.effectBase)
-		{
-			cJSON* pair = cJSON_CreateArray();
-			cJSON_AddItemToArray(pair, cJSON_CreateNumber(e.first));
-			cJSON_AddItemToArray(pair, cJSON_CreateNumber(e.second));
-			cJSON_AddItemToArray(eb, pair);
-		}
+		cJSON_AddNumberToObject(o, "scalef", r.scaleFactor);
 	}
 	// Objects scripts moved or turned (a raised portcullis, an opened Dwemer door)
 	if (r.actor < 0 && r.moved)
@@ -100,6 +86,17 @@ cJSON* World::refState(int i) const
 			cJSON_AddNumberToObject(o, "rank", r.rank);
 		if (!r.statDelta.empty())
 			cJSON_AddItemToObject(o, "stat_delta", floats(r.statDelta.data(), r.statDelta.size()));
+		if (r.werewolf)
+			cJSON_AddNumberToObject(o, "werewolf", 1);
+		if (!r.scriptEffects.empty())
+		{
+			cJSON* se = cJSON_AddArrayToObject(o, "seff");
+			for (auto& e : r.scriptEffects)
+			{
+				const int pair[2] = { e.first, e.second };
+				cJSON_AddItemToArray(se, cJSON_CreateIntArray(pair, 2));
+			}
+		}
 		for (int k = 0; k < 2; k++)
 		{
 			const std::vector<std::string>& ids = k ? r.noSpells : r.spells;
@@ -171,15 +168,7 @@ u32 World::refHash(int i) const
 	mixi(r.disposition);
 	mixi(r.talkedToPC);
 	mixi(r.at);
-	mixf(r.scaleOrig);
-	if (r.scaleOrig > 0.0f)
-		mixf(r.scale);
-	mixi(r.werewolf);
-	for (auto& e : r.effectBase)
-	{
-		mixi(e.first);
-		mixf(e.second);
-	}
+	mixf(r.scaleFactor);
 	if (r.actor < 0 && r.moved)
 	{
 		mix(r.pos, sizeof(r.pos));
@@ -199,6 +188,8 @@ u32 World::refHash(int i) const
 		mixi(r.level);
 		mixi(r.rank);
 		mix(r.statDelta.data(), r.statDelta.size() * sizeof(float));
+		mixi(r.werewolf);
+		mix(r.scriptEffects.data(), r.scriptEffects.size() * sizeof(r.scriptEffects[0]));
 		for (auto& id : r.spells)
 			mix(id.data(), id.size());
 		for (auto& id : r.noSpells)
@@ -241,25 +232,22 @@ void World::applyRefState(Ref& r, const cJSON* it)
 	}
 	r.enabled = num(it, "enabled", 1) != 0;
 	r.pickedUp = num(it, "taken") != 0;
-	if (num(it, "scale0") > 0.0f)
-	{
-		r.scale = (float)num(it, "scale", r.scale);
-		r.scaleOrig = (float)num(it, "scale0");
-	}
-	r.werewolf = num(it, "werewolf") != 0;
-	r.effectBase.clear();
-	{
-		const cJSON* e;
-		cJSON_ArrayForEach(e, cJSON_GetObjectItem(it, "effect_base"))
-			if (cJSON_GetArraySize(e) == 2)
-				r.effectBase.emplace_back(cJSON_GetArrayItem(e, 0)->valueint, (float)cJSON_GetArrayItem(e, 1)->valuedouble);
-	}
 	r.colGone = num(it, "colgone") != 0;
 	r.lockLevel = (int)num(it, "lock");
 	r.disarmed = num(it, "disarmed") != 0;
 	r.doorTarget = r.doorAngle = num(it, "door");
 	r.disposition = (int)num(it, "disp", r.disposition);
 	r.talkedToPC = num(it, "talked") != 0;
+	if (r.scaleFactor != 1.0f)                     // (back to the level's size: a state without SetScale's)
+	{
+		r.scale /= r.scaleFactor;
+		r.scaleFactor = 1.0f;
+	}
+	if (cJSON_GetObjectItem(it, "scalef"))
+	{
+		r.scale = (float)num(it, "scale", r.scale);
+		r.scaleFactor = (float)num(it, "scalef", 1.0);
+	}
 	if (r.actor >= 0)
 	{
 		r.health = num(it, "health", r.health);
@@ -285,6 +273,12 @@ void World::applyRefState(Ref& r, const cJSON* it)
 			if (r.rank >= 0)
 				game.actors[r.actor].rank = r.rank;
 		}
+		r.werewolf = num(it, "werewolf") != 0;
+		r.scriptEffects.clear();
+		const cJSON* se;
+		cJSON_ArrayForEach(se, cJSON_GetObjectItem(it, "seff"))
+			if (cJSON_GetArraySize(se) == 2)
+				r.scriptEffects.push_back({ (s16)cJSON_GetArrayItem(se, 0)->valueint, (s16)cJSON_GetArrayItem(se, 1)->valueint });
 		r.statDelta.clear();
 		if (const cJSON* d = cJSON_GetObjectItem(it, "stat_delta"))
 		{

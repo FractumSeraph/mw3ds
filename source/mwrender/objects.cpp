@@ -56,8 +56,6 @@ static bool loadTexture(C3D_Tex* tex, const char* path)
 		return false;
 	C3D_TexSetFilter(tex, GPU_LINEAR, GPU_LINEAR);
 	C3D_TexSetFilterMipmap(tex, GPU_LINEAR);
-	if (!g_profile.textureMips)
-		C3D_TexSetLodBias(tex, -16.0f);      // the full-size picture at every distance (the lowest bias there is)
 	return true;
 }
 
@@ -85,7 +83,8 @@ static void trimClearTriangles(CellBatch& b)
 	GSPGPU_FlushDataCache(b.indices, kept * 2);
 }
 
-static bool readBatches(FILE* f, std::vector<CellBatch>& out, Cell& cell, u32 version)
+// shared: a shared model's batches (format 11), 12-byte vertices without colour
+static bool readBatches(FILE* f, std::vector<CellBatch>& out, Cell& cell, u32 version, bool shared = false)
 {
 	u32 count = 0;
 	if (fread(&count, 4, 1, f) != 1)
@@ -114,7 +113,7 @@ static bool readBatches(FILE* f, std::vector<CellBatch>& out, Cell& cell, u32 ve
 			fread(b.posOffset, 4, 3, f);
 			fread(b.posScale, 4, 3, f);
 			fread(b.uvScale, 4, 2, f);
-			b.stride = CELL_VERTEX_SIZE_PACKED;
+			b.stride = shared ? CELL_VERTEX_SIZE_SHARED : CELL_VERTEX_SIZE_PACKED;
 			if (version >= 8)
 			{
 				fread(&b.flipFrames, 1, 1, f);
@@ -189,6 +188,68 @@ static bool readBatches(FILE* f, std::vector<CellBatch>& out, Cell& cell, u32 ve
 	return true;
 }
 
+// Format 11's shared models (objects.hpp SharedModel): each one's batches, its placements, then their colours
+static bool readShared(FILE* f, Cell& cell, u32 version)
+{
+	u32 count = 0;
+	if (fread(&count, 4, 1, f) != 1 || !tryReserve(cell.models, count))
+		return false;
+	for (u32 k = 0; k < count; k++)
+	{
+		SharedModel sm;
+		sm.firstBatch = cell.shared.size();
+		if (!readBatches(f, cell.shared, cell, version, true))
+			return false;
+		sm.numBatches = cell.shared.size() - sm.firstBatch;
+		for (u32 j = sm.firstBatch; j < cell.shared.size(); j++)
+		{
+			cell.shared[j].colorAt = sm.numVerts;
+			sm.numVerts += cell.shared[j].numVerts;
+		}
+		u32 n = 0;
+		fread(&n, 4, 1, f);
+		if (!tryReserve(cell.places, cell.places.size() + n))
+			return false;
+		sm.firstPlace = cell.places.size();
+		sm.numPlaces = n;
+		for (u32 i = 0; i < n; i++)
+		{
+			SharedPlace p;
+			fread(p.m, 4, 12, f);
+			fread(p.bmin, 4, 3, f);
+			fread(p.bmax, 4, 3, f);
+			fread(&p.maxDist, 4, 1, f);
+			u32 ref = 0;
+			fread(&ref, 4, 1, f);
+			p.ref = (int)ref;
+			p.model = k;
+			cell.places.push_back(p);
+		}
+		fread(&sm.sets, 4, 1, f);
+		if (sm.sets != 1 && sm.sets != n)
+		{
+			logf("cell: shared model %lu has %lu colour sets for %lu placements", k, sm.sets, n);
+			return false;
+		}
+		u32 bytes = sm.sets * sm.numVerts * 4;
+		if (bytes)
+		{
+			sm.colors = (u8*)lockedLinearAlloc(bytes);
+			if (!sm.colors)
+			{
+				logf("cell: out of linear memory at shared model %lu (%lu KB free)", k, linearSpaceFree() / 1024);
+				return false;
+			}
+			fread(sm.colors, bytes, 1, f);
+			unplane(sm.colors, sm.sets * sm.numVerts, 4);
+			GSPGPU_FlushDataCache(sm.colors, bytes);
+			cell.geometryBytes += bytes;
+		}
+		cell.models.push_back(sm);
+	}
+	return true;
+}
+
 volatile bool g_streamCancel = false;
 
 // Holds a TextureCache's own lock for a scope (the map and the entries are shared between the
@@ -243,6 +304,7 @@ static void tryLoad(TextureCache& c, TextureCache::Entry* e, const char* dataDir
 C3D_Tex* TextureCache::acquire(const char* dataDir, const std::string& name)
 {
 	CacheGuard guard(&lock);      // not the linear heap's lock: every allocation in the game waited on it
+	CellScopeOff heap;            // (the cache outlives the cell reading it)
 	Entry*& slot = entries[name];
 	if (!slot)
 		slot = new Entry();       // (zeroed: not loaded, no references, no failures)
@@ -312,7 +374,7 @@ bool cellLoad(Cell& cell, const char* dataDir, const char* cellFile, TextureCach
 	}
 
 	CellHeader h;
-	if (fread(&h, sizeof(h), 1, f) != 1 || memcmp(h.magic, "MWC1", 4) != 0 || h.version < 1 || h.version > 10)
+	if (fread(&h, sizeof(h), 1, f) != 1 || memcmp(h.magic, "MWC1", 4) != 0 || h.version < 1 || h.version > 11)
 	{
 		logf("cell: bad header in %s", path);
 		zclose(f);
@@ -364,7 +426,10 @@ bool cellLoad(Cell& cell, const char* dataDir, const char* cellFile, TextureCach
 		cell.textures[i] = cache.acquire(dataDir, name);
 		missing += cell.textures[i] == nullptr;
 		if (!cell.textures[i] && !(g_streamCancel && threadGetCurrent()))     // (a cancelled read skips them: not missing)
+		{
+			CellScopeOff heap;        // (the warnings' list outlives the cell)
 			monitorOnce((std::string("tex:") + name).c_str(), "missing texture %s (first seen in %s)", name, cellFile);
+		}
 	}
 	// newly loaded; the rest was shared (textures freed meanwhile by the main thread can make it negative)
 	cell.textureBytes = cache.bytes > before ? cache.bytes - before : 0;
@@ -388,8 +453,19 @@ bool cellLoad(Cell& cell, const char* dataDir, const char* cellFile, TextureCach
 		if (ok)
 		{
 			fread(&numActors, 4, 1, f);
+			std::vector<CellActorFile> file(numActors);
+			fread(file.data(), sizeof(CellActorFile), numActors, f);
 			cell.actors.resize(numActors);
-			fread(cell.actors.data(), sizeof(CellActor), numActors, f);
+			for (u32 k = 0; k < numActors; k++)
+			{
+				CellActor& a = cell.actors[k];
+				memcpy(a.id, file[k].id, sizeof(a.id));
+				memcpy(a.name, file[k].name, sizeof(a.name));
+				memcpy(a.pos, file[k].pos, sizeof(a.pos));
+				a.yaw = file[k].yaw;
+				a.radius = file[k].radius;
+				a.height = file[k].height;
+			}
 		}
 	}
 	if (ok && h.version >= 3)
@@ -408,6 +484,8 @@ bool cellLoad(Cell& cell, const char* dataDir, const char* cellFile, TextureCach
 	}
 	if (ok && h.version >= 4)
 		ok = readBatches(f, cell.sky, cell, h.version);
+	if (ok && h.version >= 11)
+		ok = readShared(f, cell, h.version);
 	if (ok)
 		for (CellBatch& b : cell.sky)
 			trimClearTriangles(b);
@@ -418,6 +496,8 @@ bool cellLoad(Cell& cell, const char* dataDir, const char* cellFile, TextureCach
 	logf("cell: %s: %d batches (%d lamp lit), %lu tris, %d doors, %d sky, %d actors, collision %d tris, geometry %lu KB, textures %lu KB (%d missing)",
 		cellFile, (int)cell.batches.size(), lamps, cell.numTris, (int)cell.doors.size(), (int)cell.sky.size(), (int)cell.actors.size(),
 		(int)cell.collision.tris.size() / 3, cell.geometryBytes / 1024, cell.textureBytes / 1024, missing);
+	if (!cell.models.empty())
+		logf("cell: %s: %d shared models, %d placements", cellFile, (int)cell.models.size(), (int)cell.places.size());
 	return ok;
 }
 
@@ -436,6 +516,9 @@ void cellFree(Cell& cell, TextureCache& cache)
 	freeBatches(cell.batches);
 	cell.batchBoundsOf = 0;
 	freeBatches(cell.sky);
+	freeBatches(cell.shared);
+	for (auto& m : cell.models)
+		lockedLinearFree(m.colors);
 	for (auto& d : cell.doors)
 		freeBatches(d.batches);
 	for (auto& name : cell.textureNames)

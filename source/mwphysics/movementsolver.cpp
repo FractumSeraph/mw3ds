@@ -48,6 +48,65 @@ bool Session::npcStep(int ri, Cell& cell, float dirX, float dirY, float step)
 	g_profCalls[PCALL_STEPS]++;
 	Ref& r = w.refs[ri];
 	float body[3] = { r.pos[0] + dirX * step, r.pos[1] + dirY * step, r.pos[2] + 70.0f };
+	// Another person's or creature's body is in the way (OpenMW's actors collide with each other: an actor's collision
+	// mask holds CollisionType_Actor while its collision is on). Without it a pack of wolves under a levitating player
+	// stood in one spot, five in one body, and bit as one. A step into one slides round it: never closer than the two
+	// were, nor kept further off than their half-widths (their boxes: a bear wider than a wolf), so two put down in one
+	// spot come apart as either steps away. Refused outright instead, people meeting in a doorway or a fight stood there
+	// for good. First, so the walls still have the last word
+	bool slid = false;
+	if (!r.dead)
+	{
+		auto halfWidth = [](const Ref& a) {
+			if (!a.hasBox)
+				return 28.0f * a.scaleFactor;
+			return fminf(64.0f, fmaxf(12.0f, 0.25f * ((a.boxMax[0] - a.boxMin[0]) + (a.boxMax[1] - a.boxMin[1]))));
+		};
+		float mine = halfWidth(r);
+		for (int j : w.loadedActors)
+		{
+			const Ref& o = w.refs[j];
+			if (j == ri || o.dead || fabsf(o.pos[2] - r.pos[2]) > 128.0f)
+				continue;
+			float reach = mine + halfWidth(o);
+			float nx = body[0] - o.pos[0], ny = body[1] - o.pos[1];
+			if (fabsf(nx) >= reach || fabsf(ny) >= reach || !w.active(j))
+				continue;
+			float ox = r.pos[0] - o.pos[0], oy = r.pos[1] - o.pos[1];
+			float keep = fminf(reach, sqrtf(ox * ox + oy * oy)), nd = sqrtf(nx * nx + ny * ny);
+			if (nd >= keep)
+				continue;
+			if (nd < 1e-3f)
+			{
+				// (the step ends on its middle: out the way it came)
+				nx = ox;
+				ny = oy;
+				nd = keep;
+			}
+			// What of the step goes round it is kept; head on, round it to the right, as two people pass (pushed
+			// straight back, two rats meeting in a back room walked into each other for good)
+			float ux = nx / nd, uy = ny / nd, tx = -uy, ty = ux;
+			float along = tx * dirX + ty * dirY;
+			if (fabsf(along) < 0.3f)
+				along = tx * dirY - ty * dirX >= 0.0f ? 0.3f : -0.3f;
+			float gx = ux * keep + tx * along * step, gy = uy * keep + ty * along * step, gl = sqrtf(gx * gx + gy * gy);
+			body[0] = o.pos[0] + gx / gl * keep;
+			body[1] = o.pos[1] + gy / gl * keep;
+			slid = true;
+		}
+		// (round one into another, in a pack: no step then)
+		for (int j : w.loadedActors)
+		{
+			const Ref& o = w.refs[j];
+			if (j == ri || o.dead || fabsf(o.pos[2] - r.pos[2]) > 128.0f)
+				continue;
+			float reach = mine + halfWidth(o) - 0.5f;
+			float nx = body[0] - o.pos[0], ny = body[1] - o.pos[1], ox = r.pos[0] - o.pos[0], oy = r.pos[1] - o.pos[1];
+			float nd = nx * nx + ny * ny;
+			if (nd < reach * reach && nd < ox * ox + oy * oy - 0.5f && w.active(j))
+				return false;
+		}
+	}
 	// Outdoors the ground and walls past the cell's edge are the next cell's: every loaded cell whose collision
 	// reaches the spot counts, as for the player and gravity (OpenMW moves actors in one physics world, whatever
 	// cell they belong to). A follower stopped dead at the border before, with no floor ahead
@@ -56,6 +115,16 @@ bool Session::npcStep(int ri, Cell& cell, float dirX, float dirY, float step)
 	for (LoadedCell* l : w.loaded)
 		if (&l->cell != &cell && aroundCount < 12 && collisionReaches(l->cell.collision, body[0], body[1], 40.0f))
 			around[aroundCount++] = &l->cell;
+	// (slid round someone, never through a wall: pushed clean through a thin one, a Skaal hunter in the Tombs of
+	// Skaalara stood outside the rock with no floor under him, out of everyone's reach)
+	if (slid)
+	{
+		float from[3] = { r.pos[0], r.pos[1], body[2] };
+		float t;
+		for (int k = 0; k < aroundCount; k++)
+			if (collisionRaycast(around[k]->collision, from, body, &t))
+				return false;
+	}
 	for (int k = 0; k < aroundCount; k++)
 		collisionPushSphere(around[k]->collision, body, 22.0f, true);   // about a person's half width (Morrowind's boxes: 20..29)
 	// Closed doors (and gates a script swings shut) block as boxes, as they block the player (OpenMW's actors collide
@@ -183,6 +252,14 @@ bool Session::npcStep(int ri, Cell& cell, float dirX, float dirY, float step)
 		float leaderZ = w.player.feet[2];
 		if (fz >= leaderZ - 16.0f)
 			maxDrop = fmaxf(maxDrop, fminf(250.0f, r.pos[2] - leaderZ + 16.0f));
+		// ... and to its way on below (the next grid point it walks to, this frame: npcMoveTo), the player above or not.
+		// Krish, following the player up out of the Caverns of Karstaag, walked up onto a rock beside the ramp and stood at
+		// its edge for good, the cave floor his way went down to 200 below and the player above him up the ramp; stepped
+		// off it, the rocks round its foot held him the same way, one after another. Down to a stair under the point (a grid
+		// point's height is rough: the floor under that rock's edge is 18 below the point beside it). Not in a cell under the
+		// sky (Mournhold's streets: Thrud, following the player, went down onto the walk by the canal and stayed there)
+		if (r.wayAt == w.time && fz >= r.wayZ - 48.0f && !w.cells[w.placeOf(ri)].sky)
+			maxDrop = fmaxf(maxDrop, fminf(250.0f, r.pos[2] - r.wayZ + 48.0f));
 	}
 	if (fz < r.pos[2] - maxDrop && fz > swimZ + 0.5f)
 	{
@@ -489,6 +566,7 @@ static bool sampleLand(Scene& scene, const float feet[3], float zTop, float zBot
 }
 
 const char* g_playerBlock = "";    // debug: what last pushed the player back
+const char* g_playerPushed = "";   // the person or creature that pushed the player back this frame ("" none)
 
 // Whether the body has headroom here: nothing crosses its axis between step height and the top of
 // the head (a floor above poking through the head would put the eye outside the room)
@@ -500,6 +578,41 @@ static bool bodyFits(Scene& scene, const float feet[3])
 		if (collisionRaycast(cell->collision, a, b, &t))
 			return false;
 	return true;
+}
+
+// A wall or a shut door between two points: the world's mesh, or a closed swinging door's box (Scene's blockers)
+static bool wallBetween(Scene& scene, const float a[3], const float b[3])
+{
+	float t;
+	for (Cell* cell : scene.cells)
+	{
+		if (collisionRaycast(cell->collision, a, b, &t))
+			return true;
+		for (auto& bl : cell->blockers)
+		{
+			// the segment against the box, slab by slab
+			float t0 = 0.0f, t1 = 1.0f;
+			bool miss = false;
+			for (int k = 0; k < 3 && !miss; k++)
+			{
+				float d = b[k] - a[k];
+				if (fabsf(d) < 1e-6f)
+				{
+					miss = a[k] < bl.min[k] || a[k] > bl.max[k];
+					continue;
+				}
+				float u0 = (bl.min[k] - a[k]) / d, u1 = (bl.max[k] - a[k]) / d;
+				if (u0 > u1)
+					std::swap(u0, u1);
+				t0 = fmaxf(t0, u0);
+				t1 = fminf(t1, u1);
+				miss = t0 > t1;
+			}
+			if (!miss)
+				return true;
+		}
+	}
+	return false;
 }
 
 static void resolveBody(Player& p, Scene& scene)
@@ -551,11 +664,42 @@ static void resolveBody(Player& p, Scene& scene)
 			if (p.feet[2] > a.pos[2] + a.height || p.feet[2] + kHeight < a.pos[2])
 				continue;
 			float dx = p.feet[0] - a.pos[0], dy = p.feet[1] - a.pos[1];
+			if (a.box)
+			{
+				// a creature's box, turned with it: the body pushed out of it by the shortest way (the model's y is its front)
+				float c = cosf(a.yaw), s = sinf(a.yaw);
+				float bx = dx - (a.off[0] * c + a.off[1] * s), by = dy - (-a.off[0] * s + a.off[1] * c);
+				float lx = bx * c - by * s, ly = bx * s + by * c;
+				float qx = fmaxf(-a.half[0], fminf(lx, a.half[0])), qy = fmaxf(-a.half[1], fminf(ly, a.half[1]));
+				float ex = lx - qx, ey = ly - qy, e2 = ex * ex + ey * ey, px = 0.0f, py = 0.0f;
+				if (e2 >= kRadius * kRadius)
+					continue;
+				if (e2 > 1e-4f)
+				{
+					float e = sqrtf(e2), k = (kRadius - e) / e;
+					px = ex * k;
+					py = ey * k;
+				}
+				else if (a.half[0] + kRadius - fabsf(lx) < a.half[1] + kRadius - fabsf(ly))
+					px = (lx < 0.0f ? -1.0f : 1.0f) * (a.half[0] + kRadius - fabsf(lx));
+				else
+					py = (ly < 0.0f ? -1.0f : 1.0f) * (a.half[1] + kRadius - fabsf(ly));
+				// (not through a wall or a shut door: we move creatures as cylinders, and a long box pokes out through what
+				// they stand against. OpenMW's whole box meets the world. A Nix-Hound pressed to the inside of its cage door
+				// at Rotheran pushed the player outside it, and the Open spell aimed at the door went to the hound)
+				float from[3] = { a.pos[0], a.pos[1], a.pos[2] + 50.0f }, to[3] = { p.feet[0], p.feet[1], p.feet[2] + 50.0f };
+				if (wallBetween(scene, from, to))
+					continue;
+				g_playerBlock = g_playerPushed = a.id;
+				p.feet[0] += px * c + py * s;
+				p.feet[1] += -px * s + py * c;
+				continue;
+			}
 			float minDist = kRadius + a.radius, d2 = dx * dx + dy * dy;
 			if (d2 >= minDist * minDist || d2 < 1e-4f)
 				continue;
 			float d = sqrtf(d2), push = (minDist - d) / d;
-			g_playerBlock = a.id;
+			g_playerBlock = g_playerPushed = a.id;
 			p.feet[0] += dx * push;
 			p.feet[1] += dy * push;
 		}
@@ -616,6 +760,7 @@ static void slideOffSteepFace(Player& p, Scene& scene, float minMove = 2.0f)
 void playerUpdate(Player& p, Scene& scene, const PlayerInput& inRaw, float dt)
 {
 	PlayerInput in = inRaw;
+	g_playerPushed = "";
 	if (p.knockTimer > 0.0f)
 	{
 		p.knockTimer -= dt;
@@ -631,6 +776,12 @@ void playerUpdate(Player& p, Scene& scene, const PlayerInput& inRaw, float dt)
 	const float kDegrees = 3.14159265f / 180.0f;
 	p.yaw += in.gyroYaw * kDegrees * dt;
 	p.pitch += in.gyroPitch * kDegrees * dt;
+	// The stylus: as far as it slid (none while the world stands still)
+	if (dt > 0.0f)
+	{
+		p.yaw += in.stylusYaw;
+		p.pitch += in.stylusPitch;
+	}
 	p.pitch = fmaxf(-1.5f, fminf(1.5f, p.pitch));
 
 	float sy = sinf(p.yaw), cy = cosf(p.yaw);

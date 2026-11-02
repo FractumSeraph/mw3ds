@@ -33,7 +33,7 @@ struct ConsoleProfile
 	                                 // them; it follows the frame's work (Session::adaptView) between these two
 	int spriteBudgetMin, spriteBudgetMax;
 	bool rainExtras;                 // the far rain's ring and the ripples where drops land (Session::drawPrecipitation)
-	bool textureMips;                // the world's textures draw their smaller copies far off (mwrender/objects.cpp loadTexture)
+	int snowFlakes;                  // Bloodmoon's snow and blizzard: flake sheets drawn at most (Session::drawPrecipitation)
 
 	// ---- the heap
 	bool smallHeap;                  // under 64 MB (an Old 3DS's memory mode: about 41 MB)

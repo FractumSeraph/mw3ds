@@ -36,9 +36,9 @@ struct InventoryItem;
 // First-person view model parts (tools/convert/firstperson.py): data/fp/<piece>.fpm files
 struct FpItem
 {
-	std::unordered_map<int, std::pair<std::string, std::string>> slots;   // body part slot -> male, female piece
-	std::string model;                   // the item's own mesh (arrows in flight)
-	std::string ammo;                    // arrows and bolts: the piece that sits in the bow or crossbow
+	std::unordered_map<int, std::pair<Atom, Atom>> slots;   // body part slot -> male, female piece (Atoms: the pieces repeat)
+	Atom model;                          // the item's own mesh (arrows in flight)
+	Atom ammo;                           // arrows and bolts: the piece that sits in the bow or crossbow
 	std::vector<float> arrow;            // bows and crossbows: their ArrowBone (3x4 rows, kVfxFps a second of the weapon's time)
 };
 // Pictures (tools/convert/artassets.py): loading screens, the level-up art by class, book pictures by path
@@ -52,15 +52,20 @@ struct ArtDef
 };
 struct ThirdPersonDef
 {
-	std::unordered_map<std::string, std::unordered_map<int, std::string>> races[2];
-	std::unordered_map<std::string, std::vector<std::pair<std::string, std::string>>> heads[2], hairs[2];
-	std::unordered_map<std::string, std::unordered_map<int, std::pair<std::string, std::string>>> items;
+	// (the pieces as Atoms: the same few hundred names over thousands of slots)
+	std::unordered_map<std::string, std::unordered_map<int, Atom>> races[2];
+	std::unordered_map<std::string, std::vector<std::pair<Atom, Atom>>> heads[2], hairs[2];
+	std::unordered_map<std::string, std::unordered_map<int, std::pair<Atom, Atom>>> items;
 };
 struct FirstPersonDef
 {
 	ThirdPersonDef third;
-	// Bloodmoon's werewolf in first person: its own skeleton (an index into fp/skeletons.skl, -1 none) and arms
+	// Bloodmoon's werewolf seen from its eyes (tools/convert/firstperson.py werewolf): its skeleton in fp/skeletons.skl
+	// and its skin's piece (-1 / "" without the add-on)
 	int werewolfSkeleton = -1;
+	// ... the world seen wider through its eyes (Morrowind.ini [General] Werewolf FOV, a vertical angle: OpenMW's
+	// General_Werewolf_FOV; level.py "werewolf")
+	float werewolfFov = 100.0f;
 	std::string werewolfPiece;
 	std::unordered_map<std::string, std::string> vfx;   // spell visual static id -> piece
 	std::unordered_map<int, std::string> ptex;          // magic effect -> its particle texture (a piece's fx shapes take it)
@@ -76,7 +81,7 @@ struct FirstPersonDef
 		std::unordered_map<std::string, float> away, back;
 	};
 	std::unordered_map<std::string, WorldFxDef> worldFx;
-	std::unordered_map<std::string, std::unordered_map<int, std::string>> races[2];   // [female] race -> slot -> piece
+	std::unordered_map<std::string, std::unordered_map<int, Atom>> races[2];   // [female] race -> slot -> piece
 	std::unordered_map<std::string, FpItem> items;                                   // lowercase item id
 };
 struct QuizQuestion { std::string question, answers[3], sound; };
@@ -97,7 +102,7 @@ struct MapDef
 
 // A creature / NPC scripts place at run time (PlaceAtPC / PlaceAtMe): its actor entry, mesh library,
 // skeleton
-struct SpawnDef { int actor; std::string lib, type; int skeleton; };
+struct SpawnDef { int actor; std::string lib, type; int skeleton; float size[2] = { 1.0f, 1.0f }; };   // size: across, up
 
 struct GameData
 {
@@ -115,8 +120,9 @@ struct GameData
 	float weather[4][4][3] = {};
 	bool hasWeather = false;
 	std::vector<std::string> startScripts;        // the data's start scripts (SSCR, Tribunal's): run once a game has them
-	std::vector<std::string> addons;              // what the data was converted with besides Morrowind.esm ("tribunal")
+	std::vector<std::string> addons;              // what the data was converted with besides Morrowind.esm ("tribunal", "bloodmoon")
 	bool tribunal() const { return std::find(addons.begin(), addons.end(), "tribunal") != addons.end(); }
+	bool bloodmoon() const { return std::find(addons.begin(), addons.end(), "bloodmoon") != addons.end(); }
 	std::vector<WeatherType> weatherTypes;       // in the regions' chance order
 	float weatherHours = 20.0f;                   // game hours between weather rolls
 	WeatherClock weatherClock;
@@ -135,7 +141,7 @@ struct GameData
 	int schoolIcons[6] = { -1, -1, -1, -1, -1, -1 };   // the magic schools' skill icons (item icon pages), alteration .. restoration
 	std::unordered_map<std::string, std::string> levelUpText;   // Morrowind.ini [Level Up]: "level2".., "default"
 	std::vector<ActorDef> actors;
-	std::unordered_map<std::string, Object> objects;       // lowercase id
+	std::unordered_map<Atom, Object, AtomKeyHash, AtomKeyEq> objects;   // lowercase id (interned: object() looks one up by text)
 	std::unordered_map<std::string, Script> scripts;       // lowercase name
 	std::vector<Topic> topics;
 	std::unordered_set<std::string> speakers;   // lowercase ids some response names as its speaker

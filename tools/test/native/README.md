@@ -57,7 +57,8 @@ is allocated outside it. Its session heap measured within 2% of Azahar's (20.9 M
 
 ```sh
 python tools\test\native\build.py --mem
-python tools/test/run_native_all.py --mem --ignore-warnings          # every case, Old 3DS profile, capped heap
+python tools/test/run_native_all.py --mem --ignore-warnings          # every case on its console's capped heap
+python tools/test/run_native_all.py --mem --old3ds --ignore-warnings # every case as an Old 3DS (39 MB)
 tools/test/run_test.py <case> --native --old3ds --exe build/native-mem/mw3ds-native.exe
 ```
 
@@ -128,7 +129,8 @@ Known differences:
   Azahar draws it white.
 - The 3DS system font is not on the PC: before the Morrowind font is loaded (title, first loading screen) text shows
   as grey blocks. The Morrowind font is drawn exactly.
-- No mipmaps (distant textures shimmer more); stereo shows the left eye only.
+- Mipmaps only with `MW3DS_NATIVE_MIPS=1`: one level a triangle by its longest texel step (mipLevel), a guess at the
+  console's rule not yet matched to its shots. Stereo shows the left eye only.
 
 ## What to trust
 
@@ -153,3 +155,7 @@ There is no copy to keep in step: `source/main.cpp` and `main_native.cpp` are a 
 compiled from `source/` into both builds. What must differ goes through `source/platform/platform.hpp`. `build.py` checks both
 entry files before it compiles (only the hooks and `main`, a few dozen lines at most) and stops with a message when one
 grows.
+
+`NATIVE_HEAP_KB=<n>` sets the heap the memory checker runs with, in KB (after the console's own split: an Old 3DS
+had 3.3 MB more of its heap in use than the checker at the same point of a save's load, so a replay of a console's
+crash wants about `NATIVE_HEAP_KB=36000`).

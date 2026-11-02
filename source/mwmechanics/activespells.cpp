@@ -18,9 +18,9 @@ float World::actorEffect(int ri, int effect) const
 	for (auto& t : r.effects)
 		if (t.effect == effect)
 			total += t.magnitude;
-	for (auto& b : r.effectBase)
-		if (b.first == effect)
-			total += b.second;
+	for (auto& s : r.scriptEffects)          // (Mod<effect> from a script: OpenMW's base magnitude)
+		if (s.first == effect)
+			total += s.second;
 	return total;
 }
 
@@ -33,34 +33,34 @@ float World::effectTotal(int effect) const
 	for (auto& a : abilities)
 		if (a.effect == effect)
 			total += a.magnitude;
-	auto b = effectBase.find(effect);
-	if (b != effectBase.end())
-		total += b->second;
+	for (auto& s : stats.scriptEffects)
+		if (s.first == effect)
+			total += s.second;
 	return total;
 }
 
-void World::modEffectBase(int ref, int effect, float delta)
+void World::modScriptEffect(int ref, int effect, int delta)
 {
-	if (delta == 0.0f)
+	if (effect < 0 || delta == 0)
 		return;
 	if (ref < 0)
 	{
-		float& v = effectBase[effect];
-		v += delta;
-		if (v == 0.0f)
-			effectBase.erase(effect);
+		for (auto& s : stats.scriptEffects)
+			if (s.first == effect)
+			{
+				s.second += delta;
+				return;
+			}
+		stats.scriptEffects.push_back({ effect, delta });
 		return;
 	}
-	std::vector<std::pair<int, float>>& list = refs[ref].effectBase;
-	for (size_t i = 0; i < list.size(); i++)
-		if (list[i].first == effect)
+	for (auto& s : refs[ref].scriptEffects)
+		if (s.first == effect)
 		{
-			list[i].second += delta;
-			if (list[i].second == 0.0f)
-				list.erase(list.begin() + i);
+			s.second = (s16)std::max(-32768, std::min(32767, s.second + delta));
 			return;
 		}
-	list.emplace_back(effect, delta);
+	refs[ref].scriptEffects.push_back({ (s16)effect, (s16)std::max(-32768, std::min(32767, delta)) });
 }
 
 void World::reapplyEffects()

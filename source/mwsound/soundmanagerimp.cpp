@@ -311,6 +311,12 @@ static CachedSound* load(const std::string& file)
 	return &slot;
 }
 
+void audioPreload(const std::string& file)
+{
+	if (s_enabled && !file.empty())
+		load(file);
+}
+
 float audioDuration(const std::string& file)
 {
 	auto it = s_cache.find(file);
@@ -664,18 +670,28 @@ void Session::updateAmbience()
 
 // ---- Sound
 
-void Session::mix3d(const float* pos, float& volume, float& pan, float minDist, float maxDist, bool inverse)
+void Session::mix3d(const float* pos, float& volume, float& pan, float minDist, float maxDist, bool inverse,
+	float cullDist)
 {
 	float dx = pos[0] - listener[0], dy = pos[1] - listener[1], dz = pos[2] - listener[2];
 	float dist = sqrtf(dx * dx + dy * dy + dz * dz);
-	// inverse: OpenAL's inverse distance clamped, as OpenMW plays its sounds (full within minDist, then minDist / dist);
-	// past maxDist not played, as the line below has it
-	float att = inverse ? (dist <= minDist ? 1.0f : dist > maxDist ? 0.0f : minDist / dist)
+	// inverse: OpenAL's inverse distance clamped, as OpenMW plays its sounds: full within minDist, then minDist / dist,
+	// and past maxDist the distance counts as maxDist (the gain minDist / maxDist). Past cullDist the sound is not heard
+	// at all (OpenMW's SoundManager::cull3DSound fades it out): its maxDist for most, 2000 for a script's loop
+	// (kLoopCullDistance). A sound too faint to matter isn't started either, below: the 3DS's channels are few
+	float att = inverse ? (dist <= minDist ? 1.0f : minDist / fminf(dist, maxDist))
 		: dist <= minDist ? 1.0f : fmaxf(0.0f, 1.0f - (dist - minDist) / fmaxf(1.0f, maxDist - minDist));
+	if (cullDist > 0.0f && dist > cullDist)
+		att = 0.0f;
 	volume *= att;
 	float rel = atan2f(dx, dy) - listener[3];
 	pan = dist > 1.0f ? sinf(rel) * 0.8f : 0.0f;
 }
+
+// A script's loop (PlayLoopSound3D[VP]) is heard out to 2000 units whatever its record's range, and no farther (OpenMW's
+// PlayMode::LoopRemoveAtDistance and sSoundCullDistance, "from an original engine"): Mournhold's insect emitters, whose
+// range is 1200, carry across the Great Bazaar, while the many in the cells around it stay silent
+const float kLoopCullDistance = 2000.0f;
 
 // A sound record's range in units (OpenMW's SoundBufferPool::insertSound): its own, or fAudioDefaultMinDistance /
 // fAudioDefaultMaxDistance when both are 0, times fAudioMinDistanceMult and fAudioMaxDistanceMult (20 and 50)
@@ -703,7 +719,7 @@ void Session::playSound(int ref, const std::string& soundId, float volume, float
 		float pos[3] = { w.refs[ref].pos[0], w.refs[ref].pos[1], w.refs[ref].pos[2] + 50.0f };
 		float lo, hi;
 		soundRange(w.game, it->second, lo, hi);
-		mix3d(pos, volume, pan, lo, hi, true);
+		mix3d(pos, volume, pan, lo, hi, true, hi);
 	}
 	if (volume > 0.01f)
 	{
@@ -712,6 +728,23 @@ void Session::playSound(int ref, const std::string& soundId, float volume, float
 		if (script && ref >= 0 && ch >= 0 && scriptSounds.size() < 16)
 			scriptSounds.push_back({ ref, lower(soundId), w.time + audioDuration(it->second.file) / fmaxf(pitch, 0.1f) });
 	}
+}
+
+void Session::preloadSound(const std::string& soundId)
+{
+	auto it = w.game.sounds.find(lower(soundId));
+	if (it != w.game.sounds.end())
+		audioPreload(it->second.file);
+}
+
+void Session::playRandomSound(int ref, const std::string& prefix, float volume)
+{
+	std::vector<std::string> ids;
+	for (int k = 1; k <= 9; k++)
+		if (w.game.sounds.count(prefix + std::to_string(k)))
+			ids.push_back(prefix + std::to_string(k));
+	if (!ids.empty())
+		playSound(ref, ids[rand() % ids.size()], volume);
 }
 
 void Session::loopSound(int ref, const std::string& soundId, bool start, float volume, float pitch)
@@ -752,16 +785,14 @@ bool Session::soundPlaying(int ref, const std::string& soundId)
 	return false;
 }
 
-// A loop holds a sound channel only while it can be heard, and only the loudest few do: a town's fires or a
-// Dwemer ruin's steam and machinery are dozens of loops, which at a channel each (silent or not) used up all
-// of them and left every other sound without one
-void Session::updateLoopSounds()
+// Loops whose object is gone (its cell not loaded, or disabled) stop. Before a cell's objects leave memory too: the
+// reference list shrinks under their slots, and a stale number reads the freed end of it
+void Session::dropDeadLoops()
 {
-	static const size_t kMaxLoops = 12;
 	for (size_t k = 0; k < loopSounds.size();)
 	{
 		LoopSound& l = loopSounds[k];
-		if (!w.active(l.ref) || !w.refs[l.ref].visible())
+		if (l.ref < 0 || l.ref >= (int)w.refs.size() || !w.active(l.ref) || !w.refs[l.ref].visible())
 		{
 			audioStop(l.channel);
 			loopSounds.erase(loopSounds.begin() + k);
@@ -769,6 +800,15 @@ void Session::updateLoopSounds()
 		}
 		k++;
 	}
+}
+
+// A loop holds a sound channel only while it can be heard, and only the loudest few do: a town's fires or a
+// Dwemer ruin's steam and machinery are dozens of loops, which at a channel each (silent or not) used up all
+// of them and left every other sound without one
+void Session::updateLoopSounds()
+{
+	static const size_t kMaxLoops = 12;
+	dropDeadLoops();
 	static std::vector<float> vols, pans, order;
 	vols.assign(loopSounds.size(), 0.0f);
 	pans.assign(loopSounds.size(), 0.0f);
@@ -782,7 +822,7 @@ void Session::updateLoopSounds()
 		{
 			float lo, hi;
 			soundRange(w.game, it->second, lo, hi);
-			mix3d(pos, volume, pans[k], lo, hi, true);
+			mix3d(pos, volume, pans[k], lo, hi, true, kLoopCullDistance);
 		}
 		vols[k] = volume;
 	}
@@ -797,6 +837,7 @@ void Session::updateLoopSounds()
 	{
 		LoopSound& l = loopSounds[k];
 		bool want = vols[k] >= floorVol && vols[k] > 0.01f;
+		l.heard = want;
 		if (l.channel >= 0 && !audioPlaying(l.channel))
 			l.channel = -1;
 		if (!want)

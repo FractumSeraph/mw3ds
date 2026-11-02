@@ -104,6 +104,11 @@ std::optional<float> miscExtensions(Ctx& c, const Node& n, World& w, bool onPlay
 		return 0.0f;
 	}
 	case F_GOTOJAIL: c.host.goToJail(); return 0.0f;
+	// GetPCTraveling / GetPCInJail: 1 for the frame a travel service takes the player away and the first scripts after
+	// the trip, and for those a jail term runs through (OpenMW's flags, cleared by the next world update): Bloodmoon's
+	// werewolf waits them out
+	case F_GETPCTRAVELING: return w.pcTraveling > 0 ? 1.0f : 0.0f;
+	case F_GETPCINJAIL: return w.pcInJail > 0 ? 1.0f : 0.0f;
 	// Cast spell target: the spell's effects land on the target (the player or an NPC)
 	case F_CAST:
 	{
@@ -175,7 +180,8 @@ std::optional<float> miscExtensions(Ctx& c, const Node& n, World& w, bool onPlay
 	case F_FADEOUT: c.host.fadeTo(1.0f, argNum(c, n, 0, 1)); return 0.0f;
 	case F_FADEIN: c.host.fadeTo(0.0f, argNum(c, n, 0, 1)); return 0.0f;
 	case F_PLAYBINK:
-		if (!c.host.playMovie(argStr(c, n, 0)) && lower(argStr(c, n, 0)).find("end") != std::string::npos)
+		// (the game's own ending, missing: its words instead; not Bloodmoon's bm_wereend / bm_endgame dreams)
+		if (!c.host.playMovie(argStr(c, n, 0)) && lower(argStr(c, n, 0)).find("mw_end") != std::string::npos)
 			c.host.notify("Dagoth Ur is defeated, the Heart of Lorkhan severed. The Blight lifts from Vvardenfell.");
 		return 0.0f;
 	case F_TGM: case F_TOGGLEGODMODE:
@@ -336,17 +342,6 @@ std::optional<float> miscExtensions(Ctx& c, const Node& n, World& w, bool onPlay
 		});
 		return 0.0f;
 	}
-	// GetPCInJail / GetPCTraveling: the player is being jailed, or travelling with a guide, right now (OpenMW's
-	// isPlayerInJail / isPlayerTraveling: true only while it happens; here the moment just after, which is when
-	// scripts see it). Bloodmoon's werewolf scripts don't change the player then
-	case F_GETPCINJAIL:
-		return w.time - w.jailedAt < 1.0f ? 1.0f : 0.0f;
-	case F_GETPCTRAVELING:
-		return w.time - w.travelledAt < 1.0f ? 1.0f : 0.0f;
-	// GetWeaponType: the type of the weapon in hand (WPDT), -1 for none, -2 a lockpick, -3 a probe (OpenMW's)
-	case F_GETWEAPONTYPE:
-		return (float)w.weaponTypeOf(onPlayer || !r ? -1 : ref);
-
 	// The player's or a person's weapon (or fists) out and ready (OpenMW: the draw state is Weapon)
 	case F_GETWEAPONDRAWN:
 		return c.host.isWeaponDrawn(onPlayer || !r ? -1 : ref) ? 1.0f : 0.0f;

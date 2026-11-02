@@ -9,6 +9,7 @@
 
 // The running game: world state, dialogue, menus, and everything scripts call into.
 const char* summonCreatureId(int effect);    // the creature a summoning effect calls (mwmechanics/spelleffects.cpp), nullptr if none
+void summonSpot(World& w, const float caster[3], float yaw, float out[3]);   // where it comes (mwmechanics/summoning.cpp)
 float npcClimbSlope(const World& w, const Ref& r);   // the steepest land an actor walks up now, degrees (mwphysics/movementsolver.cpp)
 
 struct Session : ScriptHost, WindowManagerState, MechanicsState, RenderState, SoundState, TestState
@@ -70,6 +71,7 @@ struct Session : ScriptHost, WindowManagerState, MechanicsState, RenderState, So
 	void giveItems(const std::vector<std::pair<int, std::string>>& items);
 	void updateAmbience();
 	void updateLoopSounds();
+	void dropDeadLoops();
 	void stopLoopSounds();
 	void updateWeatherEffects(float dt);
 	void updateSky();
@@ -147,6 +149,7 @@ struct Session : ScriptHost, WindowManagerState, MechanicsState, RenderState, So
 	float knockdownOdds(int agility);
 	float fallDamage(float height, int acrobatics, float jump);
 	float actorWalkSpeed(int ref);
+	float raceWeight(const std::string& race, bool female);   // the race's weight for a sex (1: no such race)
 	float normalWeaponResist(int ref);
 	float fleeRatingOf(int ref, float distance);
 	float actorHalfLength(int ref);                      // collision box half length (OpenMW's getHalfExtents().y())
@@ -193,6 +196,13 @@ struct Session : ScriptHost, WindowManagerState, MechanicsState, RenderState, So
 	void drawConsole();               // Options > Console: one MWScript line at a time (mwgui/console.cpp)
 	void saveSettings();
 	void viewModelUpdate(const PlayerInput& in, float dt);
+	// What the first press of X reads from the card, read now instead (behind a loading screen, on equipping): the
+	// weapon's and shield's first-person pieces and the weapon's "up" sound (mwmechanics/combat.cpp)
+	void warmWeapon();
+	// Character creation's face preview, read behind the loading screen of the boat's door (the race menu comes on the
+	// dock), let go of with the menu (mwmechanics/character.cpp)
+	void preloadRacePreview();
+	void preloadSound(const std::string& soundId);   // a sound read into the cache, not played
 	// repair (mwgui/windowmanagerimp.cpp)
 	void drawRepair();
 	void openRepair(int smith, int tool);        // smith: the NPC (-1: the player's own tool, an inventory index)
@@ -208,6 +218,7 @@ struct Session : ScriptHost, WindowManagerState, MechanicsState, RenderState, So
 	void updateCorprus();
 	void openPendingMenu();
 	void playerControls(PlayerInput& in, bool menu);
+	void stylusButtons(PlayerInput& in, bool menu);   // stylus layouts: the HUD's Use, Cast, Ready, Jump and Sneak as input
 	void playerMove(const PlayerInput& in, float dt, u64& t);
 	void aimAndActivate(const PlayerInput& in, bool menu);
 	void updateMouths(float dt);
@@ -219,6 +230,8 @@ struct Session : ScriptHost, WindowManagerState, MechanicsState, RenderState, So
 	void updateFadeAndNotes(float dt);
 	void drawTop();
 	void drawHurtFlash();
+	void drawWerewolfView();
+	const char* hudHandArt();             // the HUD art the weapon box shows with nothing held ("werewolf_hand"), or null
 	void itemTip(const Object* o, const InventoryItem* it);   // it: that one's wear and charge (nullptr: new)
 	void spellTip(const SpellDef& sp);
 	int armorSkill(const Object* o);      // the armor skill a piece of armor trains: by its weight for its slot
@@ -238,6 +251,8 @@ struct Session : ScriptHost, WindowManagerState, MechanicsState, RenderState, So
 	void say(int ref, const std::string& file, const std::string& text) override;
 	bool sayDone(int ref) override;
 	void playSound(int ref, const std::string& soundId, float volume = 1.0f, float pitch = 1.0f, bool script = false) override;
+	// One of a family of numbered sounds at random ("wolfhit": WolfHit1..3; OpenMW's Store<Sound>::searchRandom)
+	void playRandomSound(int ref, const std::string& prefix, float volume = 1.0f);
 	void loopSound(int ref, const std::string& soundId, bool start, float volume = 1.0f, float pitch = 1.0f) override;
 	void streamMusic(const std::string& file) override;
 	bool soundPlaying(int ref, const std::string& soundId) override;
@@ -274,7 +289,6 @@ struct Session : ScriptHost, WindowManagerState, MechanicsState, RenderState, So
 	bool hurtFlashOngoing() { if (hurtFlash > 0.0f) return false; hurtFlash = 1.0f; return true; }
 	void sheathe() override { sheatheTimer = 99.0f; }
 	void goToJail() override;
-	void setPlayerWerewolf(bool werewolf) override;    // Bloodmoon's change of form (mwmechanics/werewolf.cpp)
 	void teleportPlayer(int cell, const float pos[3], float yaw) override
 	{
 		// (outdoors to outdoors only into a cell already loaded round the player: farther, Almsivi or Divine Intervention,
@@ -327,15 +341,18 @@ struct Session : ScriptHost, WindowManagerState, MechanicsState, RenderState, So
 	// A door's or container's lock and trap, in OpenMW's order: 0 stays shut (locked, no key), 1 its trap went off,
 	// 2 free to open
 	int lockGate(int ref, const char* lockedSound);
-	bool werewolfRefused();                       // a werewolf is refused by everything but doors: the message
+	bool werewolfRefused(int ref = -1);           // a werewolf is refused by everything but doors: the message
 	bool readRefused();                           // a book in the pack can't be read in a fight: the message
 	// Beast races and broken pieces: OpenMW's canBeEquipped: 0 refused (message in why), 1 ok, 2 a two-hander, 3 a shield with one
 	int canEquip(const InventoryItem& it, std::string* why);
 	bool testSneak = false;                       // SNEAK:1: the player sneaks (tests)
+	bool werewolf = false;                        // WEREWOLF:1: the player is a werewolf (refusals only: no other change of form)
 	void openScreen(Screen s);
 	void closeScreen();
-	void mix3d(const float* pos, float& volume, float& pan, float minDist, float maxDist, bool inverse = false);
+	void mix3d(const float* pos, float& volume, float& pan, float minDist, float maxDist, bool inverse = false,
+		float cullDist = 0.0f);
 	void greetings(float dt);
+	void werewolfWitnesses();                     // the player just changed into a werewolf: who saw it
 	std::string targetLabel(int ref);
 	std::vector<std::string> targetPopupLines(int ref);    // the name over the crosshair, wrapped to fit the top screen
 	std::vector<std::string> targetPromptLines(int ref, float* scale = nullptr);   // "A: Open <name>" on the bottom screen: one or two lines, at that scale
@@ -344,6 +361,7 @@ struct Session : ScriptHost, WindowManagerState, MechanicsState, RenderState, So
 	void drawHud();
 	std::vector<ActiveEffect> hudEffects();
 	void drawQuickStrip();
+	void drawStylusButtons();         // stylus layouts: the HUD's Use, Cast, Ready, Jump and Sneak
 	void drawMessage();
 	void drawDialogue();
 	void layoutDialogue(float width);

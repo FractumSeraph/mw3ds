@@ -491,11 +491,27 @@ void World::respawnCell(int c)
 		logf("world: %s refreshed: %d containers restocked, %d came back, %d corpses cleared", lc.file.c_str(), restocked, revived, cleared);
 }
 
+// The cells named by a cell's changes as where its people stand now ("at")
+static void movedTargets(const std::string& json, std::vector<std::string>& to)
+{
+	for (size_t k = json.find("\"at\":\""); k != std::string::npos; k = json.find("\"at\":\"", k + 1))
+	{
+		size_t a = k + 6, e = json.find('"', a);
+		if (e == std::string::npos)
+			break;
+		std::string t = json.substr(a, e - a);
+		if (std::find(to.begin(), to.end(), t) == to.end())
+			to.push_back(t);
+	}
+}
+
 void World::storeCellState(const std::string& file, const std::string& json)
 {
 	StoredCell st;
 	st.raw = json.size();
 	st.movedRefs = json.find("\"at\":") != std::string::npos;
+	movedTargets(json, st.movedTo);
+	st.movedScanned = true;
 	// (no memory to pack it: kept as text, raw 0 marks it so)
 	if (!packText(json, st.z))
 	{
@@ -503,6 +519,32 @@ void World::storeCellState(const std::string& file, const std::string& json)
 		st.raw = 0;
 	}
 	cellStates[file] = std::move(st);
+}
+
+// A cell's people a quest moved into this one (PositionCell) come with their own cell's objects: those are read back now
+// so they stand here as its objects come in (applyCellState lists them). Mehra Milo, moved to Holamayan, belongs to
+// the Library of Vivec: the library stayed in memory for the rest of the game to keep her; now it is read for the
+// monastery and goes again with the rest
+void World::readMovedIn(int cell)
+{
+	std::vector<std::string> homes;
+	for (auto& st : cellStates)
+	{
+		// (a save's kept block says only that someone was moved: looked through once for where to)
+		if (st.second.movedRefs && !st.second.movedScanned)
+		{
+			st.second.movedScanned = true;
+			movedTargets(cellStateJson(st.second), st.second.movedTo);
+		}
+		if (std::find(st.second.movedTo.begin(), st.second.movedTo.end(), cells[cell].file) != st.second.movedTo.end())
+			homes.push_back(st.first);
+	}
+	for (const std::string& h : homes)
+	{
+		int c = cellIndex(h);
+		if (c >= 0 && !cells[c].refsLoaded && ensureRefs(c))
+			logf("world: %s read for %s standing in %s", h.c_str(), "its people", cells[cell].file.c_str());
+	}
 }
 
 std::string World::cellStateJson(const StoredCell& st) const
@@ -519,7 +561,7 @@ std::string World::cellStateJson(const StoredCell& st) const
 }
 
 // A cell's changed objects and its objects' scripts that hold anything, as text ("" when nothing)
-std::string World::cellStateText(int c) const
+std::string World::cellStateText(int c, bool* failed) const
 {
 	const LevelCell& lc = cells[c];
 	int first = lc.refBase, last = lc.refBase + lc.refCount, n = 0;
@@ -539,6 +581,9 @@ std::string World::cellStateText(int c) const
 		bool set = !s.running;
 		for (float v : s.locals)
 			set |= v != 0.0f;
+		// (character creation's scripts: their locals start as postChargenRef leaves them, "done", so a zero here is a
+		// change to keep too: reading the cell's objects again would mark the script done over it)
+		set |= refs[s.ref].idLower.compare(0, 7, "chargen") == 0;
 		if (set)
 		{
 			cJSON_AddItemToArray(sc, scriptState(s));
@@ -549,7 +594,10 @@ std::string World::cellStateText(int c) const
 	if (n)
 	{
 		char* t = cJSON_PrintUnformatted(st);
-		out = t;
+		if (t)
+			out = t;
+		else if (failed)
+			*failed = true;
 		free(t);
 	}
 	cJSON_Delete(st);

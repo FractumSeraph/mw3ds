@@ -64,6 +64,7 @@ struct ScriptedInput
 	int persuade = -1;                // PERSUADE:k: in a talk, admire 0 / intimidate 1 / taunt 2 / bribe 3..5
 	int weather = -1;                 // WEATHER:k: the current region's weather becomes k (at once)
 	int level = 0;                    // LEVEL:n: the player's level becomes n
+	int sleepTo = -1;                 // SLEEPTO:h: SLEEPUNTIL, but no rest when the clock already reads h (a second one after an interrupted rest)
 	int sleepUntil = -1;              // SLEEPUNTIL:h: rest until game hour h comes round (the rest menu's hour picker)
 	int sleep = 0, sleepForce = 0;    // SLEEP:h[:1|2]: sleep h hours here (1: a creature is sure to come, 2: none comes)
 	std::string moveTo;               // MOVETO:id: that reference moves 200 in front of the player (PositionCell)
@@ -87,7 +88,7 @@ struct ScriptedInput
 	bool saveLegacy = false;          // SAVEV1:name: the save in version 1 (every cell inside the JSON: old saves still load)
 	std::string saveAs, loadFrom;     // SAVE:name / LOAD:name: sdmc:/3ds/mw3ds/test_<name>.sav (the sweeps
 	                                  // start every quest from the same state)
-	int layout = -1;                  // CONTROLS:classic|xbox|goldeneye: the button layout from this step on
+	int layout = -1;                  // CONTROLS:classic|xbox|goldeneye|stylus: the button layout from this step on
 	int gyroAim = -1;                 // GYROAIM:<percent>|off: gyro aim's sensitivity from this step on (0 off)
 	float gyroYaw = 0.0f, gyroPitch = 0.0f;   // GYRO:yaw:pitch: the console turning (degrees a second) this step
 	int skin = -1;                    // SKIN:gpu|cpu: how the actors of cells loaded from here on are skinned
@@ -141,6 +142,8 @@ std::vector<CamPose> loadAutocam(const RenderCamera& spawn);
 // the HUD hidden, the world standing still (parseKeys)
 extern bool g_testFrameCap;
 extern bool g_testDepth16;          // DEPTH16:on: the top screen's 16-bit depth buffer in 2D (Engine::createTopTargets)
+extern int g_testThrottleFps;       // THROTTLE:<fps>: each frame waits out the rest of 1/fps (engine.cpp)
+extern bool g_testGpuModel;         // GPUMODEL:on|off: the PC build prices each frame's drawing as the console's GPU would
 extern float g_test3dSlider;        // SLIDER3D:<0..1>: the 3D slider held there (engine.cpp; -1: the console's own)
 extern int g_testLayout;
 extern bool g_camHeld, g_hudOff, g_halt;

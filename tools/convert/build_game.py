@@ -12,10 +12,10 @@ import re
 import math
 import struct
 
-from mwfiles import DATA_FILES, addons, game_path, read_game, read_records, text
+from mwfiles import DATA_FILES, bloodmoon, game_path, read_game, read_records, text, tribunal
 from mwscript import ScriptError, compile_script, compile_snippet
 from creature import creature_stats
-from npcstats import bind, npc_items, npc_stats, weapon_damage
+from npcstats import HARMFUL_EFFECTS, bind, npc_items, npc_stats, weapon_damage
 
 ITEM_TYPES = {"MISC", "BOOK", "ALCH", "INGR", "WEAP", "ARMO", "CLOT", "LIGH", "APPA", "LOCK", "PROB", "REPA"}
 # Engine sounds used by the runtime (item pickup, doors, UI, journal, footsteps)
@@ -37,6 +37,12 @@ ENGINE_SOUNDS = [
     "bowPull", "bowShoot", "crossbowPull", "crossbowShoot", "Item Weapon Blunt Up", "Item Weapon Bow Up",
     "Item Weapon Longblade Up", "Item Weapon Spear Up", "Item Weapon Crossbow Up", "DefaultLand",
     "destruction bolt", "repair", "repair fail",
+    # Bloodmoon's werewolf, picked by family at random (OpenMW's searchRandom): a refusal by what was used, the claws'
+    # swing and hit, readying them, the run (records only with the add-on: nothing changes without it)
+    "WolfActivator1", "WolfContainer1", "WolfContainer2", "WolfCreature1", "WolfCreature2", "WolfCreature3",
+    "WolfItem1", "WolfItem2", "WolfItem3", "WolfNPC1", "WolfNPC2", "WolfNPC3", "WolfHit1", "WolfHit2", "WolfHit3",
+    "WolfSwing", "WolfSwing1", "WolfSwing2", "WolfSwing3", "WolfEquip1", "WolfEquip2", "WolfEquip3", "WolfEquip4",
+    "WolfEquip5", "WolfRun",
 ]
 
 
@@ -220,8 +226,10 @@ def _npc_info(rec, db):
 # ---------------------------------------------------------------- magic effects
 
 # Magic effects' GMST names (sEffect<key>) by index: their display names
-EFFECT_KEYS = """WaterBreathing SwiftSwim WaterWalking Shield FireShield LightningShield FrostShield Burden Feather Jump Levitate SlowFall Lock Open FireDamage ShockDamage FrostDamage DrainAttribute DrainHealth DrainSpellpoints DrainFatigue DrainSkill DamageAttribute DamageHealth DamageMagicka DamageFatigue DamageSkill Poison WeaknesstoFire WeaknesstoFrost WeaknesstoShock WeaknesstoMagicka WeaknesstoCommonDisease WeaknesstoBlightDisease WeaknesstoCorprusDisease WeaknesstoPoison WeaknesstoNormalWeapons DisintegrateWeapon DisintegrateArmor Invisibility Chameleon Light Sanctuary NightEye Charm Paralyze Silence Blind Sound CalmHumanoid CalmCreature FrenzyHumanoid FrenzyCreature DemoralizeHumanoid DemoralizeCreature RallyHumanoid RallyCreature Dispel Soultrap Telekinesis Mark Recall DivineIntervention AlmsiviIntervention DetectAnimal DetectEnchantment DetectKey SpellAbsorption Reflect CureCommonDisease CureBlightDisease CureCorprusDisease CurePoison CureParalyzation RestoreAttribute RestoreHealth RestoreSpellPoints RestoreFatigue RestoreSkill FortifyAttribute FortifyHealth FortifySpellpoints FortifyFatigue FortifySkill FortifyMagickaMultiplier AbsorbAttribute AbsorbHealth AbsorbSpellPoints AbsorbFatigue AbsorbSkill ResistFire ResistFrost ResistShock ResistMagicka ResistCommonDisease ResistBlightDisease ResistCorprusDisease ResistPoison ResistNormalWeapons ResistParalysis RemoveCurse TurnUndead SummonScamp SummonClannfear SummonDaedroth SummonDremora SummonAncestralGhost SummonSkeletalMinion SummonLeastBonewalker SummonGreaterBonewalker SummonBonelord SummonWingedTwilight SummonHunger SummonGoldenSaint SummonFlameAtronach SummonFrostAtronach SummonStormAtronach FortifyAttackBonus CommandCreatures CommandHumanoids BoundDagger BoundLongsword BoundMace BoundBattleAxe BoundSpear BoundLongbow ExtraSpell BoundCuirass BoundHelm BoundBoots BoundShield BoundGloves Corpus Vampirism SummonCenturionSphere SunDamage StuntedMagicka SummonFabricant""".split()
-# (137, SummonFabricant, is Tribunal's: its record is in Tribunal.esm, so vanilla data never names it)
+EFFECT_KEYS = """WaterBreathing SwiftSwim WaterWalking Shield FireShield LightningShield FrostShield Burden Feather Jump Levitate SlowFall Lock Open FireDamage ShockDamage FrostDamage DrainAttribute DrainHealth DrainSpellpoints DrainFatigue DrainSkill DamageAttribute DamageHealth DamageMagicka DamageFatigue DamageSkill Poison WeaknesstoFire WeaknesstoFrost WeaknesstoShock WeaknesstoMagicka WeaknesstoCommonDisease WeaknesstoBlightDisease WeaknesstoCorprusDisease WeaknesstoPoison WeaknesstoNormalWeapons DisintegrateWeapon DisintegrateArmor Invisibility Chameleon Light Sanctuary NightEye Charm Paralyze Silence Blind Sound CalmHumanoid CalmCreature FrenzyHumanoid FrenzyCreature DemoralizeHumanoid DemoralizeCreature RallyHumanoid RallyCreature Dispel Soultrap Telekinesis Mark Recall DivineIntervention AlmsiviIntervention DetectAnimal DetectEnchantment DetectKey SpellAbsorption Reflect CureCommonDisease CureBlightDisease CureCorprusDisease CurePoison CureParalyzation RestoreAttribute RestoreHealth RestoreSpellPoints RestoreFatigue RestoreSkill FortifyAttribute FortifyHealth FortifySpellpoints FortifyFatigue FortifySkill FortifyMagickaMultiplier AbsorbAttribute AbsorbHealth AbsorbSpellPoints AbsorbFatigue AbsorbSkill ResistFire ResistFrost ResistShock ResistMagicka ResistCommonDisease ResistBlightDisease ResistCorprusDisease ResistPoison ResistNormalWeapons ResistParalysis RemoveCurse TurnUndead SummonScamp SummonClannfear SummonDaedroth SummonDremora SummonAncestralGhost SummonSkeletalMinion SummonLeastBonewalker SummonGreaterBonewalker SummonBonelord SummonWingedTwilight SummonHunger SummonGoldenSaint SummonFlameAtronach SummonFrostAtronach SummonStormAtronach FortifyAttackBonus CommandCreatures CommandHumanoids BoundDagger BoundLongsword BoundMace BoundBattleAxe BoundSpear BoundLongbow ExtraSpell BoundCuirass BoundHelm BoundBoots BoundShield BoundGloves Corpus Vampirism SummonCenturionSphere SunDamage StuntedMagicka SummonFabricant SummonCreature01 SummonCreature02 SummonCreature03
+SummonCreature04 SummonCreature05""".split()
+# (137, SummonFabricant, is Tribunal's: its record is in Tribunal.esm, so vanilla data never names it; 138-142 are
+# Bloodmoon's Summon Wolf / Bear / Bonewolf and two unused, named by sEffectSummonCreature01-05 as OpenMW's)
 
 
 def magic_effects(db):
@@ -260,7 +268,7 @@ def hardcoded_flags(k):
     0x10 harmful, 0x20 its hit visual repeats while it lasts, 0x40 / 0x80 / 0x100 castable on self / touch / target."""
     no_magnitude = {0, 2, 39, 45, 46, 58, 60, 61, 62, 63, 69, 70, 71, 72, 73, 132, 133, 134} | set(range(102, 117))         | set(range(120, 132))
     no_duration = {12, 13, 57, 60, 61, 62, 63, 69, 70, 71, 72, 73}
-    harmful = {7, 45, 46, 47, 48, 51, 52, 53, 54, 58, 135, 136} | set(range(14, 39)) | set(range(85, 90))
+    harmful = HARMFUL_EFFECTS
     self_only = {43, 59, 60, 61, 62, 63, 64, 65, 66, 126, 132, 133, 134} | set(range(102, 117)) | set(range(120, 132))
     others_only = {12, 13, 44, 58, 101, 118, 119} | set(range(49, 57)) | set(range(85, 90))
     f = 0
@@ -749,9 +757,8 @@ def build(db, cells, actor_records, actor_cells):
         if rec is not None:
             objects[item.lower()] = object_entry(rec)
 
-    # Bound weapons and armor (summoned by spells), and the werewolf robe BecomeWerewolf puts on (Bloodmoon: the
-    # engine hands it out, so nothing in the level reaches it; mwmechanics/werewolf.cpp)
-    for bid in list(BOUND_ITEMS) + ["werewolfrobe"]:
+    # Bound weapons and armor (summoned by spells)
+    for bid in BOUND_ITEMS:
         rec = db["objects"].get(bid)
         if rec is not None:
             objects[bid] = object_entry(rec)
@@ -894,7 +901,7 @@ def build(db, cells, actor_records, actor_cells):
         "ambient": {"water": water_sound or ""},
         # The add-ons the data was converted with, in load order (the engine turns their rules on from this):
         # "tribunal", "bloodmoon"
-        "addons": addons(),
+        "addons": (["tribunal"] if tribunal() else []) + (["bloodmoon"] if bloodmoon() else []),
         # The start scripts (SSCR: Tribunal's TribunalMain, MarkTRStartScript, TribFabAttackCheck), run as a game
         # starts (OpenMW's GlobalScripts::addStartup)
         "start_scripts": sorted({r.id.lower() for r in read_game({"SSCR"}) if r.id.lower() in compiled}),

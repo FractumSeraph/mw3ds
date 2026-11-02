@@ -8,7 +8,9 @@
 
 // Animated NPCs from cells/<cell>.act (tools/convert/actors.py documents the layout).
 
-struct RotKey { float t, w, x, y, z; };
+// A rotation key's unit quaternion in 16 bits a part (x 32767; the files hold floats): 12 bytes a key, not 20. The
+// keys are most of a skeleton's memory (a person's 1.5 MB, the beast races' 1.9), all of it the heap's
+struct RotKey { float t; s16 w, x, y, z; };
 struct VecKey { float t, x, y, z; };
 struct ScaleKey { float t, s; };
 
@@ -71,7 +73,7 @@ struct ActorMesh
 	std::vector<int> palBone;
 	std::vector<float> palMat;         // 12 floats (3x4) per palette entry
 	std::vector<u8> infIndex;          // per vertex: palette index[4]
-	std::vector<float> infWeight;      // per vertex: weight[4]
+	std::vector<u8> infWeight;         // per vertex: weight[4] x 255 (as the file has them)
 	std::vector<u8> infCount;          // influences in use per vertex (sorted strongest first)
 	float talk[2], blink[2];
 	// Skinned on the GPU (shaders/skin.v.pica): verts are then 24-byte packed vertices (s16 position x posQ, s16 texture
@@ -163,6 +165,7 @@ struct Actor
 	u32 wornMask = ~0u;
 	bool dressed = false;
 	u32 wornNetDone = 0;               // the online mode's outfit it was dressed in last (Ref::wornNetHash)
+	float scaleFactor = 1.0f;          // SetScale's factor its place already holds (World::syncActor brings it to the Ref's)
 };
 
 // How solid an actor is drawn under Invisibility and Chameleon (OpenMW's CharacterController::setVisibility): invisible,
@@ -181,6 +184,7 @@ struct ActorSet
 	std::vector<Actor> actors;
 	u32 bytes = 0;
 	u32 skinnedGpu = 0, skinnedCpu = 0;   // skinned meshes read: drawn by shaders/skin.v.pica / re-skinned on the CPU
+	u8 cellLight[3] = { 0, 0, 0 };        // the cell's light without lamps (x 64, .act 5), for those placed while playing
 };
 
 // A cell's .act: version 3 lists placements whose meshes are in library files (under dataDir), their
@@ -189,9 +193,10 @@ bool actorsLoad(ActorSet& set, const char* path, const char* dataDir, const std:
 struct Cell;
 struct TextureCache;
 // A creature / NPC placed while playing: its meshes from a library file (dataDir/lib); textures the cell
-// doesn't list yet are added to it. Returns its index in set.actors, -1 when it couldn't be read.
+// doesn't list yet are added to it, lit by tint (x 64; none: the library's even light). Returns its index in
+// set.actors, -1 when it couldn't be read.
 int actorsAddFromLibrary(ActorSet& set, Cell& cell, TextureCache& cache, const char* dataDir, const std::string& lib,
-	int ref, int skeleton, const float place[12]);
+	int ref, int skeleton, const float place[12], const u8* tint = nullptr);
 // cells/skeletons.skl: skeletons shared by every cell's actors (.act version 2 carries none). With
 // cells/skel_<k>.skl present each is read when an actor first needs it (skeletonEnsure)
 extern std::vector<Skeleton> g_sharedSkeletons;

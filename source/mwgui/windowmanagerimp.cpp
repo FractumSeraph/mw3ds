@@ -169,7 +169,6 @@ void Session::drawBottom()
 	case SCR_CONSOLE: drawConsole(); break;
 	case SCR_REPAIR: drawRepair(); break;
 	case SCR_SAVES: drawSaves(); break;
-	case SCR_ONLINE: drawOnline(); break;
 	case SCR_GAMEMENU: drawGameMenu(); break;
 	default: break;
 	}
@@ -177,10 +176,29 @@ void Session::drawBottom()
 
 void Session::openScreen(Screen s)
 {
-	// A werewolf has no inventory and no magic (OpenMW hides those windows)
-	if (w.werewolf && (s == SCR_INVENTORY || s == SCR_MAGIC || s == SCR_SPELLS))
+	// A werewolf has no inventory or magic to look at (OpenMW hides both windows in wolf form; the 3DS's Items and
+	// Magic buttons say so instead: differs, 3DS UI)
+	if (w.stats.werewolf && (s == SCR_INVENTORY || s == SCR_MAGIC || s == SCR_SPELLS))
+	{
+		notify(w.game.gmst("swerewolfrefusal", "You cannot do this as a werewolf."));
 		return;
+	}
 	screen = s;
+	// The race menu starts on the first race of its list (drawRace): the player is that race from the moment it opens,
+	// not a frame later, so the face drawn is the one read ahead behind the boat door's loading screen (preloadRacePreview)
+	// and not first the old race's, read for one frame
+	if (s == SCR_RACE)
+		for (auto& r : w.game.races)
+			if (r.playable)
+			{
+				if (lower(w.stats.race) != lower(r.id))
+				{
+					w.stats.race = r.id;
+					w.stats.head.clear();
+					w.stats.hair.clear();
+				}
+				break;
+			}
 	list = UiList();
 	list2 = UiList();
 	grid = UiGrid();
@@ -193,7 +211,9 @@ void Session::openScreen(Screen s)
 
 void Session::closeScreen()
 {
-	if (screen == SCR_DIALOGUE || screen == SCR_BARTER || screen == SCR_TRAVEL || screen == SCR_SPELLS
+	// (a talk left open under another screen, a guard's greeting that came up as the rest menu opened over it, closes with the
+	// screen: its state alone kept menuOpen() true, the world still, nothing aimed at and no step taken)
+	if (dlg.open || screen == SCR_DIALOGUE || screen == SCR_BARTER || screen == SCR_TRAVEL || screen == SCR_SPELLS
 		|| screen == SCR_TRAINING || screen == SCR_PERSUADE || screen == SCR_SPELLMAKE
 		|| (screen == SCR_REPAIR && repairRef >= 0)
 		|| (screen == SCR_ENCHANT && enchanterRef >= 0))

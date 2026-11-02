@@ -1,3 +1,4 @@
+#include "mwscript/scriptstore.hpp"
 #include "components/interpreter/interpreter.hpp"
 
 #include <optional>
@@ -529,7 +530,7 @@ void scriptsRun(World& w, ScriptHost& host, float dt, bool globalOnly)
 				w.scripts[i].targetCell.clear();
 			}
 			Ctx c{ w, host, (int)i, ref >= 0 || !w.scripts[i].item.empty() ? ref : w.scripts[i].target, dt };
-			exec(c, w.scripts[i].script->body);
+			exec(c, scriptBody(*w.scripts[i].script));       // (read back from the card if it isn't in)
 			// OnActivate lasts one frame; OnPCAdd / OnPCEquip stay set until the script clears them
 			w.scripts[i].activated = false;
 		}
@@ -551,7 +552,7 @@ float scriptEval(World& w, ScriptHost& host, const Node& expr, int selfRef)
 	return eval(c, expr);
 }
 
-// What call() runs: the table, and statFunction's families (Get / Set / Mod + attribute or skill; Get / Set / Mod /
+// What call() runs: the table, and statFunction's families (Get / Set / Mod + attribute, skill or magic effect stat; Get / Set / Mod /
 // ModCurrent + health, magicka, fatigue; Get...GetRatio; GetLevel / SetLevel; ModPCCrimeLevel)
 bool scriptFunctionSupported(const std::string& name)
 {
@@ -570,14 +571,14 @@ bool scriptFunctionSupported(const std::string& name)
 		return false;
 	if (stat == "health" || stat == "magicka" || stat == "fatigue")
 		return true;
-	for (const EffectFunc& f : kEffectFuncs)
-		if (op <= 2 && stat == f.name)
-			return true;
 	for (const char* a : kAttrFuncs)
 		if (stat == a)
 			return true;
 	for (const char* k : kSkillFuncs)
 		if (stat == k)
 			return true;
+	for (const char* e : kEffectFuncs)
+		if (stat == e)
+			return op != 3 && !(op == 0 && name.size() > 8 && name.compare(name.size() - 8, 8, "getratio") == 0);
 	return false;
 }

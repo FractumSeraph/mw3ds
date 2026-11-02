@@ -16,6 +16,9 @@
 extern const char* g_playerBlock;
 bool g_testDepth16 = false;
 float g_test3dSlider = -1.0f;
+bool g_testGpuModel = false;
+int g_testThrottleFps = 0;
+float g_testCpuScale = 0.0f;
 #include <malloc.h>
 #include "testdrive/testhelpers.hpp"
 
@@ -30,6 +33,24 @@ std::optional<bool> opsWorld(Session& s, const std::vector<std::string>& a)
 	{
 		float at[3] = { (float)atof(a[2].c_str()), (float)atof(a[3].c_str()), (float)atof(a[4].c_str()) };
 		s.testPlaceAt(a[1], at, atan2f(w.player.feet[0] - at[0], w.player.feet[1] - at[1]));
+		return true;
+	}
+	// SETPOS:<id>:x:y:z: that actor, in its own cell, stood exactly there, held at that height by whatever its feet are on,
+	// as a save puts it back (not set down on the floor under its middle, as PLACEAT and Position do): a spot only a fight
+	// or a fall leaves one in, on an edge
+	if (verb == "SETPOS" && a.size() >= 5)
+	{
+		int ri = findRef(s, a[1]);
+		if (ri < 0 || w.refs[ri].actor < 0 || !w.active(ri))
+			return fail(a[1] + " not loaded");
+		Ref& r = w.refs[ri];
+		for (int k = 0; k < 3; k++)
+			r.pos[k] = (float)atof(a[2 + k].c_str());
+		r.fitBox();
+		r.moved = true;
+		r.path.clear();
+		r.repathTimer = 0.0f;           // (its way from there planned at once, as after a load)
+		w.syncActor(ri);
 		return true;
 	}
 	// VFX:<static>:x:y:z: that spell visual played there on its own (side-by-side shots against OpenMW's world.vfx)
@@ -94,7 +115,9 @@ std::optional<bool> opsWorld(Session& s, const std::vector<std::string>& a)
 	}
 	if (verb == "WEREWOLF" && a.size() >= 2)
 	{
-		s.w.werewolf = atoi(a[1].c_str()) != 0;
+		// (the change BecomeWerewolf / UndoWerewolf make, unseen: the token's checks predate witnesses and a bounty)
+		s.w.setWerewolf(-1, atoi(a[1].c_str()) != 0);
+		s.w.werewolfJustChanged = false;
 		return true;
 	}
 	// KNOCKDOWN:<npc>: they lie knocked down for a long while (their pockets open to anyone)
@@ -264,6 +287,24 @@ std::optional<bool> opsWorld(Session& s, const std::vector<std::string>& a)
 		logf("test: 3d slider %.3f", g_test3dSlider);
 		return true;
 	}
+	// GPUMODEL:on|off[:<cpu scale>]: the PC build's GPU time for each frame priced from its draws and triangles
+	// (gpuModelMs), so the dynamic view closes in where the console's GPU would fall behind; off: 0, as the PC build has.
+	// The scale: how many times slower the console's CPU runs this build's frame work (EXPECT:cpuest, fpsest; 0 unknown)
+	if (verb == "GPUMODEL" && a.size() >= 2)
+	{
+		g_testGpuModel = a[1] == "on";
+		g_testCpuScale = a.size() >= 3 ? (float)atof(a[2].c_str()) : 0.0f;
+		logf("test: gpu model %s, cpu scale %.1f", g_testGpuModel ? "on" : "off", g_testCpuScale);
+		return true;
+	}
+	// THROTTLE:<fps>|0: each frame waits out the rest of 1/fps (the PC build runs as fast as it can: this is a console
+	// running that slow, for what changes with the frame rate)
+	if (verb == "THROTTLE" && a.size() >= 2)
+	{
+		g_testThrottleFps = atoi(a[1].c_str());
+		logf("test: frames throttled to %d fps", g_testThrottleFps);
+		return true;
+	}
 	// SAYLINE:<npc>[:novoice]: the NPC speaks a line, voiced (the first voice file in the data) or text only
 	if (verb == "SAYLINE" && a.size() >= 2)
 	{
@@ -273,9 +314,35 @@ std::optional<bool> opsWorld(Session& s, const std::vector<std::string>& a)
 		bool voiced = !(a.size() >= 3 && a[2] == "novoice");
 		if (voiced && w.game.voices.empty() && w.game.voiceFiles.empty())
 			return fail("no voice files in the data");
-		std::string line = !voiced ? "" : !w.game.voices.empty() ? *w.game.voices.begin() : w.game.voiceFiles.begin()->first;
+		// (the first by name, not by the set's order: that is the hash's, another line on the 32-bit memory build)
+		std::string line;
+		if (voiced && !w.game.voices.empty())
+			line = *std::min_element(w.game.voices.begin(), w.game.voices.end());
+		else if (voiced)
+			line = w.game.voiceFiles.begin()->first;
 		s.say(ri, line, voiced ? "A line spoken for the test." : "A line written for the test.");
 		logf("test: %s says a %s line", a[1].c_str(), voiced ? "voiced" : "text-only");
+		return true;
+	}
+	// LOOPSOUND:<object id>|last:<sound>: the object plays the sound in a loop (PlayLoopSound3D); `last` is the loaded
+	// reference stored last in the reference list, whose cell goes first when the list shrinks
+	if (verb == "LOOPSOUND" && a.size() >= 3)
+	{
+		int ri = -1;
+		if (a[1] == "last")
+		{
+			for (int i = (int)w.refs.size() - 1; i >= 0 && ri < 0; i--)
+				if (w.active(i) && w.refs[i].visible())
+					ri = i;
+		}
+		else
+			ri = s.testFindRef(a[1]);
+		if (ri < 0)
+			return fail("no " + a[1]);
+		if (!w.game.sounds.count(lower(a[2])))
+			return fail("no sound " + a[2]);
+		s.loopSound(ri, a[2], true);
+		logf("test: %s loops %s", w.refs[ri].idLower.c_str(), a[2].c_str());
 		return true;
 	}
 	if ((verb == "GAMMA" || verb == "AUTOGAMMA" || verb == "LUX" || verb == "CAMLUMA") && a.size() >= 2)
