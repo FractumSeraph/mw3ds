@@ -505,7 +505,9 @@ struct Updater
 		// data's server has it
 		if (r.dataNeeded > dataVersionOf(dataDir))
 		{
-			std::string url = dataIndexUrl(r.dataNeeded);
+			bool new3ds = false;
+			APT_CheckNew3DS(&new3ds);
+			std::string url = dataIndexUrl(r.dataNeeded, !new3ds);
 			logf("update: it needs data format %d: asking %s", r.dataNeeded, url.c_str());
 			fetch.start(url, false);
 			step = CHECK_DATA;

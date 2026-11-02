@@ -309,7 +309,7 @@ struct Downloader
 			fail("The network couldn't be started.");
 			return;
 		}
-		indexUrl = dataIndexUrl(kDataVersion);
+		indexUrl = dataIndexUrl(kDataVersion, !isNew3ds);
 		base = indexUrl.substr(0, indexUrl.rfind('/') + 1);
 		logf("data: asking %s", indexUrl.c_str());
 		fetch.req.sink = nullptr;
@@ -338,8 +338,8 @@ struct Downloader
 		if (!isNew3ds && idx.maxTex > kOld3dsMaxTex)
 		{
 			message = "The server's game data is made for a New 3DS (textures up to " + std::to_string(idx.maxTex)
-				+ " texels; an Old 3DS takes " + std::to_string(kOld3dsMaxTex) + "). Convert Morrowind for an Old 3DS "
-				"with the MW3DS Converter on a PC instead.";
+				+ " texels; an Old 3DS takes " + std::to_string(kOld3dsMaxTex) + "), and it has no Old 3DS set yet. "
+				"Convert Morrowind for an Old 3DS with the MW3DS Converter on a PC instead.";
 			step = BLOCKED;
 			return;
 		}
@@ -527,28 +527,37 @@ struct Downloader
 };
 }
 
-std::string dataIndexUrl(int format)
+std::string dataIndexUrl(int format, bool old3ds)
 {
-	// (data_url.txt's address for this format: its "data-v<n>" made this format's)
+	// Each console's set: data-v<format> (the New 3DS's), data-v<format>-o3ds (quarter-size textures). data_url.txt's
+	// address has its "data-v<n>[-o3ds]" made this format's and console's
+	std::string folder = "data-v" + std::to_string(format) + (old3ds ? "-o3ds" : "");
 	std::string url = firstLine(kUrlPath);
 	size_t at = url.find("data-v");
 	if (at == std::string::npos)
-		return url.empty() ? std::string(kBase) + "data-v" + std::to_string(format) + "/index.json" : url;
+		return url.empty() ? std::string(kBase) + folder + "/index.json" : url;
 	size_t end = at + 6;
 	while (end < url.size() && isdigit((unsigned char)url[end]))
 		end++;
-	return url.substr(0, at + 6) + std::to_string(format) + url.substr(end);
+	if (url.compare(end, 5, "-o3ds") == 0)
+		end += 5;
+	return url.substr(0, at) + folder + url.substr(end);
 }
 
-std::string dataDownloadNeed(const char* dataDir)
+std::string dataDownloadNeed(const char* dataDir, bool isNew3ds)
 {
 	struct stat st;
 	if (stat((std::string(dataDir) + "/game.json").c_str(), &st) != 0)
 		return "This console has no game data yet.";
+	bool sd = strncmp(dataDir, "romfs:", 6) != 0;
 	int have = dataVersionOf(dataDir);
-	if (strncmp(dataDir, "romfs:", 6) != 0 && have < kDataVersion)
+	if (sd && have < kDataVersion)
 		return "The game data on the SD card is format " + std::to_string(have) + ", older than this FractumMorrowind's ("
 			+ std::to_string(kDataVersion) + "): online, other players' things and people won't line up with yours.";
+	// (the New 3DS's set on an Old 3DS: its textures don't fit; the Old 3DS's set replaces it)
+	if (sd && !isNew3ds && dataMaxTex(dataDir) > kOld3dsMaxTex)
+		return "The game data on the SD card is the New 3DS's (textures up to " + std::to_string(dataMaxTex(dataDir))
+			+ " texels): this Old 3DS needs its own, with smaller textures.";
 	return "";
 }
 

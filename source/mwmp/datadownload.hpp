@@ -3,7 +3,7 @@
 // The game data's download (FractumSeraph/mw3ds). The program-only CIA (and a .3dsx) carries none of Morrowind; when
 // the console has no data of this program's format (no romfs:/data, no sdmc:/3ds/mw3ds/data, or older data there), a
 // screen at the start offers to fetch it from the server that hosts it (halomaps.fractumseraph.net, the seedbox):
-// <base>/data-v<format>/index.json (tools/release/make_datapacks.py) names packs of about 32 MB, each checked by its
+// <base>/data-v<format>[-o3ds]/index.json (each console its own; tools/release/make_datapacks.py) names packs of about 32 MB, each checked by its
 // SHA-256 and unpacked into sdmc:/3ds/mw3ds/data.part as it streams in. The packs done are noted there, so a download
 // cut off (no Wi-Fi, the console shut) carries on from the pack it was in. Once every pack is in, data.part becomes
 // sdmc:/3ds/mw3ds/data (older data there is replaced; saves are kept apart, in sdmc:/3ds/mw3ds/saves).
@@ -13,9 +13,11 @@
 #include <citro2d.h>
 #include <string>
 
-// What the console lacks: "" nothing (dataDir's data is this program's), else why the data must come down
-std::string dataDownloadNeed(const char* dataDir);
-// The index.json the console asks for data of this format
-std::string dataIndexUrl(int format);
+// What the console lacks: "" nothing (dataDir's data is this program's, made for this console), else why the data
+// must come down
+std::string dataDownloadNeed(const char* dataDir, bool isNew3ds);
+// The index.json the console asks for data of this format: data-v<format>/ for a New 3DS, data-v<format>-o3ds/ (the
+// Old 3DS's quarter-size textures) for an Old 3DS
+std::string dataIndexUrl(int format, bool old3ds);
 // The screen: true once the data is in sdmc:/3ds/mw3ds/data, false when the player quits
 bool dataDownloadScreen(C3D_RenderTarget* top, C3D_RenderTarget* bottom, const std::string& need, bool isNew3ds);

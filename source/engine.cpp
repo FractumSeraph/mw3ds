@@ -195,7 +195,7 @@ bool Engine::prepare()
 		dataVersionOf(dataDir), kDataVersion);
 	// No data of this program's format (the program-only CIA, a .3dsx): it comes down from the server that hosts it
 	// (mwmp/datadownload.hpp), or the player quits
-	std::string dataNeed = dataDownloadNeed(dataDir);
+	std::string dataNeed = dataDownloadNeed(dataDir, isNew3ds);
 	if (!dataNeed.empty())
 	{
 		if (!dataDownloadScreen(top, bottom, dataNeed, isNew3ds))

@@ -8,7 +8,9 @@
 // on data it can't read.
 //   0  before the stamp
 //   1  each reference's RefNum ("rn", the online mode's shared objects), the werewolf's first-person arms
-static const int kDataVersion = 1;
+//   2  upstream MW3DS's Bloodmoon and data changes (merged 2026-11-01: its converter's dialogue and script cards,
+//      texture padding, the werewolf's own model); the hosted New 3DS and Old 3DS sets (data-v2, data-v2-o3ds)
+static const int kDataVersion = 2;
 
 // The data folder's data_version.txt (0 when it has none)
 int dataVersionOf(const char* dataDir);
