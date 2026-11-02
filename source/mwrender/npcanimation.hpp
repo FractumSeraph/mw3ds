@@ -34,7 +34,9 @@ struct BodyAct
 // its torch and weapon stay. Its textures join the cell's list. False (the library kept) when a piece couldn't load
 struct ActorDef;
 struct LoadedCell;
-bool npcDress(World& w, LoadedCell& l, Actor& a, const ActorDef& d, const std::vector<std::string>& items);
+// weapon (online): the weapon the server's copy holds, drawn in place of the library's ("" none); null keeps the library's
+bool npcDress(World& w, LoadedCell& l, Actor& a, const ActorDef& d, const std::vector<std::string>& items,
+	const std::string* weapon = nullptr);
 
 // What a body looks like and wears: the player's (playerLook: World::stats and the equipped inventory) or another
 // player's in the online mode (mwmp/puppets.cpp, from their PlayerAppearance and PlayerEquipment)

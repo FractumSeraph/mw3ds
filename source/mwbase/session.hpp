@@ -518,6 +518,7 @@ struct Session : ScriptHost, WindowManagerState, MechanicsState, RenderState, So
 	void onlineApplyRecord();
 	std::string onlineActorCell(int ri);
 	bool onlinePuppet(int ri);        // online: one of the world's people the server simulates (drawn off its stream)
+	void actorMovedByScript(int ref, int cell, const float pos[3]) override;   // online: the server's copy moved too
 	void onlinePuppets(float now);
 	void onlineStory(float now);
 	bool onlineStoryEvent(const std::string& name, const struct LValue& body);

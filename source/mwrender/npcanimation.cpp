@@ -464,7 +464,8 @@ void PlayerBody::free(World& w)
 	ready = false;
 }
 
-bool npcDress(World& w, LoadedCell& l, Actor& a, const ActorDef& d, const std::vector<std::string>& items)
+bool npcDress(World& w, LoadedCell& l, Actor& a, const ActorDef& d, const std::vector<std::string>& items,
+	const std::string* weapon)
 {
 	const ThirdPersonDef& t = w.game.firstPerson.third;
 	std::string race = lower(d.race.str());
@@ -525,6 +526,17 @@ bool npcDress(World& w, LoadedCell& l, Actor& a, const ActorDef& d, const std::v
 					glow[s.first] = w.game.enchantGlow(id);
 				}
 		}
+	// Online, the weapon the server's copy holds (ActorEquip): its third-person piece in place of the library's
+	// ("" none); without one the library's stays
+	if (weapon && !weapon->empty())
+	{
+		auto fit = w.game.firstPerson.items.find(*weapon);
+		if (fit != w.game.firstPerson.items.end() && fit->second.slots.count(SLOT_WEAPON))
+		{
+			part[SLOT_WEAPON] = fit->second.slots.at(SLOT_WEAPON).first;
+			glow[SLOT_WEAPON] = w.game.enchantGlow(*weapon);
+		}
+	}
 	// The pieces, read for this actor alone (a skin re-posed on the CPU writes its own vertices)
 	const Skeleton& sk = actorSkeleton(l.actors, a.skeleton);
 	std::vector<ActorMesh> made;
@@ -556,6 +568,8 @@ bool npcDress(World& w, LoadedCell& l, Actor& a, const ActorDef& d, const std::v
 			copy.glow = glow[s];
 			if (s == SLOT_SHIELD)
 				copy.hand = 2;            // put away while both hands are busy or the torch is out
+			if (s == SLOT_WEAPON)
+				copy.flags |= 128;        // (the weapon's bit, as the library's weapon has it)
 			made.push_back(copy);
 		}
 		p->meshes.clear();                // (their buffers are the actor's now; the piece gives back its own textures)
@@ -570,10 +584,10 @@ bool npcDress(World& w, LoadedCell& l, Actor& a, const ActorDef& d, const std::v
 		}
 		return false;
 	}
-	// The library's torch and weapon stay; the rest goes
+	// The library's torch and weapon stay (its weapon not when the server named the one held); the rest goes
 	std::vector<ActorMesh> keep;
 	for (auto& m : a.meshes)
-		if (m.hand == 1 || (m.flags & 128))
+		if (m.hand == 1 || ((m.flags & 128) && !weapon))
 			keep.push_back(m);
 		else
 		{
@@ -620,17 +634,21 @@ void Session::updateDress(float dt)
 				a.wornNetDone = r.wornNetHash;
 				const auto& shown = w.game.firstPerson.third.items;
 				std::vector<std::string> on, lib;
+				std::string held;            // (the weapon in their hand there: drawn instead of the library's)
 				for (auto& id : r.wornNet)
 					if (shown.count(id))
 						on.push_back(id);
+					else if (const Object* o = w.game.object(id))
+						if (o->recType == REC_WEAP && o->subtype < WEAP_ARROW && held.empty())
+							held = id;
 				for (auto& k : d.worn)
 					if (shown.count(k.str()))
 						lib.push_back(k.str());
 				std::sort(on.begin(), on.end());
 				std::sort(lib.begin(), lib.end());
-				if (on == lib && !a.dressed)
+				if (on == lib && !a.dressed && held == d.weapon.str())
 					continue;
-				if (!npcDress(w, *l, a, d, on))
+				if (!npcDress(w, *l, a, d, on, &held))
 					logf("npcdress: %s kept as it was (a piece wouldn't load)", d.id.c_str());
 				continue;
 			}

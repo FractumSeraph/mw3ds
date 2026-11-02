@@ -39,6 +39,7 @@ struct ScriptHost
 	virtual void playObjectGroup(int ref, const std::string& group, bool loop) {}   // PlayGroup on an object, not an actor
 	virtual void knockDownActor(int ref) = 0;            // ModCurrentFatigue to 0 or less
 	virtual void teleportPlayer(int cell, const float pos[3], float yaw) = 0;   // PositionCell on the player
+	virtual void actorMovedByScript(int ref, int cell, const float pos[3]) {}  // PositionCell / Position on anyone else, before the move (online: the server's people)
 	virtual void hurtPlayer(float health) = 0;           // HurtStandingActor
 	virtual void sheathe() = 0;                          // PayFine: the weapon is put away
 	virtual void goToJail() = 0;                         // GotoJail

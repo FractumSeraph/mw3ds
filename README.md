@@ -9,38 +9,48 @@ your browser on a PC, on the same server, with the same players.
 | --- | --- |
 | [morrowind.fractumseraph.net](https://morrowind.fractumseraph.net) | `fractumseraph.net` |
 
-**Getting started (New 3DS / New 2DS XL):**
+**Getting started (any 3DS or 2DS):**
 
-1. Install `FractumMorrowind.cia` from the [releases](https://github.com/FractumSeraph/mw3ds/releases) with FBI (or
-   another CIA installer) and start it from the HOME menu.
-2. At its first start, with Wi-Fi on, it downloads the game data: Morrowind, Tribunal and Bloodmoon, about 1.4 GB. Keep
-   the console open and charging. A download that gets cut off carries on where it stopped.
+1. Install `FractumMorrowind.cia` from the [releases](https://github.com/FractumSeraph/mw3ds/releases) with FBI and start
+   it from the HOME menu. In FBI, **Remote Install > Scan QR Code** with this code installs the latest release:
 
-   **Faster, with an SD card reader:** download
-   [FractumMorrowind-data-v1.zip](https://halomaps.fractumseraph.net/mw3ds/FractumMorrowind-data-v1.zip) on a PC and
-   unzip it to the root of the 3DS's SD card (it holds `3ds/mw3ds/data`). The game finds the data there and skips the
-   download. (Morrowind's own game files can't be used as they are: the 3DS needs them converted. To convert your own
-   install instead, see [the converter](#mw3ds-the-engine) below; the CIA it makes carries its data.)
-3. To play online, make an account at [morrowind.fractumseraph.net](https://morrowind.fractumseraph.net) with the
-   invite code `fractumseraph.net`, then press **Online** on the 3DS's title screen and sign in with that account. Play
-   offline whenever you have no Wi-Fi: your offline saves are kept apart from the online world.
+   <img src="docs/img/fractummorrowind-cia-qr.png" alt="QR code for FractumMorrowind.cia" width="160">
+2. At its first start, with Wi-Fi on, it downloads the game data: Morrowind, Tribunal and Bloodmoon, made for your
+   console (about NEW3DS_SIZE on a New 3DS, OLD3DS_SIZE on an Old 3DS, with smaller textures). Keep the console open
+   and charging. A download that gets cut off carries on where it stopped.
+
+   **Faster, with an SD card reader:** download your console's zip on a PC and unzip it to the root of the 3DS's SD card
+   (it holds `3ds/mw3ds/data`). The game finds the data there and skips the download.
+
+   | Console | Data | Checksum |
+   | --- | --- | --- |
+   | New 3DS, New 2DS XL | [FractumMorrowind-data-v2.zip](https://halomaps.fractumseraph.net/mw3ds/FractumMorrowind-data-v2.zip) | [SHA-256](https://halomaps.fractumseraph.net/mw3ds/FractumMorrowind-data-v2.zip.sha256) |
+   | Old 3DS, 2DS | [FractumMorrowind-data-v2-o3ds.zip](https://halomaps.fractumseraph.net/mw3ds/FractumMorrowind-data-v2-o3ds.zip) | [SHA-256](https://halomaps.fractumseraph.net/mw3ds/FractumMorrowind-data-v2-o3ds.zip.sha256) |
+
+   (Morrowind's own game files can't be used as they are: the 3DS needs them converted. To convert your own install
+   instead, see [the converter](#mw3ds-the-engine) below; the CIA it makes carries its data.)
+3. To play online, press **Online** on the title screen, then **New account**: pick an account name and a password
+   (12 or more characters); the invite code `fractumseraph.net` is filled in. The same account signs in at
+   [morrowind.fractumseraph.net](https://morrowind.fractumseraph.net) in a browser. Play offline whenever you have no
+   Wi-Fi: your offline saves are kept apart from the online world.
 
 FractumMorrowind is FractumSeraph's fork of [MW3DS](https://github.com/3ds-conspiracy/mw3ds), and it installs beside
-MW3DS rather than over it. It adds four things to MW3DS, described in [docs/ONLINE.md](docs/ONLINE.md):
+MW3DS rather than over it. It plays Morrowind with Tribunal and Bloodmoon, as MW3DS does, and adds, as described in
+[docs/ONLINE.md](docs/ONLINE.md):
 - **Online play:** the title's **Online** button signs in to an [openmw-web](https://github.com/FractumSeraph/openmw-web)
-  multiplayer server (morrowind.fractumseraph.net by default), to play beside people in the browser. You see each
-  other move, dress and chat, and can join friends' worlds; the server's world is shared too: its people and
-  creatures, fights, what is taken, opened and unlocked, chests, quests and the time of day.
-- **Bloodmoon:** `python tools/build/build_cia.py --bloodmoon` converts Morrowind, Tribunal and Bloodmoon, and the
-  engine runs Bloodmoon's script functions, the werewolf's stats included.
+  multiplayer server (morrowind.fractumseraph.net by default), to play beside people in the browser, and makes new
+  accounts there. You see each other move, dress and chat, and can join friends' worlds; the server's world is shared
+  too: its people (dressed and armed as the server has them) and creatures, fights, what is taken, opened and
+  unlocked, chests, quests and the time of day.
 - **Downloads its game data:** the CIA carries nothing of Morrowind's. At its first start it downloads the converted
-  data from halomaps.fractumseraph.net, checked pack by pack, unless the SD card already has it. See [The game data download](docs/ONLINE.md#the-game-data-download).
+  data for its console (New 3DS or Old 3DS) from halomaps.fractumseraph.net, checked pack by pack, unless the SD card
+  already has it. See [The game data download](docs/ONLINE.md#the-game-data-download).
 - **Updates itself:** at the title screen, with Wi-Fi on, it asks GitHub for the latest release and offers it
-  (**Update** beside **Online**). Only the program downloads, checked by SHA-256; your saves and game data stay. See
-  [Updating](docs/ONLINE.md#updating).
+  (**Update** beside **Online**). Only the program downloads, checked by SHA-256; your saves stay, and new game data
+  downloads when a release needs it. See [Updating](docs/ONLINE.md#updating).
 
-The rest of this page is MW3DS's own: the engine, the converter (to make a CIA from your own Morrowind install, which an
-Old 3DS needs), building and testing.
+The rest of this page is MW3DS's own: the engine, the converter (to make a CIA from your own Morrowind install, with its
+data inside), building and testing.
 
 Everything also builds without MSYS2 in a Linux image: `sh tools/build/docker/run.sh python3 tools/build/make.py`.
 

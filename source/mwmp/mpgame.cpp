@@ -3496,6 +3496,43 @@ std::string Session::onlineActorCell(int ri)
 	return c < (int)og->cellKeys.size() ? og->cellKeys[c] : cellKeyAt(w, c);
 }
 
+// A script moved one of the server's people (PositionCell / Position): our copy goes there at once, and the cell's
+// holder is asked to move the real one (PROTOCOL.md's position claim: at most 5 a minute; without a holder our move
+// stands)
+void Session::actorMovedByScript(int ref, int cell, const float pos[3])
+{
+	if (!onlinePuppet(ref))
+		return;
+	const Ref& r = w.refs[ref];
+	if (r.rnFile < 0 || r.rnFile >= (int)og->contentFiles.size() || og->contentFiles[r.rnFile] < 0)
+		return;                           // (one the server's world spawned: it moves them itself)
+	static std::vector<float> sent;
+	float now = w.time;
+	sent.erase(std::remove_if(sent.begin(), sent.end(), [&](float t) { return now - t > 60.0f || t > now; }), sent.end());
+	if (sent.size() >= 5)
+	{
+		logf("online: %s moved by a script here only (5 a minute asked already)", r.id.c_str());
+		return;
+	}
+	sent.push_back(now);
+	Online& on = *g_online;
+	std::string cellKey = onlineActorCell(ref);
+	LValue b = LValue::newTable();
+	b.set("cellKey", cellKey);
+	auto ep = on.epochOf.find(cellKey);
+	b.set("epoch", (double)(ep != on.epochOf.end() ? ep->second : 0));
+	b.set("ref", LValue::refNum(r.rnIndex, og->contentFiles[r.rnFile]));
+	LValue p = LValue::newTable();
+	if (cell >= 0 && cell < (int)w.cells.size() && w.cells[cell].interior)
+		p.set("cell", w.cells[cell].name.str());
+	p.set("x", (double)pos[0]);
+	p.set("y", (double)pos[1]);
+	p.set("z", (double)pos[2]);
+	b.set("position", p);
+	on.sendEvent("ActorAI", b);
+	logf("online: %s moved by a script: the server's copy asked to follow", r.id.c_str());
+}
+
 bool Session::onlinePuppet(int ri)
 {
 	if (!g_online || !og || g_online->phase != Online::IN_WORLD || ri < 0 || ri >= (int)w.refs.size())

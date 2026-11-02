@@ -1,49 +1,35 @@
-# Online play and Bloodmoon (FractumSeraph/mw3ds)
+# Online play (FractumSeraph/mw3ds, FractumMorrowind)
 
-This fork of [MW3DS](https://github.com/3ds-conspiracy/mw3ds) adds these (and updates itself, and can download its
-game data: see [Updating](#updating) and [The game data download](#the-game-data-download)):
-
-- **Bloodmoon.** The converter takes the add-on and the engine runs the script functions its quests need.
-- **An online mode.** The 3DS plays as a player on an [openmw-web](https://github.com/FractumSeraph/openmw-web)
-  multiplayer server, beside people playing in the browser.
+This fork of [MW3DS](https://github.com/3ds-conspiracy/mw3ds) adds an online mode: the 3DS plays as a player on an
+[openmw-web](https://github.com/FractumSeraph/openmw-web) multiplayer server, beside people playing in the browser. It
+also updates itself and downloads its game data: see [Updating](#updating) and
+[The game data download](#the-game-data-download).
 
 ## Bloodmoon
 
-Convert with Tribunal and Bloodmoon, in the Game of the Year load order openmw-web servers use:
+Bloodmoon is MW3DS's own now ([spec/bloodmoon.md](../spec/bloodmoon.md); the fork's earlier version gave way to it in
+the merge of 2026-11-01). openmw-web servers play the Game of the Year load order, so convert with both add-ons:
 
 ```sh
-python tools/build/build_cia.py --bloodmoon
+python tools/build/build_cia.py --tribunal --bloodmoon
 ```
 
-That writes the data to `out/data-bloodmoon` and the CIA to `build/mw3ds-bloodmoon.cia`. `--bloodmoon` implies
-`--tribunal`. The converter's own option is `tools/convert/level.py --bloodmoon` (or `MW3DS_BLOODMOON=1`).
-
-What the engine runs for Bloodmoon (`source/mwmechanics/werewolf.cpp` and the script extensions):
-
-| Script functions | What they do |
-|---|---|
-| BecomeWerewolf, UndoWerewolf, IsWerewolf | The player changes form. The beast's attributes and skills come from the `fWerewolf*` settings and its health from `fWereWolfHealth`. The werewolf robe goes on and the rest comes off. Inventory, magic and casting are refused. Witnesses make the player a known werewolf, and add a bounty when they report it. |
-| GetWerewolfKills, SetWerewolfAcrobatics | Kills in the beast's form; its Acrobatics once Bloodmoon grants it |
-| Get / Set / Mod + 24 magic effects | ModResistFire, ModResistParalysis and the rest: a lasting modifier under the effect, saved |
-| GetPCInJail, GetPCTraveling | True just after jail or a guide's travel |
-| GetWeaponType | The weapon in hand's type, -1 none, -2 a lockpick, -3 a probe |
-| GetScale, SetScale, ModScale | An actor drawn at the new size (0.5 to 2) |
-| TurnMoonRed, TurnMoonWhite | Secunda in Morrowind.ini's `[Moons] Script Color` |
-
-The werewolf is drawn as Bloodmoon draws its werewolf NPCs: the beast-legged skeleton under the werewolf robe, with
-the werewolf head and hair. That covers the player in third person and other online players who are werewolves.
-In first person the werewolf has its own arms and claws (`wolf/skin.1st.nif`, with its hand-to-hand animations), on
-its own skeleton: the converter writes it as the second first-person skeleton when the data has Bloodmoon.
+That writes the data to `out/data-tribunal-bloodmoon` (`--old3ds` too: `out/o3ds-tribunal-bloodmoon`). Another
+online player in the werewolf's form is drawn with the werewolf's own model, as the player is.
 
 ## The online mode
 
 ### Playing
 
-1. Make an account on the server's website (for FractumSeraph's server, morrowind.fractumseraph.net). The 3DS signs
-   in with the account's name and password, so the account needs a password.
-2. On the title screen, tap **Online** (or press Y).
-3. Check the server address. `https://morrowind.fractumseraph.net` is the default. Enter the account name and sign in.
+1. On the title screen, tap **Online** (or press Y).
+2. Check the server address. `https://morrowind.fractumseraph.net` is the default. Enter the account name and sign in.
    The password is asked each time and is never written to the SD card.
+
+   No account yet? **New account** (or Y) makes one there: an account name, the server's invite code (filled in for
+   morrowind.fractumseraph.net: `fractumseraph.net`) and a password of 12 or more characters, asked twice. It is
+   openmw-web's password sign-up (`POST /auth/password/register`), which the server's owner turns on
+   (`[login].allowPasswordSignup`, with registration open); without it the 3DS says so, and the account is made on
+   the server's website instead. The same account signs in there.
 4. If the server asks, choose a username (and give an email).
 5. Choose a character, or **New** to make one. A new one goes through Morrowind's own character creation. A
    returning one is loaded as the server keeps it: looks, stats, pack, equipment, spells, quests, topics, factions,
@@ -96,9 +82,10 @@ needs put back (QuestSpawn), an attack it refused (CombatRefused, said on screen
 (CellSnapshotReplace). The HOME menu tells the server the game is paused (ClientVisibility), so it holds our frames
 rather than dropping a link that went quiet.
 
-When the server's copy of one of its people changes clothes or armor (ActorEquip), the 3DS dresses them in it from the
-third-person pieces (as a stripped corpse is). The 3DS's own limits: their weapon and torch stay the ones the converter
-gave them; a script moving one of the server's people with PositionCell moves our copy only.
+When the server's copy of one of its people changes clothes, armor or weapon (ActorEquip), the 3DS dresses and arms
+them in it from the third-person pieces (as a stripped corpse is dressed); their torch stays the converter's. A script
+here moving one of the server's people (PositionCell, Position) moves our copy at once and asks the cell's holder to
+move theirs (the position claim, at most 5 a minute).
 
 Each player sees the others walk and run where they are, dressed as they are.
 
@@ -161,32 +148,39 @@ program needs.
 ### The game data download
 
 The program-only CIA and the .3dsx carry nothing of Morrowind's. When the console has no data of the program's format
-(no data in the CIA, none in `sdmc:/3ds/mw3ds/data`, or older data there), a screen at the start offers to download it
-(`source/mwmp/datadownload.cpp`) from `https://halomaps.fractumseraph.net/mw3ds/data-v<format>/index.json`, on the
-seedbox that hosts the Halo maps (GitHub's space stays free of it). It shows the size and the SD card's free space; **Download** fetches packs of about
-32 MB, each checked against its SHA-256 in `index.json` and unpacked into `sdmc:/3ds/mw3ds/data.part` as it streams in.
-The packs done are noted there, so a download cut off (Wi-Fi lost, the console shut, **Stop**) carries on from the pack
-it was in. With every pack in, `data.part` becomes `sdmc:/3ds/mw3ds/data` (older data there is replaced; saves are in
-`sdmc:/3ds/mw3ds/saves`). Without Wi-Fi the screen says so; with older data on the card, **Not now** plays on with it.
-Over a 3DS's Wi-Fi the whole island takes some time (the emulator managed about 0.5 MB/s): keep the console open and
-charging.
+for its console (no data in the CIA, none in `sdmc:/3ds/mw3ds/data`, older data there, or on an Old 3DS the New 3DS's
+data), a screen at the start offers to download it (`source/mwmp/datadownload.cpp`) from the seedbox that hosts the
+Halo maps (GitHub's space stays free of it): `https://halomaps.fractumseraph.net/mw3ds/data-v<format>/index.json` on a
+New 3DS, `data-v<format>-o3ds/` on an Old 3DS (its textures quarter-size, up to 128 texels). It shows the size and the
+SD card's free space; **Download** fetches packs of about 32 MB, each checked against its SHA-256 in `index.json` and
+unpacked into `sdmc:/3ds/mw3ds/data.part` as it streams in. The packs done are noted there, so a download cut off
+(Wi-Fi lost, the console shut, **Stop**) carries on from the pack it was in. With every pack in, `data.part` becomes
+`sdmc:/3ds/mw3ds/data` (older data there is replaced; saves are in `sdmc:/3ds/mw3ds/saves`). Without Wi-Fi the screen
+says so; with older data on the card, **Not now** plays on with it. Over a 3DS's Wi-Fi the whole island takes some time
+(the emulator managed about 0.5 MB/s): keep the console open and charging.
 
-**From a PC instead:** the same data is on the seedbox as one zip,
-`https://halomaps.fractumseraph.net/mw3ds/FractumMorrowind-data-v1.zip` (1.4 GB, stored, holding `3ds/mw3ds/data`).
-Unzipped to the SD card's root with a card reader, it is found at the start (`data_version.txt` says its format) and
-nothing downloads. A new data format gets its own zip (`-data-v2`).
+**From a PC instead:** each set is on the seedbox as one zip too, `FractumMorrowind-data-v<format>.zip` (New 3DS) and
+`FractumMorrowind-data-v<format>-o3ds.zip` (Old 3DS) in `https://halomaps.fractumseraph.net/mw3ds/`, each with its
+`.sha256` beside it. Stored, holding `3ds/mw3ds/data`: unzipped to the SD card's root with a card reader, it is found at
+the start (`data_version.txt` says its format) and nothing downloads. Format 1's (`data-v1`, its zip) stays for
+consoles still on a program of that format.
 
-The hosted data is the New 3DS's (textures up to 256 texels); an Old 3DS is told to convert its own on a PC.
-`sdmc:/3ds/mw3ds/data_url.txt` points the screen at another `index.json` (a test server's); `data_answer.txt` ("yes"
-or "no") answers it for a scripted run.
+`sdmc:/3ds/mw3ds/data_url.txt` points the screen at another `index.json` (a test server's; its `data-v<n>[-o3ds]` is
+made this program's format and console's); `data_answer.txt` ("yes" or "no") answers it for a scripted run.
 
-*Hosting it:* `python tools/release/make_datapacks.py out/data-bloodmoon build/datapacks/data-v1` writes `index.json`
-and the packs (`NNN-<sha256>.mwp`; the pack format is in the script). Copy the folder to the server so that
-`/mw3ds/data-v1/index.json` is served beside them (on the seedbox: `~/www/halomaps.fractumseraph.net/public_html/mw3ds/`,
-the packs first and `index.json` last, so no console sees an index whose packs aren't there yet): the packs may be cached for good (their names change with their
-content), `index.json` never. A new data format is a new folder (`data-v2`), so consoles on the older program keep
-theirs. For the zip, put the data folder under `3ds/mw3ds/data` in a zip without compression (the files are already
-compressed).
+*Hosting it:* convert both sets (`build_cia.py --tribunal --bloodmoon --mods`, then with `--old3ds` too), then
+
+```sh
+python tools/release/make_datapacks.py out/data-tribunal-bloodmoon build/datapacks/data-v2 --zip build/datapacks/FractumMorrowind-data-v2.zip
+python tools/release/make_datapacks.py out/o3ds-tribunal-bloodmoon build/datapacks/data-v2-o3ds --zip build/datapacks/FractumMorrowind-data-v2-o3ds.zip
+```
+
+write each set's `index.json` and packs (`NNN-<sha256>.mwp`; the pack format is in the script) and its zip. Copy each
+folder to the server so that `/mw3ds/data-v2/index.json` is served beside its packs (on the seedbox:
+`~/www/halomaps.fractumseraph.net/public_html/mw3ds/`, the packs first and `index.json` last, so no console sees an index
+whose packs aren't there yet), and the zips with their `.sha256` in `/mw3ds/`. The packs may be cached for good (their
+names change with their content), `index.json` never. A new data format is a new folder, so consoles on the older
+program keep theirs.
 
 ### Building
 
@@ -197,16 +191,13 @@ sh tools/build/docker/run.sh python3 tools/build/make.py
 ```
 
 ```sh
-sh tools/build/docker/run.sh python3 tools/convert/level.py --tribunal --bloodmoon --world
+sh tools/build/docker/run.sh python3 tools/build/build_cia.py --tribunal --bloodmoon --mods
 ```
 
-```sh
-sh tools/build/docker/run.sh python3 tools/build/build_cia.py --bloodmoon --skip-convert
-```
-
-The first builds `mw3ds.3dsx`. The second converts the data. The third packs both into `build/mw3ds-bloodmoon.cia`
-(the image has makerom, built from Project_CTR's tagged source). Set `MW3DS_MORROWIND_DIR` in `.env`, and
-`MW3DS_DOCKER_FLAGS="-e MW3DS_OUT=out/data-bloodmoon"` to choose where the data goes.
+The first builds `mw3ds.3dsx`. The second converts the data with both add-ons and the optimization mods (about 80
+minutes the first time; `--old3ds` for the Old 3DS's set) and packs it with the program into
+`build/mw3ds-tribunal-bloodmoon.cia` (the image has makerom, built from Project_CTR's tagged source; `--skip-convert`
+packs data already converted). Set `MW3DS_MORROWIND_DIR` in `.env`.
 
 ### Testing
 
@@ -224,6 +215,7 @@ gateway runs those worlds with `--server-entry dist/testhost.mjs`.
 - `say`: a line said once in the world.
 - `join`: a friend's username, whose request is accepted and whose world is joined.
 - `probe`: a public address fetched first, to check the console's TLS without signing in anywhere.
+- `invite`: the account is made first (New account's sign-up) with this invite code; a gateway's address only.
 
 A server with no sim peer runs every cell's people on the clients. To try the world's stream without one, the local
 test server's `mp-simpeer.ts` (in FractumSeraph's test copy of the server) logs in as the peer with the server's

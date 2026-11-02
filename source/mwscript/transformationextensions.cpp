@@ -234,6 +234,7 @@ std::optional<float> transformationExtensions(Ctx& c, const Node& n, World& w, b
 			// set down on the floor there (OpenMW adjustPosition)
 			if (r->actor >= 0 && w.cells[cell].live)
 				w.snapToFloor(pos);
+			c.host.actorMovedByScript(ref, cell, pos);
 			w.relocate(ref, cell, pos, yaw);
 		}
 		return 0.0f;
