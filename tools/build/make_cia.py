@@ -39,7 +39,9 @@ DEFS = {
 }
 
 
-BANNER = ROOT / "tools" / "build" / "banner.bnr"         # the 3D model (make_art.py) and its own tune
+# FractumMorrowind's flat banner (tools/build/art/fractum: the ring and moon, the name); upstream MW3DS's 3D one is
+# tools/build/banner.bnr (make_art.py)
+BANNER = ROOT / "tools" / "build" / "art" / "fractum" / "banner.bnr"
 BANNER_WAV = ROOT / "tools" / "build" / "banner.wav"
 TUNE = "Music/Special/morrowind title.mp3"                 # under Data Files
 TUNE_RATE, TUNE_SECS, TUNE_FADE = 32000, 2.9, 0.6
