@@ -604,7 +604,11 @@ bool npcDress(World& w, LoadedCell& l, Actor& a, const ActorDef& d, const std::v
 	a.deformed = false;
 	a.skinSerial = ~0u;
 	a.dressed = true;
-	logf("npcdress: %s dressed again, %d items on, %d meshes", d.id.c_str(), (int)items.size(), (int)a.meshes.size());
+	int held = 0;
+	for (auto& m : a.meshes)
+		held += (m.flags & 128) ? 1 : 0;
+	logf("npcdress: %s dressed again, %d items on, %d meshes (%d of the weapon%s%s)", d.id.c_str(), (int)items.size(),
+		(int)a.meshes.size(), held, weapon && !weapon->empty() ? ": " : "", weapon ? weapon->c_str() : "");
 	return true;
 }
 

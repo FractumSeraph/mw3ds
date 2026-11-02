@@ -132,7 +132,9 @@ def write_zip(files, path):
     with open(path, "rb") as f:
         for block in iter(lambda: f.read(1 << 20), b""):
             h.update(block)
-    path.with_name(path.name + ".sha256").write_text(f"{h.hexdigest()}  {path.name}\n", encoding="utf-8")
+    # (newline "\n" on Windows too: sha256sum -c reads a \r as part of the file name)
+    path.with_name(path.name + ".sha256").write_text(f"{h.hexdigest()}  {path.name}\n", encoding="utf-8",
+                                                     newline="\n")
     print(f"{path}: {path.stat().st_size / 1048576:.1f} MB, sha256 {h.hexdigest()}")
 
 
