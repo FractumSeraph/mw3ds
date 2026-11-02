@@ -2,10 +2,14 @@
 these at its first start (source/mwmp/datadownload.cpp), so the CIA a player is given can be the small one.
     python tools/release/make_datapacks.py out/data-bloodmoon build/datapacks/data-v1
     python tools/release/make_datapacks.py <data> <out> --pack-mb 32 --name "Morrowind, Tribunal and Bloodmoon"
+    python tools/release/make_datapacks.py <data> <out> --zip build/datapacks/FractumMorrowind-data-v2.zip
 
 Hosted on a web server, for example https://halomaps.fractumseraph.net/mw3ds/data-v1/ (the 3DS asks for
 data-v<its data format>/index.json there; sdmc:/3ds/mw3ds/data_url.txt points it elsewhere). The data is Morrowind's,
 converted: host it only where you may.
+
+--zip also writes the same data as one zip for the SD card (stored, the files under 3ds/mw3ds/data/: unzipped to the
+card's root, the game finds it and downloads nothing) and its <zip>.sha256 (sha256sum's format).
 
 The folder it writes:
     index.json              {"format": 1, "data": <data_version.txt>, "maxTex": <game.json's>, "name", "bytes" (the
@@ -19,6 +23,7 @@ same way twice. Earlier packs' names stay when a later file changes size, unless
 """
 import argparse
 import hashlib
+import zipfile
 import json
 import os
 import struct
@@ -49,6 +54,7 @@ def main():
     ap.add_argument("out", type=Path, help="the folder to write (emptied of old packs first)")
     ap.add_argument("--pack-mb", type=int, default=32)
     ap.add_argument("--name", default="Morrowind, Tribunal and Bloodmoon")
+    ap.add_argument("--zip", type=Path, help="also the SD card's zip of the data (and <zip>.sha256)")
     a = ap.parse_args()
     data = a.data.resolve()
     if not (data / "game.json").is_file():
@@ -107,6 +113,27 @@ def main():
     (a.out / "index.json").write_text(json.dumps(index, indent=1) + "\n", encoding="utf-8")
     print(f"{a.out / 'index.json'}: data format {version}, {len(files)} files, {total / 1048576:.1f} MB "
           f"in {len(packs)} packs")
+    if a.zip:
+        write_zip(files, a.zip)
+
+
+def write_zip(files, path):
+    """The data as one zip for the SD card: stored (the files are compressed already), each under 3ds/mw3ds/data/,
+    the same date on every entry so the same data zips the same way; then path.sha256."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".part")
+    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_STORED, allowZip64=True) as z:
+        for rel, p in files:
+            info = zipfile.ZipInfo("3ds/mw3ds/data/" + rel, (2026, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_STORED
+            z.writestr(info, p.read_bytes())
+    os.replace(tmp, path)
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    path.with_name(path.name + ".sha256").write_text(f"{h.hexdigest()}  {path.name}\n", encoding="utf-8")
+    print(f"{path}: {path.stat().st_size / 1048576:.1f} MB, sha256 {h.hexdigest()}")
 
 
 if __name__ == "__main__":

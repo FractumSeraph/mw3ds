@@ -122,12 +122,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           notes="Unzip MW3DS-Converter, run MW3DS Converter.exe and pick your own Morrowind install: it makes the CIA. Nothing from Morrowind is in this download."
+          echo "$notes" > build/release-notes.md
           title="$TAG"
           case "$TAG" in mp-*)
+            # (the fork's: how to install FractumMorrowind, its QR code, the data and the server)
             title="FractumMorrowind ${TAG#mp-}"
-            notes="New 3DS: install FractumMorrowind.cia (FBI, or Universal-Updater). At its first start it downloads Morrowind, Tribunal and Bloodmoon (1.35 GB) over Wi-Fi from halomaps.fractumseraph.net; a download cut off carries on where it stopped. Later versions update themselves. Online play: docs/ONLINE.md. MW3DS-Converter makes a CIA from your own Morrowind install instead (the Old 3DS needs that).";;
+            cp .github/release-notes-fractum.md build/release-notes.md;;
           esac
-          gh release view "$TAG" > /dev/null 2>&1 || gh release create "$TAG" --draft --title "$title" --notes "$notes"
+          gh release view "$TAG" > /dev/null 2>&1 || gh release create "$TAG" --draft --title "$title" --notes-file build/release-notes.md
           gh release upload "$TAG" --clobber build/release/MW3DS-Converter-*.zip "engine/mw3ds-${TAG}-debug.elf" \
             build/FractumMorrowind.cia build/FractumMorrowind.3dsx build/update.json
 
