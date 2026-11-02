@@ -5,6 +5,7 @@
 #include <3ds.h>
 #include <citro2d.h>
 #include <cctype>
+#include <cerrno>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -469,6 +470,7 @@ struct Downloader
 		}
 		if (rename(kSdDataPart, kSdData) != 0)
 		{
+			logf("data: %s won't move to %s: %s", kSdDataPart, kSdData, strerror(errno));
 			rename(kSdDataOld, kSdData);
 			fail("Couldn't put the game data in place.");
 			return;

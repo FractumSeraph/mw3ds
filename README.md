@@ -16,7 +16,7 @@ your browser on a PC, on the same server, with the same players.
 
    <img src="docs/img/fractummorrowind-cia-qr.png" alt="QR code for FractumMorrowind.cia" width="160">
 2. At its first start, with Wi-Fi on, it downloads the game data: Morrowind, Tribunal and Bloodmoon, made for your
-   console (about NEW3DS_SIZE on a New 3DS, OLD3DS_SIZE on an Old 3DS, with smaller textures). Keep the console open
+   console (about 1.4 GB on a New 3DS, 1.3 GB on an Old 3DS, with smaller textures). Keep the console open
    and charging. A download that gets cut off carries on where it stopped.
 
    **Faster, with an SD card reader:** download your console's zip on a PC and unzip it to the root of the 3DS's SD card
