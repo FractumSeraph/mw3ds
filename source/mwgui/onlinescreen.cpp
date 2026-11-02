@@ -82,6 +82,14 @@ std::string onlineTitleScreen(C3D_RenderTarget* top, C3D_RenderTarget* bottom, c
 	on.config.load();
 	readContent(dataDir);
 	std::string username, email;
+	// New account (openmw-web's password sign-up): the screen's own page, with the invite code the server asks of new
+	// players (morrowind.fractumseraph.net's is public: its page and the fork's README give it)
+	bool creating = false;
+	std::string invite;
+	auto defaultInvite = [](const std::string& server) {
+		return server.find("morrowind.fractumseraph.net") != std::string::npos ? std::string("fractumseraph.net")
+			: std::string();
+	};
 	UiList list;
 	bool wasTouching = false, dragged = false;
 	int lastX = 0, lastY = 0, pressX = 0, pressY = 0;
@@ -155,6 +163,55 @@ std::string onlineTitleScreen(C3D_RenderTarget* top, C3D_RenderTarget* bottom, c
 		switch (on.phase)
 		{
 		case Online::IDLE: case Online::FAILED:
+		if (creating)
+		{
+			uiText(6, 2, 0.55f, col::header, "New account");
+			uiText(8, 26, 0.42f, col::textDim, "Server");
+			if (uiButton(8, 40, 304, 26, on.config.server))
+			{
+				std::string s = on.config.server;
+				if (askText("Server, e.g. https://morrowind.fractumseraph.net", s, false, 200))
+				{
+					on.config.server = s;
+					on.config.save();
+					invite = defaultInvite(s);
+				}
+			}
+			uiText(8, 72, 0.42f, col::textDim, "Account name (your sign-in name)");
+			if (uiButton(8, 86, 304, 26, on.config.account.empty() ? "(tap to enter)" : on.config.account))
+			{
+				std::string a = on.config.account;
+				if (askText("Account name", a, false, 32))
+					on.config.account = a;
+			}
+			uiText(8, 118, 0.42f, col::textDim, "Invite code (the server's, for new players)");
+			if (uiButton(8, 132, 304, 26, invite.empty() ? "(tap to enter)" : invite))
+				askText("Invite code", invite, false, 128);
+			uiText(8, 164, 0.38f, col::textDim, "The password (12 or more characters) is asked next, twice.");
+			uiText(8, 178, 0.38f, col::textDim, "The same account signs in on the server's website.");
+			if (uiButton(4, 208, 154, 28, "Back") || (down & KEY_B))
+				creating = false;
+			bool can = !on.config.account.empty() && !on.config.server.empty();
+			if (uiButton(162, 208, 154, 28, "Create", true, can) || (can && (down & KEY_A)))
+			{
+				std::string pw, again;
+				if (askText("Password (12 or more characters)", pw, true) && askText("The password again", again, true))
+				{
+					if (pw != again)
+						on.failWith("The two passwords weren't the same");
+					else if (pw.size() < 12)
+						on.failWith("The password needs 12 or more characters");
+					else
+					{
+						on.config.save();
+						on.signUp(on.config.server, on.config.account, pw, invite);
+						creating = false;
+					}
+				}
+				lastTick = svcGetSystemTick();
+			}
+			break;
+		}
 		{
 			uiText(6, 2, 0.55f, col::header, "Sign in");
 			uiText(8, 34, 0.45f, col::textDim, "Server");
@@ -178,10 +235,17 @@ std::string onlineTitleScreen(C3D_RenderTarget* top, C3D_RenderTarget* bottom, c
 				}
 			}
 			uiText(8, 140, 0.4f, col::textDim, "The password is asked each time and never kept.");
-			if (uiButton(4, 208, 154, 28, "Back") || (down & KEY_B))
+			uiText(8, 156, 0.4f, col::textDim, "New player? Make an account with New account.");
+			if (uiButton(4, 208, 100, 28, "Back") || (down & KEY_B))
 				result = "";
+			if (uiButton(108, 208, 100, 28, "New account") || (down & KEY_Y))
+			{
+				creating = true;
+				if (invite.empty())
+					invite = defaultInvite(on.config.server);
+			}
 			bool can = !on.config.account.empty() && !on.config.server.empty();
-			if (uiButton(162, 208, 154, 28, "Sign in", true, can) || (can && (down & KEY_A)))
+			if (uiButton(212, 208, 104, 28, "Sign in", true, can) || (can && (down & KEY_A)))
 			{
 				std::string pw;
 				if (askText("Password", pw, true))
@@ -257,7 +321,7 @@ std::string onlineTitleScreen(C3D_RenderTarget* top, C3D_RenderTarget* bottom, c
 }
 
 // Scripted runs (tools/test, the PC test build): sdmc:/3ds/mw3ds/online_test.json {"server", "account", "password",
-// "character": "new" | "first" | an id} signs in without the screens, for a local test server's test accounts. False
+// "character": "new" | "first" | an id, "invite": the server's invite code to make the account first} signs in without the screens, for a local test server's test accounts. False
 // when there is no such file or the sign-in failed (logged)
 bool onlineAutoSignIn(const char* dataDir)
 {
@@ -273,7 +337,7 @@ bool onlineAutoSignIn(const char* dataDir)
 		return std::string(cJSON_IsString(v) ? v->valuestring : "");
 	};
 	std::string server = get("server"), account = get("account"), password = get("password"), character = get("character");
-	std::string say = get("say"), probe = get("probe"), join = get("join");
+	std::string say = get("say"), probe = get("probe"), join = get("join"), invite = get("invite");
 	cJSON_Delete(j);
 	if (!g_online)
 		g_online = new Online();
@@ -293,7 +357,10 @@ bool onlineAutoSignIn(const char* dataDir)
 	if (server.empty())
 		return false;
 	Online& on = *g_online;
-	on.signIn(server, account, password);
+	if (!invite.empty())
+		on.signUp(server, account, password, invite);
+	else
+		on.signIn(server, account, password);
 	on.testSay = say;
 	on.testJoin = join;
 	on.testSayAt = 5.0f;

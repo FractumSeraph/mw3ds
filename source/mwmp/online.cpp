@@ -220,6 +220,16 @@ void Online::defaultManifest()
 
 void Online::signIn(const std::string& server, const std::string& acct, const std::string& pw)
 {
+	start(server, acct, pw, nullptr);
+}
+
+void Online::signUp(const std::string& server, const std::string& acct, const std::string& pw, const std::string& invite)
+{
+	start(server, acct, pw, &invite);
+}
+
+void Online::start(const std::string& server, const std::string& acct, const std::string& pw, const std::string* invite)
+{
 	cancel();
 	err.clear();
 	account = acct;
@@ -234,6 +244,11 @@ void Online::signIn(const std::string& server, const std::string& acct, const st
 	std::string s = server;
 	while (!s.empty() && s.back() == '/')
 		s.pop_back();
+	if (invite && (s.compare(0, 5, "ws://") == 0 || s.compare(0, 6, "wss://") == 0))
+	{
+		fail("A single world's address can't make accounts: make one on the server's website");
+		return;
+	}
 	if (s.compare(0, 5, "ws://") == 0 || s.compare(0, 6, "wss://") == 0)
 	{
 		// One world: straight to its socket (/ws when no path is given)
@@ -254,12 +269,17 @@ void Online::signIn(const std::string& server, const std::string& acct, const st
 	kind = GATEWAY;
 	base = s;
 	phase = SIGNING_IN;
-	status = "Signing in...";
+	status = invite ? "Making your account..." : "Signing in...";
 	cJSON* body = cJSON_CreateObject();
 	cJSON_AddStringToObject(body, "name", acct.c_str());
 	cJSON_AddStringToObject(body, "password", pw.c_str());
+	if (invite)
+		cJSON_AddStringToObject(body, "invite", invite->c_str());
 	char* t = cJSON_PrintUnformatted(body);
-	request(LOGIN, "POST", "/auth/password", t);
+	if (invite)
+		request(REGISTER, "POST", "/auth/password/register", t);
+	else
+		request(LOGIN, "POST", "/auth/password", t);
 	free(t);
 	cJSON_Delete(body);
 }
@@ -329,6 +349,21 @@ void Online::onHttp()
 	};
 	switch (was)
 	{
+	case REGISTER:
+		// (its answer is a sign-in's; the server's own words say what was wrong: the name taken, the password too
+		// short, the invite code; 404: a server without password sign-up)
+		if (code != 200 || !j)
+		{
+			if (code == 404)
+				fail("This server can't make accounts here: make one on its website");
+			else if (code == 429)
+				fail("Too many tries: wait a minute and try again");
+			else
+				fail(errorText("The account couldn't be made"));
+			break;
+		}
+		logf("online: account %s made", str(j, "name", account.c_str()));
+		// fall through
 	case LOGIN:
 		if (code == 200 && j)
 		{

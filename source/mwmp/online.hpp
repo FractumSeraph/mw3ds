@@ -111,11 +111,16 @@ public:
 
 	// ---- signing in (the title's online screens)
 	void signIn(const std::string& server, const std::string& account, const std::string& password);
+	// A new account on the server (POST /auth/password/register: openmw-web's password sign-up, behind the server's
+	// invite code), then on as a sign-in. A single world's address (ws://) can't make one
+	void signUp(const std::string& server, const std::string& account, const std::string& password,
+		const std::string& invite);
 	void setProfile(const std::string& username, const std::string& email);
 	std::vector<OnlineCharacter> characters;
 	void chooseCharacter(const std::string& id);
 	void createCharacter();
 	void cancel();                                        // back to IDLE, everything closed
+	void failWith(const std::string& why) { fail(why); }   // FAILED with this as the error (the screens' own checks)
 	void update(float dt);                                // every frame, title or game
 
 	// ---- what the server said at the welcome
@@ -172,12 +177,13 @@ public:
 	~Online();
 
 private:
+	void start(const std::string& server, const std::string& acct, const std::string& pw, const std::string* invite);
 	enum Kind { GATEWAY, WORLD } kind = GATEWAY;
 	std::string base;                                     // https://host[:port] (gateway) or the ws url (world)
 	std::string account, password, locker, ticket, accountKey;
 	std::string wsUrl, err;
 	HttpRequest http;
-	enum Step { NONE, LOGIN, PROFILE_GET, PROFILE_SET, CHARS, CHAR_NEW, WORLDS, TICKET } step = NONE;
+	enum Step { NONE, LOGIN, REGISTER, PROFILE_GET, PROFILE_SET, CHARS, CHAR_NEW, WORLDS, TICKET } step = NONE;
 	float retryAt = -1;
 	int worldTries = 0;
 	WebSocket ws;
