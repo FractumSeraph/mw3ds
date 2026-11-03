@@ -33,7 +33,7 @@ The watch is on one hand, so one finger plays, and every press buzzes:
 | The bezel | Turn, 15 degrees a click |
 | **WALK** | Walk on by itself, the bezel steering, until it is pressed again, a menu opens or a fight begins |
 | **MORE**, or the back button | The ring of actions |
-| The circle's edge | Health (red, left; bright while low), magicka (blue, right) and fatigue (green, bottom right), as a watch face's rings |
+| The circle's edge | Health (red, left; bright while low, three buzzes as it falls under a quarter), magicka (blue, right) and fatigue (green, bottom right), as a watch face's rings, and **N** where north lies |
 
 | The ring | |
 | --- | --- |

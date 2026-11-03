@@ -723,6 +723,20 @@ void androidDrawOverlay(int ww, int wh)
 			if (share > 0.0f)
 				glesArc(g.cx, g.cy, outer, inner, b.from, b.from + (b.to - b.from) * share, color);
 		}
+		// Health falling under a quarter: three buzzes, once until it is back over a third
+		static bool warned = false;
+		if (!warned && g_playerBars[0] > 0.0f && g_playerBars[0] < 0.25f)
+		{
+			warned = true;
+			buzz(40, 3);
+		}
+		else if (g_playerBars[0] > 0.34f)
+			warned = false;
+		// North: a mark on the edge where north lies from where the player faces (straight up: facing north)
+		float north = 90.0f + g_playerYaw * 57.29578f, a = north * 0.01745329f;
+		float nx = g.cx + cosf(a) * g.r * 0.9f, ny = g.cy - sinf(a) * g.r * 0.9f;
+		glesDisc(nx, ny, g.r * 0.055f, 0xB0000000, 0.0f);
+		glesLabel("N", nx, ny, g.r * 0.09f, 0xF0E8F0F8);
 	}
 	// what is on, in words beside the ring's button: sneaking, looking
 	if (!s_ring)

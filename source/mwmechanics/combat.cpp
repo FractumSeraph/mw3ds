@@ -32,6 +32,7 @@
 
 bool g_weaponOut = false;                            // (mechanicsstate.hpp)
 float g_playerBars[3] = { 1.0f, 1.0f, 1.0f };
+float g_playerYaw = 0.0f;
 
 static const float kHeldLightShare = 0.5f;           // a held torch's colour on its holder (Actor::heldLight), against OpenMW
 
@@ -932,6 +933,7 @@ void Session::combatUpdate(const PlayerInput& in, float dt, bool menu)
 	}
 
 	g_weaponOut = weaponDrawn;
+	g_playerYaw = w.player.yaw;
 	g_playerBars[0] = s.healthMax > 0.0f ? fmaxf(0.0f, fminf(1.0f, s.health / s.healthMax)) : 0.0f;
 	g_playerBars[1] = s.magickaMax > 0.0f ? fmaxf(0.0f, fminf(1.0f, s.magicka / s.magickaMax)) : 0.0f;
 	g_playerBars[2] = s.fatigueMax > 0.0f ? fmaxf(0.0f, fminf(1.0f, s.fatigue / s.fatigueMax)) : 0.0f;
