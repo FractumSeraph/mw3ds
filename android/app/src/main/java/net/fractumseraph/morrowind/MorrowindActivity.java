@@ -85,12 +85,25 @@ public class MorrowindActivity extends SDLActivity {
         return super.dispatchKeyEvent(event);
     }
 
-    /** A short buzz for a press of the watch's controls (android_input.cpp), from the game's thread */
-    public static void buzz(int milliseconds) {
+    /**
+     * A short buzz for a press of the watch's controls or something felt in the game (android_input.cpp), from the
+     * game's thread: times of them, as long apart as each lasts
+     */
+    public static void buzz(int milliseconds, int times) {
         MorrowindActivity activity = instance;
         Vibrator vibrator = activity != null ? activity.getSystemService(Vibrator.class) : null;
-        if (vibrator != null && vibrator.hasVibrator())
+        if (vibrator == null || !vibrator.hasVibrator())
+            return;
+        if (times <= 1) {
             vibrator.vibrate(VibrationEffect.createOneShot(milliseconds, VibrationEffect.DEFAULT_AMPLITUDE));
+            return;
+        }
+        long[] timings = new long[times * 2];
+        for (int i = 0; i < times; i++) {
+            timings[i * 2] = i == 0 ? 0 : milliseconds;
+            timings[i * 2 + 1] = milliseconds;
+        }
+        vibrator.vibrate(VibrationEffect.createWaveform(timings, -1));
     }
 
     /**

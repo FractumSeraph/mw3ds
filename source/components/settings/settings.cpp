@@ -22,6 +22,12 @@ bool g_stylusButtons = true;
 int g_stickZonePct = kStickZoneDefaultPct;
 bool g_invertY = false;
 bool g_subtitles = true;
+#ifdef MW3DS_ANDROID
+static const bool kAidsDefault = true;      // (a watch: one finger to fight with)
+#else
+static const bool kAidsDefault = false;
+#endif
+bool g_autoReady = kAidsDefault, g_safeStrikes = kAidsDefault, g_aimHelp = kAidsDefault;
 int g_depthMode = DEPTH_16_IN_3D;
 static int s_gyroSens = 100;      // gyro aim's sensitivity, kept while it is off
 
@@ -43,6 +49,7 @@ void Session::loadSettings()
 		g_invertY = false;
 		g_subtitles = true;
 		g_depthMode = DEPTH_24;          // (DEPTH16:on asks for the 16-bit buffer)
+		g_autoReady = g_safeStrikes = g_aimHelp = false;    // (AIDS: turns them on)
 	}
 	FILE* f = fopen(kSettingsPath, "r");
 	if (!f)
@@ -81,6 +88,9 @@ void Session::loadSettings()
 		// (an older file's geaim= is left unread: the GoldenEye aim looks at the look speed)
 		else if (strncmp(line, "inverty=", 8) == 0) g_invertY = strncmp(line + 8, "on", 2) == 0;
 		else if (strncmp(line, "subtitles=", 10) == 0) g_subtitles = strncmp(line + 10, "off", 3) != 0;
+		else if (strncmp(line, "autoready=", 10) == 0) g_autoReady = strncmp(line + 10, "on", 2) == 0;
+		else if (strncmp(line, "safestrikes=", 12) == 0) g_safeStrikes = strncmp(line + 12, "on", 2) == 0;
+		else if (strncmp(line, "aimhelp=", 8) == 0) g_aimHelp = strncmp(line + 8, "on", 2) == 0;
 		else if (strncmp(line, "depth=", 6) == 0 && !autotest)
 			g_depthMode = strncmp(line + 6, "24", 2) == 0 ? DEPTH_24 : strncmp(line + 6, "16in3d", 6) == 0 ? DEPTH_16_IN_3D : DEPTH_16;
 		else if (strncmp(line, "view=", 5) == 0)
@@ -119,6 +129,8 @@ void Session::saveSettings()
 	fprintf(f, "stylusspeed=%d\nstylusbuttons=%s\n", g_stylusSpeed, g_stylusButtons ? "on" : "off");
 	fprintf(f, "stickzone=%d\n", g_stickZonePct);
 	fprintf(f, "subtitles=%s\n", g_subtitles ? "on" : "off");
+	fprintf(f, "autoready=%s\nsafestrikes=%s\naimhelp=%s\n", g_autoReady ? "on" : "off", g_safeStrikes ? "on" : "off",
+		g_aimHelp ? "on" : "off");
 	fprintf(f, "depth=%s\n", g_depthMode == DEPTH_24 ? "24" : g_depthMode == DEPTH_16_IN_3D ? "16in3d" : "16");
 	fprintf(f, "view=%s\n", viewMode == VIEW_MIN ? "min" : viewMode == VIEW_MAX ? "max" : viewMode == VIEW_MID ? "mid" : "auto");
 	fprintf(f, "dynview=%s\n", viewMode == VIEW_AUTO ? "on" : "off");     // (for an older build reading the file)

@@ -56,6 +56,11 @@ extern int g_gyroAim;
 // (the console's own tilt)
 extern int g_lookSpeed, g_geTurnSpeed;
 extern bool g_invertY;
+// Combat aids (Options > Prefs > Combat aids), for one finger on a watch (on by default in the Android build, off on the
+// console): the weapon comes out when someone fights the player and goes away once it's over (autoReady); a first
+// blow at someone not fighting the player is held back until a second asks again (safeStrikes); with the weapon out
+// the view eases round to the nearest foe in front (aimHelp). mwmechanics/combat.cpp
+extern bool g_autoReady, g_safeStrikes, g_aimHelp;
 static const int kLookMinPct = 100, kLookMaxPct = 300, kLookStepPct = 10;      // (the bar's middle is 2.00x: 1.00x was too slow)
 static const int kGeTurnMinPct = 50, kGeTurnMaxPct = 200;
 // A new player's look speed, and Look's Default: quicker than 1.00x, which felt slow on the console (1.20x still did).
@@ -84,6 +89,7 @@ enum Screen
 	SCR_CLASS_CREATE,
 	SCR_AUDIO,
 	SCR_ONLINE,          // the online mode's players, chat and friends (mwmp/mpgame.cpp)
+	SCR_AIDS,            // Options > Prefs > Combat aids
 };
 
 struct MessageState

@@ -5,6 +5,9 @@
 // Session derives from it: the members are Session's (s.attackCharge), kept here beside the code that uses them
 #include "mwbase/sessiontypes.hpp"
 
+// The player's weapon (or fists) is out, as this frame left it (the Android build's controls: a tap strikes then)
+extern bool g_weaponOut;
+
 struct MechanicsState
 {
 
@@ -48,6 +51,13 @@ struct MechanicsState
 	bool pickQueued = false;          // a press while the lockpick / probe came up: tried once it's up
 
 	float sheatheTimer = 0.0f;        // seconds without fighting; the weapon goes away after a while
+
+	// Combat aids (Options > Prefs > Combat aids: g_autoReady, g_safeStrikes, g_aimHelp)
+	bool aidReadied = false;          // the weapon came out by itself for this fight (it goes away by itself after it)
+	float aidCalm = 0.0f;             // seconds no one has fought the player
+	int aidAskTarget = -1;            // a held-back blow's target: a new blow at it within aidAskUntil lands
+	float aidAskUntil = 0.0f;
+	bool aidHeld = false;             // the blow under way was held back: nothing till the attack is let go
 
 	int attackKind = 0;               // 0 chop, 1 slash, 2 thrust: picked when the wind-up starts
 

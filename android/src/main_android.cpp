@@ -25,6 +25,12 @@ void platformLook(float& yaw, float& pitch)
 	androidLookTake(yaw, pitch);
 }
 
+// A buzz (android_input.cpp)
+void platformFeedback(int what)
+{
+	androidFeedback(what);
+}
+
 int main(int, char**)
 {
 	if (!androidStart())

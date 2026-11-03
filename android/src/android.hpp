@@ -20,6 +20,8 @@ ScreenView androidScreenView(int windowW, int windowH);
 void androidDrawOverlay(int windowW, int windowH);
 // The view's turn since the last call, in radians (platform/platform.hpp platformLook)
 void androidLookTake(float& yaw, float& pitch);
+// What the player should feel, as a buzz (platform/platform.hpp platformFeedback: FEEDBACK_*)
+void androidFeedback(int what);
 
 // The sound: SDL's output, mixing the ndsp stand-ins' channels as they play (android_audio.cpp)
 void androidAudioStart();

@@ -30,6 +30,8 @@ void Session::drawOptions()
 	int tab = 0;
 	while (tab < 3 && kOptionTabs[tab] != screen)
 		tab++;
+	if (screen == SCR_AIDS)
+		tab = 0;                         // (a page of Prefs)
 	header(w.game.gmst("soptions", "Options"));
 	const UiInput& in = uiIn();
 	static const char* kTabKeys[4][2] = { { "sprefs", "Prefs" }, { "saudio", "Audio" }, { "svideo", "Video" },
@@ -132,8 +134,9 @@ void Session::drawOptions()
 			g_subtitles = !g_subtitles;
 			notify(g_subtitles ? "Subtitles on." : "Subtitles off: spoken lines are only heard.");
 		}
-		// Console: OpenMW's, one script line at a time, on the object the crosshair was on; Credits: Morrowind's movie
-		int extra = buttons(170, 26, { "Console", "Credits" });
+		// Console: OpenMW's, one script line at a time, on the object the crosshair was on; Credits: Morrowind's movie;
+		// Combat aids: their page (below)
+		int extra = buttons(170, 26, { "Console", "Credits", "Combat aids" });
 		b = buttons(208, 28, { "Default", w.game.gmstLabel("sclose", "Close") });
 		closing = b == 1;
 		if (extra == 0)
@@ -156,6 +159,12 @@ void Session::drawOptions()
 				notify("The credits movie is missing: Video\\mw_credits.bik was not converted with the game data.");
 			return;
 		}
+		if (extra == 2)
+		{
+			openScreen(SCR_AIDS);
+			focus = 0;
+			return;
+		}
 		if (b == 0)
 		{
 			difficulty = 0;
@@ -163,6 +172,50 @@ void Session::drawOptions()
 			hitIndicators = false;
 			g_subtitles = true;
 			changed = true;
+		}
+	}
+	else if (screen == SCR_AIDS)
+	{
+		// For one finger on a watch (Android's default; the console's is off): the weapon comes out by itself when
+		// someone fights the player, a first blow at someone peaceful is held back, the view eases round to a foe
+		uiText(10, 50, 0.4f, col::textDim, "Help for fighting with one finger.");
+		if (choice(68, "Ready by itself", onOff(g_autoReady)))
+		{
+			g_autoReady = !g_autoReady;
+			notify(g_autoReady ? "The weapon comes out when someone fights you, and goes away when it's over."
+				: "The weapon comes out only when you ready it.");
+		}
+		if (choice(94, "Safe strikes", onOff(g_safeStrikes)))
+		{
+			g_safeStrikes = !g_safeStrikes;
+			notify(g_safeStrikes ? "A first blow at someone who isn't fighting you is held back: strike again to attack."
+				: "Every blow lands, peaceful or not.");
+		}
+		if (choice(120, "Aim help", onOff(g_aimHelp)))
+		{
+			g_aimHelp = !g_aimHelp;
+			notify(g_aimHelp ? "With your weapon out, the view turns towards the nearest foe in front of you."
+				: "You aim yourself.");
+		}
+		b = buttons(208, 28, { "Default", w.game.gmstLabel("sback", "Back") });
+#ifdef MW3DS_ANDROID
+		const bool kDefault = true;
+#else
+		const bool kDefault = false;
+#endif
+		if (b == 0)
+		{
+			g_autoReady = g_safeStrikes = g_aimHelp = kDefault;
+			changed = true;
+		}
+		// Back (or B): Prefs again, on its Combat aids button
+		if (b == 1 || (in.down & KEY_B))
+		{
+			if (changed)
+				saveSettings();
+			openScreen(SCR_OPTIONS);
+			focus = 6;
+			return;
 		}
 	}
 	else if (screen == SCR_AUDIO)
