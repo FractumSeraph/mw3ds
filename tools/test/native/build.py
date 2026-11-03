@@ -34,8 +34,8 @@ SKIP = {"main.cpp", "components/debug/debuglog.cpp", "mwrender/screenshotmanager
 # so the console and these builds can't drift apart
 # (check_entry_files)
 ENTRY_FILES = ["source/main.cpp", "tools/test/native/main_native.cpp", "android/src/main_android.cpp"]
-ENTRY_MAX_LINES = 50
-ENTRY_FUNCTIONS = {"main", "platformRunOver", "platformFailFast", "platformClearVram", "platformLook"}
+ENTRY_MAX_LINES = 60
+ENTRY_FUNCTIONS = {"main", "platformRunOver", "platformFailFast", "platformClearVram", "platformLook", "platformFeedback"}
 # The renderer's drawing entry points get a suffix in the file that defines them: native_gpu.cpp wraps them so they draw
 # only with NATIVE_DRAW=1
 RENDERER_RENAMES = ["rendererDrawWorld", "rendererDrawMesh", "rendererDrawMeshGlow", "rendererDrawActor", "rendererDrawGlow",

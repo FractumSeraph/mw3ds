@@ -28,8 +28,8 @@ The watch is on one hand, so one finger plays, and every press buzzes:
 | On the top screen | |
 | --- | --- |
 | Slide | Walk, a stick where the finger landed (pushed far: run) |
-| Tap | A: talk, open, take |
-| Hold still | Attack: wound up while held (a red ring under the finger), struck when let go |
+| Tap | Weapon away: A (talk, open, take). Weapon out: a quick blow |
+| Hold still | Weapon out: a blow wound up while held (a red ring under the finger, a buzz once it's wound up fully), struck when let go. Weapon away: nothing |
 | The bezel | Turn, 15 degrees a click |
 | **WALK** | Walk on by itself, the bezel steering, until it is pressed again or a menu opens |
 | **MORE**, or the back button | The ring of actions |
@@ -45,6 +45,19 @@ The watch is on one hand, so one finger plays, and every press buzzes:
 
 A tap outside the ring's actions, or the back button, closes it. On a phone a second finger's slide looks while the
 first walks.
+
+### Combat
+
+The weapon decides what a touch does, so that no blow is struck by accident: put away, nothing a finger does is a blow.
+The game's **Combat aids** (Options > Prefs > Combat aids, on by default on Android, off on the 3DS) do the rest:
+
+| Combat aid | |
+| --- | --- |
+| Ready by itself | The weapon comes out (a buzz) when someone starts fighting you, and goes away 5 s after the last of them stops; put away by hand, it stays away for that fight |
+| Safe strikes | A first blow at someone who isn't fighting you (peaceful, or fighting someone else) is held back: two buzzes and "Attack Fargoth? Strike again to attack." A new blow at them within 4 s lands. Melee only |
+| Aim help | With the weapon out, the view turns towards the nearest foe in front of you (within 70 degrees and three reaches), 90 degrees a second at most |
+
+Being hit buzzes long.
 
 | On the bottom screen | |
 | --- | --- |

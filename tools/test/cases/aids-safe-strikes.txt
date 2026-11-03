@@ -1,0 +1,15 @@
+# start: Seyda Neen
+# Combat aids, Safe strikes (Options > Prefs > Combat aids; on in the Android build): the first blow at Fargoth, who
+# isn't fighting the player, is held back and nothing comes of it; struck at again, the blows land and the assault is
+# reported
+3 0 0 0 0 MSG
+0.3 0 0 0 0 SEED:7+GOD:2
+0.3 0 0 0 0 GIVE:daedric_longsword
+0.3 0 0 0 0 EQUIP:daedric_longsword
+0.3 0 0 0 0 AIDS:on
+20 0 0 0 0 STRIKE:fargoth:0.5
+1 0 0 0
+0.1 0 0 0 0 EXPECT:bounty:eq:0+EXPECT:refcombat:fargoth:eq:0
+20 0 0 0 0 STRIKE:fargoth:3
+2 0 0 0
+0.1 0 0 0 0 EXPECT:bounty:gt:0

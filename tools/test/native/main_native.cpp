@@ -28,6 +28,10 @@ void platformLook(float& yaw, float& pitch)
 	yaw = pitch = 0.0f;
 }
 
+void platformFeedback(int)
+{
+}
+
 int main()
 {
 	return appMain();

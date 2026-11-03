@@ -263,6 +263,15 @@ std::optional<bool> opsWorld(Session& s, const std::vector<std::string>& a)
 		logf("test: %s %s", verb.c_str(), a[1].c_str());
 		return true;
 	}
+	// AIDS:on|off: the Combat aids (Options > Prefs > Combat aids) all on or off, saved as their page saves them; a scripted
+	// run starts with them off
+	if (verb == "AIDS" && a.size() >= 2)
+	{
+		g_autoReady = g_safeStrikes = g_aimHelp = a[1] == "on";
+		s.saveSettings();
+		logf("test: combat aids %s", a[1].c_str());
+		return true;
+	}
 	// DEPTH16:on|off: the top screen's 16-bit depth buffer in 2D too (Engine::createTopTargets takes it in 3D only): shots
 	// of far surfaces fighting, in the emulator
 	if (verb == "DEPTH16" && a.size() >= 2)

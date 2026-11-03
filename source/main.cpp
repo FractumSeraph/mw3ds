@@ -18,6 +18,10 @@ void platformLook(float& yaw, float& pitch)
 	yaw = pitch = 0.0f;
 }
 
+void platformFeedback(int)
+{
+}
+
 // gfxInit shows its screen buffers, in VRAM, before anything is drawn: what was left there came up as static. VRAM is
 // filled with black first by the GPU (the CPU may not write it), and given back for gfxInit to take
 void platformClearVram()

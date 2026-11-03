@@ -28,6 +28,9 @@
 #include "mwbase/session.hpp"
 #include "mwmechanics/combathelpers.hpp"
 #include "mwmechanics/magiceffects.hpp"
+#include "platform/platform.hpp"
+
+bool g_weaponOut = false;                            // (mechanicsstate.hpp)
 
 static const float kHeldLightShare = 0.5f;           // a held torch's colour on its holder (Actor::heldLight), against OpenMW
 
@@ -251,6 +254,7 @@ void Session::damagePlayer(float dmg, bool fatigueOnly)
 	hurtFlash = 1.0f;
 	bodyHit = true;
 	sheatheTimer = 0.0f;
+	platformFeedback(FEEDBACK_HIT);
 	if (weaponDrawn && vm.action == VM_IDLE)
 		vm.play(VM_HIT, "Hit1");
 	if (s.health <= 0.0f && !playerDead)
@@ -717,6 +721,58 @@ void Session::combatUpdate(const PlayerInput& in, float dt, bool menu)
 	// (a cast is one upper-body state for its whole animation: no drawing, sheathing or blow until it ends)
 	bool casting = castLock > 0.0f || vm.action == VM_CAST;
 	bool putAway = in.sheathe || (in.readyToggle && weaponDrawn);
+
+	// Combat aids (Options > Prefs > Combat aids). The nearest one fighting the player (in combat, not with another
+	// actor) within 2000 units, and the nearest within three reaches in front, within 70 degrees of the view
+	int foe = -1, foeAhead = -1;
+	if (g_autoReady || g_aimHelp)
+	{
+		float best = 2000.0f, bestAhead = 1e9f;
+		float ahead = 3.0f * meleeReach(w, wpn, false) + kPlayerHalfLength;
+		w.forLoadedActors([&](int i) {
+			const Ref& r = w.refs[i];
+			if (r.actor < 0 || r.dead || !r.visible() || r.ai != AI_COMBAT || r.duelFoe >= 0)
+				return;
+			float dx = r.pos[0] - w.player.feet[0], dy = r.pos[1] - w.player.feet[1];
+			float d = sqrtf(dx * dx + dy * dy);
+			if (d < best)
+			{
+				best = d;
+				foe = i;
+			}
+			if (d < ahead && d < bestAhead && fabsf(angleDiff(atan2f(dx, dy), w.player.yaw)) < 1.22f)
+			{
+				bestAhead = d;
+				foeAhead = i;
+			}
+		});
+	}
+	aidCalm = foe >= 0 ? 0.0f : aidCalm + dt;
+	// Ready by itself: out when someone starts fighting the player (once a fight: put away by hand, it stays away), and
+	// away again 5 s after the last one stopped, when it came out by itself
+	if (g_autoReady && foe >= 0 && !aidReadied && !weaponDrawn && canFight && !casting)
+	{
+		sheatheTimer = 0.0f;
+		ready();
+		aidReadied = true;
+		platformFeedback(FEEDBACK_READIED);
+		logf("combat: the weapon out by itself (%s fights)", w.refs[foe].id.c_str());
+	}
+	if (aidReadied && foe < 0 && aidCalm > 5.0f)
+	{
+		aidReadied = false;
+		if (g_autoReady && weaponDrawn && !in.attack)
+			putAway = true;
+	}
+	// Aim help: with the weapon out, the view eases round to the foe in front, 90 degrees a second at most (not while a
+	// menu is up, nor once it is within 6 degrees)
+	if (g_aimHelp && weaponDrawn && canFight && foeAhead >= 0)
+	{
+		const Ref& r = w.refs[foeAhead];
+		float off = angleDiff(atan2f(r.pos[0] - w.player.feet[0], r.pos[1] - w.player.feet[1]), w.player.yaw);
+		if (fabsf(off) > 0.1f)
+			w.player.yaw += fmaxf(-1.57f * dt, fminf(1.57f * dt, off));
+	}
 	if (canFight && !casting && in.readyToggle && !weaponDrawn)
 	{
 		sheatheTimer = 0.0f;
@@ -724,7 +780,13 @@ void Session::combatUpdate(const PlayerInput& in, float dt, bool menu)
 	}
 	// The next blow waits for the last one's follow-through, and for a cast to end (OpenMW: one attack animation at a time)
 	bool busy = attackCharge < 0.0f && (vm.action == VM_FOLLOW || casting);
-	if (canFight && in.attack && !busy)
+	if (aidHeld && !in.attack)
+		aidHeld = false;
+	if (aidHeld)
+	{
+		// a held-back blow: nothing until the attack is let go
+	}
+	else if (canFight && in.attack && !busy)
 	{
 		sheatheTimer = 0.0f;
 		if (!weaponDrawn)
@@ -757,7 +819,26 @@ void Session::combatUpdate(const PlayerInput& in, float dt, bool menu)
 		}
 		else
 		{
-			if (attackCharge < 0.0f)
+			// Safe strikes: a first blow at someone who isn't fighting the player (peaceful, or fighting another) is held
+			// back and asked about; a new blow at the same one within 4 s lands. Melee only: a shot has no one target yet
+			if (attackCharge < 0.0f && g_safeStrikes && !isRanged(wpn))
+			{
+				int t = swingTarget();
+				if (t >= 0 && (w.refs[t].ai != AI_COMBAT || w.refs[t].duelFoe >= 0)
+					&& !(t == aidAskTarget && w.time < aidAskUntil))
+				{
+					aidAskTarget = t;
+					aidAskUntil = w.time + 4.0f;
+					aidHeld = true;
+					const ActorDef& def = w.game.actors[w.refs[t].actor];
+					notify(std::string("Attack ") + (*def.name.c_str() ? def.name.c_str() : "them") + "? Strike again to attack.");
+					platformFeedback(FEEDBACK_HELD_BACK);
+					logf("combat: a blow at %s held back (Safe strikes)", w.refs[t].id.c_str());
+				}
+				else if (t == aidAskTarget)
+					aidAskTarget = -1;
+			}
+			if (attackCharge < 0.0f && !aidHeld)
 			{
 				attackCharge = 0.0f;
 				attackKind = isRanged(wpn) ? 0 : in.moveY > 0.3f ? 2 : fabsf(in.moveX) > 0.3f ? 1 : 0;
@@ -767,8 +848,14 @@ void Session::combatUpdate(const PlayerInput& in, float dt, bool menu)
 				vm.play(VM_WINDUP, (std::string(vmGroup(wpn, tool)) + (isRanged(wpn) ? "Shoot" : attackKind == 2 ? "Thrust"
 					: attackKind == 1 ? "Slash" : "Chop")).c_str(), true);
 			}
-			attackCharge = fminf(1.0f, attackCharge + dt / (0.8f / fmaxf(0.5f, wpn ? wpn->speed : 1.0f)));
-			vm.charge = attackCharge;
+			if (!aidHeld)
+			{
+				float charged = attackCharge;
+				attackCharge = fminf(1.0f, attackCharge + dt / (0.8f / fmaxf(0.5f, wpn ? wpn->speed : 1.0f)));
+				vm.charge = attackCharge;
+				if (charged < 1.0f && attackCharge >= 1.0f && !isRanged(wpn))
+					platformFeedback(FEEDBACK_CHARGED);
+			}
 		}
 	}
 	else if (attackCharge >= 0.0f && canFight && !vm.windupReached())
@@ -819,6 +906,8 @@ void Session::combatUpdate(const PlayerInput& in, float dt, bool menu)
 		pickQueued = false;
 		vm.play(VM_UNEQUIP, (std::string(pickProbe ? "PickProbe" : vmGroup(wpn, tool)) + "Uneq").c_str());
 	}
+
+	g_weaponOut = weaponDrawn;
 
 	float headTrack = w.game.gmstf("fmaxheadtrackdistance", 400.0f);
 	float headTrackIn = w.game.gmstf("finteriorheadtrackmult", 0.5f);

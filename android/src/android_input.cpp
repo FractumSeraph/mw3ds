@@ -28,6 +28,8 @@
 #include "components/debug/debuglog.hpp"
 #include "mwbase/sessiontypes.hpp"
 #include "mwinput/inputmanagerimp.hpp"
+#include "mwmechanics/mechanicsstate.hpp"
+#include "platform/platform.hpp"
 
 static SDL_Window* s_window = nullptr;
 static SDL_GLContext s_gl = nullptr;
@@ -120,8 +122,9 @@ extern "C" JNIEXPORT void JNICALL Java_net_fractumseraph_morrowind_MorrowindActi
 	s_rotary += (int)lroundf(clicks * 100.0f);
 }
 
-// A short buzz under the finger, so a press is felt without looking (MorrowindActivity.buzz)
-static void buzz(int ms)
+// A short buzz under the finger, so a press is felt without looking (MorrowindActivity.buzz): times of them, a little
+// apart
+static void buzz(int ms, int times = 1)
 {
 	static jclass cls = nullptr;
 	static jmethodID method = nullptr;
@@ -135,12 +138,12 @@ static void buzz(int ms)
 			return;
 		jclass local = env->GetObjectClass(activity);
 		cls = (jclass)env->NewGlobalRef(local);
-		method = env->GetStaticMethodID(cls, "buzz", "(I)V");
+		method = env->GetStaticMethodID(cls, "buzz", "(II)V");
 		env->DeleteLocalRef(local);
 		env->DeleteLocalRef(activity);
 	}
 	if (method)
-		env->CallStaticVoidMethod(cls, method, (jint)ms);
+		env->CallStaticVoidMethod(cls, method, (jint)ms, (jint)times);
 	if (env->ExceptionCheck())
 		env->ExceptionClear();
 }
@@ -280,9 +283,12 @@ static void act(Action a)
 // ---- fingers
 //
 // On the top screen one finger does it all (a watch is worn on the other hand): a slide walks (a stick where it
-// landed: pushed far, it runs), a tap is A (talk, open, take), held still it is the attack (wound up while held,
-// struck when let go). The bezel turns. With the ring's LOOK on, a slide looks instead; a second finger's slide
-// looks while the first walks (two thumbs, on a phone)
+// landed: pushed far, it runs). The weapon (or the fists) decides the rest, so that no blow is struck by accident:
+// put away, a tap is A (talk, open, take) and holding still does nothing; out, a tap is a quick blow and holding
+// still winds one up (struck when let go, a buzz once it's wound up fully). The bezel turns. With the ring's LOOK
+// on, a slide looks instead; a second finger's slide looks while the first walks (two thumbs, on a phone). The
+// game's Combat aids bring the weapon out when someone fights (a buzz) and hold back a first blow at someone
+// peaceful (two buzzes)
 
 enum Role { ROLE_NONE, ROLE_GESTURE, ROLE_BUTTON, ROLE_SCREEN, ROLE_OUTSIDE };
 struct Finger
@@ -373,7 +379,8 @@ static void fingerUp(const Geometry& g, Finger& f, int ww, int wh)
 {
 	if (f.role == ROLE_GESTURE && !f.slid && !f.attack && SDL_GetTicks() - f.t0 < kTapMs)
 	{
-		s_pulse |= KEY_A;
+		// (the weapon out: a quick blow, let go at once; away: A)
+		s_pulse |= g_weaponOut ? layoutKeys(ACT_ATTACK) : KEY_A;
 		buzz(10);
 	}
 	if (f.role == ROLE_BUTTON)
@@ -533,10 +540,11 @@ void hidScanInput()
 		switch (f.role)
 		{
 		case ROLE_GESTURE:
-			if (!f.slid && !f.attack && now - f.t0 >= kHoldMs)
+			// (held still with the weapon out: the wind-up; with it away, nothing)
+			if (!f.slid && !f.attack && now - f.t0 >= kHoldMs && g_weaponOut)
 			{
 				f.attack = true;
-				buzz(25);
+				buzz(15);
 			}
 			if (f.attack)
 				held |= layoutKeys(ACT_ATTACK);
@@ -617,6 +625,18 @@ void hidCstickRead(circlePosition* c)
 {
 	c->dx = (s16)lroundf(std::clamp(s_stick2X, -1.0f, 1.0f) * 156.0f);
 	c->dy = (s16)lroundf(std::clamp(s_stick2Y, -1.0f, 1.0f) * 156.0f);
+}
+
+void androidFeedback(int what)
+{
+	switch (what)
+	{
+	case FEEDBACK_READIED: buzz(30); break;
+	case FEEDBACK_CHARGED: buzz(20); break;
+	case FEEDBACK_HELD_BACK: buzz(25, 2); break;
+	case FEEDBACK_HIT: buzz(70); break;
+	default: break;
+	}
 }
 
 void androidLookTake(float& yaw, float& pitch)

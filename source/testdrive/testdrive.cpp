@@ -131,7 +131,7 @@ int screenByName(const std::string& n)
 		{ "alchemy", SCR_ALCHEMY }, { "recharge", SCR_RECHARGE }, { "persuade", SCR_PERSUADE }, { "spells", SCR_SPELLS },
 		{ "race", SCR_RACE }, { "birth", SCR_BIRTH }, { "stats", SCR_STATS }, { "saves", SCR_SAVES }, { "death", SCR_DEATH },
 		{ "journal", SCR_JOURNAL }, { "gamemenu", SCR_GAMEMENU }, { "map", SCR_MAP },
-		{ "classmethod", SCR_CLASS_METHOD }, { "classquiz", SCR_CLASS_QUIZ }, { "classlist", SCR_CLASS_LIST }, { "classresult", SCR_CLASS_RESULT }, { "classcreate", SCR_CLASS_CREATE }, { "review", SCR_REVIEW }, { "magic", SCR_MAGIC }, { "options", SCR_OPTIONS }, { "display", SCR_DISPLAY }, { "controls", SCR_CONTROLS }, { "look", SCR_LOOK }, { "console", SCR_CONSOLE },
+		{ "classmethod", SCR_CLASS_METHOD }, { "classquiz", SCR_CLASS_QUIZ }, { "classlist", SCR_CLASS_LIST }, { "classresult", SCR_CLASS_RESULT }, { "classcreate", SCR_CLASS_CREATE }, { "review", SCR_REVIEW }, { "magic", SCR_MAGIC }, { "options", SCR_OPTIONS }, { "display", SCR_DISPLAY }, { "controls", SCR_CONTROLS }, { "look", SCR_LOOK }, { "aids", SCR_AIDS }, { "console", SCR_CONSOLE },
 	};
 	for (auto& e : names)
 		if (n == e.name)
