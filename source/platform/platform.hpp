@@ -31,6 +31,9 @@ void platformFeedback(int what);
 // background (a watch's screen sleeping, a notification), where the system may end it unasked: SDL's pump, inside that
 // scan, then waits until the app comes back. engine.cpp
 bool gameSaveForBackground();
+// The same moment's use of quick key k (0..3), as a tap on the HUD's slot (the Android build's ring). False when not in
+// play
+bool gameUseQuickKey(int k);
 
 // Before gfxInit: the console's VRAM cleared to black (gfxInit puts the screens' buffers there and lights the screens on
 // them at once, before the game's first frame). Nothing on the PC test build

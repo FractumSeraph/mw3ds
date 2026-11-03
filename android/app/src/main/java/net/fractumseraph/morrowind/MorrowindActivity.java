@@ -12,6 +12,7 @@ import android.view.InputDevice;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.WindowManager;
+import android.view.inputmethod.EditorInfo;
 import android.widget.EditText;
 
 import java.util.concurrent.ArrayBlockingQueue;
@@ -161,7 +162,8 @@ public class MorrowindActivity extends SDLActivity {
             field.setInputType(type);
             field.setSelection(field.getText().length());
             final boolean[] given = { false };
-            RoundDialog.show(activity, hint == null || hint.isEmpty() ? "Text" : hint, null, field, true,
+            field.setImeOptions(EditorInfo.IME_ACTION_DONE);
+            android.app.AlertDialog dialog = RoundDialog.show(activity, hint == null || hint.isEmpty() ? "Text" : hint, null, field, true,
                 () -> {
                     if (!given[0])
                         answer.offer(new String[] { null });
@@ -174,6 +176,15 @@ public class MorrowindActivity extends SDLActivity {
                     given[0] = true;
                     answer.offer(new String[] { null });
                 }));
+            // (the keyboard's own done key gives the text too: no OK to tap after it)
+            field.setOnEditorActionListener((v, action, event) -> {
+                if (action != EditorInfo.IME_ACTION_DONE || given[0])
+                    return false;
+                given[0] = true;
+                answer.offer(new String[] { field.getText().toString() });
+                dialog.dismiss();
+                return true;
+            });
             field.requestFocus();
         });
         try {

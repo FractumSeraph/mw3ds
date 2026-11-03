@@ -43,6 +43,7 @@ The watch is on one hand, so one finger plays, and every press buzzes:
 | **VIEW** | First or third person |
 | **LOOK** | A slide looks instead of walking ("LOOK" shows while on) |
 | **SCREEN** | The bottom screen: the HUD's inventory, magic, map and stats buttons |
+| **1** **2** **3** **4** in its middle | The quick keys, as the HUD's slots (equip, ready the spell) |
 
 A tap outside the ring's actions, or the back button, closes it. On a phone a second finger's slide looks while the
 first walks.

@@ -450,6 +450,14 @@ bool gameSaveForBackground()
 	return s_scanSession->save();
 }
 
+bool gameUseQuickKey(int k)
+{
+	if (!s_scanSession || k < 0 || k > 3)
+		return false;
+	s_scanSession->useQuickKey(k);
+	return true;
+}
+
 bool Engine::frame()
 {
 	s_scanSession = loaded && !session->autotest && !session->playerDead ? session : nullptr;
