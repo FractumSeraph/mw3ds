@@ -438,9 +438,23 @@ bool Engine::retryFromTitle(bool& loadedOut)
 }
 
 // One pass of the loop: input, the scripted step, the update, both screens drawn; false: the loop ends
+// The game while the frame loop's own input scan runs, between two frames: what gameSaveForBackground saves (null at
+// any other time: a load under way, the title, a scripted run, the player dead)
+static Session* s_scanSession = nullptr;
+
+bool gameSaveForBackground()
+{
+	if (!s_scanSession)
+		return false;
+	logf("save: the app goes to the background");
+	return s_scanSession->save();
+}
+
 bool Engine::frame()
 {
+	s_scanSession = loaded && !session->autotest && !session->playerDead ? session : nullptr;
 	hidScanInput();
+	s_scanSession = nullptr;
 	irrstScanInput();
 	u32 down = hidKeysDown(), held = hidKeysHeld(), up = hidKeysUp();
 	if (!loaded && (down & KEY_START))

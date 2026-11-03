@@ -33,6 +33,7 @@ The watch is on one hand, so one finger plays, and every press buzzes:
 | The bezel | Turn, 15 degrees a click |
 | **WALK** | Walk on by itself, the bezel steering, until it is pressed again, a menu opens or a fight begins |
 | **MORE**, or the back button | The ring of actions |
+| The circle's edge | Health (red, left; bright while low, three buzzes as it falls under a quarter), magicka (blue, right) and fatigue (green, bottom right), as a watch face's rings, and **N** where north lies |
 
 | The ring | |
 | --- | --- |
@@ -58,6 +59,12 @@ The game's **Combat aids** (Options > Prefs > Combat aids, on by default on Andr
 | Aim help | With the weapon out, the view turns towards the nearest foe in front of you (within 70 degrees and three reaches), 90 degrees a second at most |
 
 Being hit buzzes long.
+
+### Saving
+
+Besides the game's own autosaves (a door, travel), the game autosaves as the app goes to the background (the watch's
+screen sleeping, a notification, the Home button), where Android may end it unasked: SDL tells the game from inside its
+input scan, between two frames of play (`gameSaveForBackground` in `source/engine.cpp`).
 
 ### Frame rate
 

@@ -36,6 +36,8 @@ static SDL_Window* s_window = nullptr;
 static SDL_GLContext s_gl = nullptr;
 static bool s_round = false;
 static bool s_quit = false;
+static bool SDLCALL leavingWatch(void*, SDL_Event* e);      // (the app going to the background: below)
+static bool s_walk = false;             // walking on by itself (the WALK button): the bezel steers
 
 SDL_Window* androidWindow()
 {
@@ -91,6 +93,7 @@ bool androidStart()
 	}
 	SDL_GL_MakeCurrent(s_window, s_gl);
 	SDL_GL_SetSwapInterval(1);
+	SDL_AddEventWatch(leavingWatch, nullptr);
 	androidAudioStart();
 	int w = 0, h = 0;
 	SDL_GetWindowSizeInPixels(s_window, &w, &h);
@@ -108,7 +111,6 @@ static unsigned s_lastFrames = 0;
 static u32 s_held = 0, s_down = 0, s_up = 0;
 static u32 s_pulse = 0;                 // pressed for one scan, let go the next (a tap's A, a ring item)
 static bool s_sneak = false;            // sneaking (the ring's SNEAK), held as the layout's sneak button
-static bool s_walk = false;             // walking on by itself (the WALK button): the bezel steers
 static bool s_lookMode = false;         // a slide looks instead of walking (the ring's LOOK)
 static bool s_ring = false;             // the ring of actions is open
 static touchPosition s_touch = {};
@@ -120,6 +122,18 @@ static u32 s_padKeys = 0;               // a gamepad's buttons, as the console's
 static float s_lookYaw = 0, s_lookPitch = 0;
 static std::atomic<int> s_rotary{ 0 };  // bezel clicks, hundredths (MorrowindActivity, on the UI thread)
 static SDL_Gamepad* s_gamepad = nullptr;
+// The app going to the background: SDL sends it from inside its pump on the game's thread (in a scan of ours) and then
+// waits there until the app comes back, so the watch saves the game right then (platform/platform.hpp
+// gameSaveForBackground: only between two frames of play) and stops walking on
+static bool SDLCALL leavingWatch(void*, SDL_Event* e)
+{
+	if (e->type == SDL_EVENT_WILL_ENTER_BACKGROUND)
+	{
+		s_walk = false;
+		gameSaveForBackground();
+	}
+	return true;
+}
 
 extern "C" JNIEXPORT void JNICALL Java_net_fractumseraph_morrowind_MorrowindActivity_nativeRotary(JNIEnv*, jclass, jfloat clicks)
 {
@@ -444,6 +458,7 @@ void hidScanInput()
 		case SDL_EVENT_TERMINATING:
 			s_quit = true;
 			break;
+
 		case SDL_EVENT_FINGER_DOWN:
 			if (Finger* f = finger(e.tfinger.fingerID, true))
 				fingerDown(g, *f, e.tfinger.x * ww, e.tfinger.y * wh, ww, wh);
@@ -691,6 +706,38 @@ void androidDrawOverlay(int ww, int wh)
 	}
 	if (s_view != VIEW_TOP)
 		return;
+	// Health, magicka and fatigue round the circle's edge beside the world, as a watch face's rings: health up the left
+	// side, magicka up the right, fatigue along the bottom right; each filled from its foot by its share, a dim track
+	// for the rest, and health red-bright while low (the 3DS shows them on the bottom screen)
+	if (!s_ring && g_mainFrames != 0)
+	{
+		float outer = g.r * 0.985f, inner = g.r * 0.935f;
+		struct Bar { float from, to; u32 color; };
+		static const Bar kBars[3] = { { 205, 155, 0xE03030D0 }, { 335, 385, 0xE0D06030 }, { 292, 330, 0xE040B040 } };
+		for (int i = 0; i < 3; i++)
+		{
+			const Bar& b = kBars[i];
+			float share = std::clamp(g_playerBars[i], 0.0f, 1.0f);
+			u32 color = i == 0 && share < 0.25f ? 0xF04040FF : b.color;
+			glesArc(g.cx, g.cy, outer, inner, b.from, b.to, 0x50808080);
+			if (share > 0.0f)
+				glesArc(g.cx, g.cy, outer, inner, b.from, b.from + (b.to - b.from) * share, color);
+		}
+		// Health falling under a quarter: three buzzes, once until it is back over a third
+		static bool warned = false;
+		if (!warned && g_playerBars[0] > 0.0f && g_playerBars[0] < 0.25f)
+		{
+			warned = true;
+			buzz(40, 3);
+		}
+		else if (g_playerBars[0] > 0.34f)
+			warned = false;
+		// North: a mark on the edge where north lies from where the player faces (straight up: facing north)
+		float north = 90.0f + g_playerYaw * 57.29578f, a = north * 0.01745329f;
+		float nx = g.cx + cosf(a) * g.r * 0.9f, ny = g.cy - sinf(a) * g.r * 0.9f;
+		glesDisc(nx, ny, g.r * 0.055f, 0xB0000000, 0.0f);
+		glesLabel("N", nx, ny, g.r * 0.09f, 0xF0E8F0F8);
+	}
 	// what is on, in words beside the ring's button: sneaking, looking
 	if (!s_ring)
 	{

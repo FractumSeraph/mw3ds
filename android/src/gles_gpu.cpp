@@ -1381,6 +1381,22 @@ void glesDisc(float cx, float cy, float r, u32 color, float inner)
 	}
 }
 
+void glesArc(float cx, float cy, float r, float inner, float a0, float a1, u32 color)
+{
+	batchFor(nullptr, nullptr, true);
+	int sides = std::max(2, (int)(fabsf(a1 - a0) / 4.0f));
+	for (int i = 0; i < sides; i++)
+	{
+		// (degrees anticlockwise from the right; the display's y runs down)
+		float b0 = (a0 + (a1 - a0) * i / sides) * 0.01745329f, b1 = (a0 + (a1 - a0) * (i + 1) / sides) * 0.01745329f;
+		Vertex2D o0 = w2(cx + cosf(b0) * r, cy - sinf(b0) * r, color), o1 = w2(cx + cosf(b1) * r, cy - sinf(b1) * r, color);
+		Vertex2D i0 = w2(cx + cosf(b0) * inner, cy - sinf(b0) * inner, color);
+		Vertex2D i1 = w2(cx + cosf(b1) * inner, cy - sinf(b1) * inner, color);
+		Vertex2D q[6] = { i0, o0, o1, i0, o1, i1 };
+		s_batch.insert(s_batch.end(), q, q + 6);
+	}
+}
+
 // (each letter 5 columns of 7 rows, the top row in the lowest bit)
 static const struct { char c; u8 cols[5]; } kGlyphs[] = {
 	{ 'A', { 0x7E, 0x09, 0x09, 0x09, 0x7E } }, { 'B', { 0x7F, 0x49, 0x49, 0x49, 0x36 } },
