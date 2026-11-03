@@ -68,20 +68,37 @@ Besides the game's own autosaves (a door, travel), the game autosaves as the app
 screen sleeping, a notification, the Home button), where Android may end it unasked: SDL tells the game from inside its
 input scan, between two frames of play (`gameSaveForBackground` in `source/engine.cpp`).
 
-### Frame rate
-
-Options > Video > **Frame rate** (in place of the 3DS's depth buffer choice, which only its 3D screen uses): 60, or 30,
-which keeps a watch cooler and its battery going longer.
+### The menus
 
 | On the bottom screen | |
 | --- | --- |
 | A finger | The stylus |
 | **BACK**, **MENU**, **OK** | The console's B, START and A |
 | The bezel | The menus' highlight up and down (a list's row, an item grid's row; **OK** chooses it) and a text pane's scroll |
+| **ALL** / **ZOOM** | The whole screen, or zoomed in again (until the menus close) |
 | The back button | B |
 | **1** **2** **3** **4** under Inventory and Magic | Make the highlighted item or spell that quick key (the 3DS's ZL + D-pad); the HUD's slots use them |
 
 The game's hints and its tutorial name these controls on Android, not the 3DS's buttons.
+
+The bottom screen is zoomed in on what you are reading (Options > Video > **Menu zoom**, on by default): the row,
+item or button the bezel moved to, as wide as the circle holds and at most 1.6 times the whole screen's size, or a
+new answer in a conversation, its words whole. Turn the bezel in a conversation and the view goes to the topics;
+choose one and it comes back to the answer; a finger scrolls the answer. A tap never moves the view, so what you tap
+stays under your finger. Screens with nothing to follow (the HUD's buttons, the map, the stats) are shown whole. The
+game reports what is being read (`uiFocus` in `source/mwgui/widgets.cpp`: the lists, the item grids, the text panes,
+the focused buttons and the dialogue's words); `android_input.cpp` eases the view to it. The bottom screen is drawn at
+twice the console's resolution, so the font shows the detail its texture has.
+
+### Frame rate and battery
+
+Options > Video > **Frame rate** (in place of the 3DS's depth buffer choice, which only its 3D screen uses): 60, or 30,
+which keeps a watch cooler and its battery going longer. The menus run at 30 whatever it is.
+
+A watch shows one of the console's two screens, so the other isn't drawn: the world behind a menu, the HUD's buttons
+during play (`g_shownScreen` in `source/engine.cpp`). On the emulator a frame of the main menu took 2.9 ms of work
+instead of 39 with the world drawn behind it. `adb logcat -s mw3ds` shows the frame rate and the work a frame every
+10 s (`gles:`).
 
 The actions press what the button layout chosen in Options has them on (Xbox by default). A paired gamepad is the
 console's buttons where Nintendo puts them (A on the right), its sticks the Circle Pad and the C-stick.

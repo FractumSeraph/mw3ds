@@ -72,8 +72,72 @@ const std::vector<std::string>& uiLastButtons()
 	return s_lastButtons;
 }
 
+// The reader's eye (uiFocus): the frame's candidates, the best kept; the last frame's choice once a frame begins
+namespace
+{
+// rank: what the reader's eye goes to first
+enum
+{
+	FOCUS_BUTTON,       // a button with the keys' focus
+	FOCUS_STANDING,     // a list's or a grid's highlight, a text pane
+	FOCUS_SCROLLED,     // a text pane the keys (the C-stick) scrolled this frame, or that took new words
+	FOCUS_MOVED,        // a list's or a grid's highlight the keys moved this frame
+};
+struct FocusCandidate { int id; float x, y, w, h; int rank; };
+FocusCandidate s_candidate;
+bool s_candidates = false;
+UiFocus s_focus;
+int s_focusId = -1;
+}
+
+// (a widget is told from the others by where its box is)
+static int widgetId(float x, float y)
+{
+	return (int)lroundf(x) * 1024 + (int)lroundf(y) + 1;
+}
+
+// The best of the frame by rank; of two the same, the one followed the frame before, else the first drawn
+static void focusCandidate(int id, float x, float y, float w, float h, int rank)
+{
+	if (s_candidates && (rank < s_candidate.rank || (rank == s_candidate.rank && (s_candidate.id == s_focusId
+		|| id != s_focusId))))
+		return;
+	s_candidate = { id, x, y, w, h, rank };
+	s_candidates = true;
+}
+
+// A text pane's rank: scrolled by the keys this frame (held up or down, or the C-stick), or standing
+static int paneRank(bool keys)
+{
+	return (keys && (s_in.held & (KEY_UP | KEY_DOWN))) || s_in.stickY != 0.0f ? FOCUS_SCROLLED : FOCUS_STANDING;
+}
+
+const UiFocus& uiFocus()
+{
+	return s_focus;
+}
+
+void uiFocusPane(int id, float x, float y, float w, float h, bool news)
+{
+	focusCandidate(-1 - id, x, y, w, h, news ? FOCUS_SCROLLED : FOCUS_STANDING);
+}
+
 void uiBeginFrame(const UiInput& in)
 {
+	if (s_candidates)
+	{
+		if (s_candidate.id != s_focusId || s_candidate.rank >= FOCUS_SCROLLED)
+			s_focus.serial++;
+		s_focusId = s_candidate.id;
+		s_focus.x = s_candidate.x;
+		s_focus.y = s_candidate.y;
+		s_focus.w = s_candidate.w;
+		s_focus.h = s_candidate.h;
+	}
+	else
+		s_focusId = -1;
+	s_focus.valid = s_candidates;
+	s_candidates = false;
 	s_in = in;
 	s_frame++;
 	C2D_TextBufClear(s_buf);
@@ -755,6 +819,8 @@ bool uiButton(float x, float y, float w, float h, const std::string& label, bool
 		text += "..";
 	}
 	uiTextCentered(x + w / 2, y + (h - uiLineHeight(scale)) / 2, scale, c, text);
+	if (focused)
+		focusCandidate(widgetId(x, y), x, y, w, h, FOCUS_BUTTON);
 	if (!enabled)
 		return false;
 	return uiHit(x, y, w, h) || (focused && (s_in.down & KEY_A));
@@ -766,6 +832,7 @@ int uiList(UiList& list, float x, float y, float w, float h, const std::vector<s
 	float rowH = uiLineHeight(scale) + 4.0f;
 	float content = rows.size() * rowH;
 	int result = -1;
+	int before = list.selected;
 	if (keys && !rows.empty())
 	{
 		if (s_in.down & KEY_DOWN) list.selected = (list.selected + 1) % rows.size();
@@ -780,6 +847,9 @@ int uiList(UiList& list, float x, float y, float w, float h, const std::vector<s
 	if (s_in.touching && s_in.touchX >= x && s_in.touchX < x + w && s_in.touchY >= y && s_in.touchY < y + h)
 		list.scroll -= s_in.dragDY;
 	list.scroll = fmaxf(0.0f, fminf(list.scroll, fmaxf(0.0f, content - h)));
+	if (keys && !rows.empty())
+		focusCandidate(widgetId(x, y), x, fmaxf(y, y + list.selected * rowH - list.scroll), w, rowH,
+			list.selected != before ? FOCUS_MOVED : FOCUS_STANDING);
 
 	C2D_Flush();
 	C3D_SetScissor(GPU_SCISSOR_NORMAL, (u32)(240 - (y + h)), (u32)(320 - (x + w)), (u32)(240 - y), (u32)(320 - x));
@@ -858,6 +928,7 @@ int uiWrapList(UiList& list, float x, float y, float w, float h, const std::vect
 	}
 	float content = top[rows.size()];
 	int result = -1;
+	int before = list.selected;
 	if (keys && !rows.empty())
 	{
 		if (s_in.down & KEY_DOWN) list.selected = (list.selected + 1) % rows.size();
@@ -874,6 +945,10 @@ int uiWrapList(UiList& list, float x, float y, float w, float h, const std::vect
 	if (s_in.touching && s_in.touchX >= x && s_in.touchX < x + w && s_in.touchY >= y && s_in.touchY < y + h)
 		list.scroll -= s_in.dragDY;
 	list.scroll = fmaxf(0.0f, fminf(list.scroll, fmaxf(0.0f, content - h)));
+	if (keys && list.selected >= 0 && list.selected < (int)rows.size())
+		focusCandidate(widgetId(x, y), x, fmaxf(y, y + top[list.selected] - list.scroll), w,
+			fminf(top[list.selected + 1] - top[list.selected], h),
+			list.selected != before ? FOCUS_MOVED : FOCUS_STANDING);
 
 	C2D_Flush();
 	C3D_SetScissor(GPU_SCISSOR_NORMAL, (u32)(240 - (y + h)), (u32)(320 - (x + w)), (u32)(240 - y), (u32)(320 - x));
@@ -909,6 +984,8 @@ void uiTextBox(UiScroll& s, float x, float y, float w, float h, const std::strin
 	std::vector<std::string> lines = uiWrap(text, w - 8, scale);
 	float lh = uiLineHeight(scale);
 	float content = lines.size() * lh;
+	if (keys)
+		focusCandidate(widgetId(x, y), x, y, w, h, paneRank(keys));
 	if (keys)
 	{
 		if (s_in.held & KEY_DOWN) s.scroll += 4.0f;
@@ -992,6 +1069,8 @@ int uiLinkTextBox(UiLinkText& t, long revision, float x, float y, float w, float
 	if (s_in.touching && s_in.touchX >= x && s_in.touchX < x + w && s_in.touchY >= y && s_in.touchY < y + h)
 		s.scroll -= s_in.dragDY;
 	s.scroll = fmaxf(0.0f, fminf(s.scroll, fmaxf(0.0f, t.height - h)));
+	if (keys)
+		focusCandidate(widgetId(x, y), x, y, w, h, paneRank(keys));
 	// The buttons choose a link: it starts on the first one in view, LEFT / RIGHT step through them (the page
 	// scrolls to the one chosen) and A opens it
 	if (keys)
@@ -1117,6 +1196,7 @@ void uiTextBoxPictures(UiScroll& s, float x, float y, float w, float h, const st
 	float content = 0.0f;
 	for (auto& b : blocks)
 		content += b.h;
+	focusCandidate(widgetId(x, y), x, y, w, h, paneRank(true));
 	if (s_in.held & KEY_DOWN) s.scroll += 4.0f;
 	if (s_in.held & KEY_UP) s.scroll -= 4.0f;
 	s.scroll += uiStickScroll();
@@ -1188,6 +1268,7 @@ int uiItemGrid(UiGrid& grid, float x, float y, float w, float h, const std::vect
 		grid.selected = n - 1;
 	if (grid.selected < 0)
 		grid.selected = 0;
+	int before = grid.selected;
 	if (keys && n > 0)
 	{
 		int sel = grid.selected;
@@ -1207,6 +1288,10 @@ int uiItemGrid(UiGrid& grid, float x, float y, float w, float h, const std::vect
 	if (s_in.touching && s_in.touchX >= x && s_in.touchX < x + w && s_in.touchY >= y && s_in.touchY < y + h)
 		grid.scroll -= s_in.dragDY;
 	grid.scroll = fmaxf(0.0f, fminf(grid.scroll, fmaxf(0.0f, content - h)));
+	if (keys && n > 0)
+		focusCandidate(widgetId(x, y), left + (grid.selected % cols) * cell,
+			fmaxf(y, y + (grid.selected / cols) * cell - grid.scroll), cell, cell,
+			grid.selected != before ? FOCUS_MOVED : FOCUS_STANDING);
 
 	C2D_Flush();
 	C3D_SetScissor(GPU_SCISSOR_NORMAL, (u32)(240 - (y + h)), (u32)(320 - (x + w)), (u32)(240 - y), (u32)(320 - x));

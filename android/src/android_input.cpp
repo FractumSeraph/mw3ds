@@ -12,7 +12,8 @@
 //   LOOK (a slide looks instead of walking). They press what the button layout chosen in Options has them on
 //   (layoutKeys). A press buzzes.
 // - On the bottom screen a finger is the stylus; BACK (B), MENU (START) and OK (A) are above it. The bezel moves the
-//   menus' highlight and scrolls their text; the back button is B.
+//   menus' highlight and scrolls their text; the back button is B. The menus are zoomed in on what the bezel moved to
+//   (Options > Video > Menu zoom: mwgui/widgets.hpp uiFocus), and ALL (or ZOOM) shows the whole screen (zooms in).
 #include <3ds.h>
 #include <SDL3/SDL.h>
 #include <jni.h>
@@ -28,6 +29,7 @@
 #include "android.hpp"
 #include "components/debug/debuglog.hpp"
 #include "mwbase/sessiontypes.hpp"
+#include "mwgui/widgets.hpp"
 #include "mwinput/inputmanagerimp.hpp"
 #include "mwmechanics/mechanicsstate.hpp"
 #include "platform/platform.hpp"
@@ -177,11 +179,77 @@ static Geometry geometry(int ww, int wh)
 	return { ww * 0.5f, wh * 0.5f, std::min(ww, wh) * 0.5f, (float)ww, (float)wh };
 }
 
+// ---- the bottom screen zoomed (Options > Video > Menu zoom): large round what the reader is at, the row, item or
+// button the bezel moved to or a new answer's words (the game's uiFocus), eased there; the whole screen when the menu
+// has none of them (the map, the HUD's buttons) or ALL is pressed. A tap doesn't move it, nor anything while a finger
+// is on the screen, so what is under the finger stays there
+
+static float s_zoomScale = 0.0f, s_zoomX = 160.0f, s_zoomY = 120.0f;    // display pixels a game pixel; the centre
+static float s_zoomToScale = 0.0f, s_zoomToX = 160.0f, s_zoomToY = 120.0f;
+static u32 s_zoomSerial = 0;
+static bool s_zoomFlip = false;         // ALL / ZOOM: the other of Menu zoom's two, until the menus close
+static const float kZoomMost = 1.6f;    // times the whole screen's size, at most
+
+// The whole bottom screen in the circle (its diagonal, 400, the diameter) or the rectangle
+static float wholeScale(const Geometry& g, bool round)
+{
+	return round ? 2.0f * g.r / 400.0f : std::min(g.w / 320.0f, g.h / 240.0f);
+}
+
+static bool zoomOn()
+{
+	return g_menuZoom != s_zoomFlip;
+}
+
+static void zoomStep(const Geometry& g, float dt, bool fingerOnScreen)
+{
+	float whole = wholeScale(g, s_round);
+	if (s_zoomScale <= 0.0f)
+		s_zoomScale = s_zoomToScale = whole;
+	if (fingerOnScreen)
+		return;
+	const UiFocus& f = uiFocus();
+	if (s_view != VIEW_BOTTOM || !zoomOn() || !f.valid)
+	{
+		s_zoomToScale = whole;
+		s_zoomToX = 160.0f;
+		s_zoomToY = 120.0f;
+	}
+	else if (f.serial != s_zoomSerial || s_zoomToScale <= whole)
+	{
+		// (the focus's rectangle across 94% of the circle, its diagonal: a list's row as wide as fits, a text pane
+		// whole; a small one, an item or a button, at kZoomMost with what is round it)
+		float diag = std::max(8.0f, sqrtf(f.w * f.w + f.h * f.h));
+		s_zoomToScale = std::clamp(2.0f * g.r * 0.94f / diag, whole, whole * kZoomMost);
+		s_zoomToX = f.x + f.w * 0.5f;
+		s_zoomToY = f.y + f.h * 0.5f;
+	}
+	if (f.serial != s_zoomSerial && s_zoomToScale > whole)
+		logf("watch: zoom %.2fx on %.0f %.0f %.0f x %.0f", s_zoomToScale / whole, f.x, f.y, f.w, f.h);
+	s_zoomSerial = f.serial;
+	// (the screen's edge no farther in than a little past the circle's: the corners stay dark as they were)
+	float hw = g.r / s_zoomToScale * 0.75f, hh = g.r / s_zoomToScale * 0.75f;
+	float cx = hw >= 160.0f ? 160.0f : std::clamp(s_zoomToX, hw, 320.0f - hw);
+	float cy = hh >= 120.0f ? 120.0f : std::clamp(s_zoomToY, hh, 240.0f - hh);
+	float k = 1.0f - expf(-dt * 12.0f);
+	s_zoomScale += (s_zoomToScale - s_zoomScale) * k;
+	s_zoomX += (cx - s_zoomX) * k;
+	s_zoomY += (cy - s_zoomY) * k;
+}
+
 ScreenView androidScreenView(int ww, int wh)
 {
 	Geometry g = geometry(ww, wh);
 	ScreenView v;
 	v.screen = s_view == VIEW_TOP ? GFX_TOP : GFX_BOTTOM;
+	if (s_view == VIEW_BOTTOM && s_zoomScale > wholeScale(g, s_round) * 1.01f)
+	{
+		v.w = 320.0f * s_zoomScale;
+		v.h = 240.0f * s_zoomScale;
+		v.x = g.cx - s_zoomX * s_zoomScale;
+		v.y = g.cy - s_zoomY * s_zoomScale;
+		return v;
+	}
 	float sw = s_view == VIEW_TOP ? 400.0f : 320.0f, sh = 240.0f;
 	if (s_round)
 	{
@@ -204,7 +272,7 @@ ScreenView androidScreenView(int ww, int wh)
 // What a button or a ring item does: a console button (as the layout Options chose has it: layoutKeys), or one of
 // the watch's own (the screens' swap, walking on, the look mode, the ring)
 enum Action { ACT_START, ACT_READY, ACT_JUMP, ACT_CAST, ACT_ATTACK, ACT_SNEAK, ACT_POV, ACT_SCREEN, ACT_LOOK, ACT_WALK,
-	ACT_RING, ACT_B, ACT_A, ACT_QUICK1, ACT_QUICK2, ACT_QUICK3, ACT_QUICK4 };
+	ACT_RING, ACT_B, ACT_A, ACT_QUICK1, ACT_QUICK2, ACT_QUICK3, ACT_QUICK4, ACT_ZOOM };
 // Where (degrees round the centre from the right, anticlockwise, and how far out as a share of the radius) and its word
 struct Button { Action act; float deg, out; const char* label; };
 // On the top screen only two, in the bands above and below it, clear of the picture: the ring and walking on
@@ -212,7 +280,7 @@ static const Button kTopButtons[] = { { ACT_RING, 90, 0.76f, "MORE" }, { ACT_WAL
 // Above the bottom screen (high: lower, they would cover its top row) and below it
 static const Button kBottomButtons[] = {
 	{ ACT_B, 112, 0.88f, "BACK" }, { ACT_START, 90, 0.80f, "MENU" }, { ACT_A, 68, 0.88f, "OK" },
-	{ ACT_SCREEN, 270, 0.80f, "WORLD" },
+	{ ACT_SCREEN, 270, 0.80f, "WORLD" }, { ACT_ZOOM, 238, 0.88f, "ZOOM" },
 };
 // The ring: eight actions round the display, the world dimmed behind them
 static const Button kRing[] = {
@@ -228,6 +296,12 @@ static const float kRingSize = 0.19f;       // a ring item's (the quick keys' in
 static const float kQuickSize = 0.11f;
 
 static bool isQuick(Action a) { return a >= ACT_QUICK1 && a <= ACT_QUICK4; }
+
+// (ZOOM / ALL only on a menu with something to zoom in on)
+static bool buttonShown(const Button& b)
+{
+	return b.act != ACT_ZOOM || uiFocus().valid;
+}
 
 static void buttonsFor(const Button*& list, int& n, float& size)
 {
@@ -289,6 +363,9 @@ static void act(Action a)
 		break;
 	case ACT_RING:
 		s_ring = true;
+		break;
+	case ACT_ZOOM:
+		s_zoomFlip = !s_zoomFlip;
 		break;
 	case ACT_QUICK1: case ACT_QUICK2: case ACT_QUICK3: case ACT_QUICK4:
 		gameUseQuickKey(a - ACT_QUICK1);
@@ -363,7 +440,7 @@ static int buttonUnder(const Geometry& g, float x, float y)
 		float bx, by;
 		buttonAt(g, list[i], bx, by);
 		float d = (isQuick(list[i].act) ? kQuickSize : size) * g.r * 1.15f;
-		if ((x - bx) * (x - bx) + (y - by) * (y - by) <= d * d)
+		if (buttonShown(list[i]) && (x - bx) * (x - bx) + (y - by) * (y - by) <= d * d)
 			return i;
 	}
 	return -1;
@@ -455,7 +532,20 @@ void hidScanInput()
 		s_view = want;
 		if (want == VIEW_BOTTOM)
 			s_walk = s_ring = false;
+		else
+			s_zoomFlip = false;
 	}
+	{
+		static Uint64 last = 0;
+		Uint64 now = SDL_GetTicks();
+		float dt = last ? std::min(0.1f, (now - last) / 1000.0f) : 0.0f;
+		last = now;
+		bool onScreen = false;
+		for (auto& f : s_fingers)
+			onScreen |= f.role == ROLE_SCREEN;
+		zoomStep(g, dt, onScreen);
+	}
+	g_shownScreen = s_view == VIEW_TOP ? GFX_TOP : GFX_BOTTOM;
 
 	u32 pulse = 0;
 	SDL_Event e;
@@ -699,6 +789,8 @@ void androidDrawOverlay(int ww, int wh)
 	buttonsFor(list, n, size);
 	for (int i = 0; i < n; i++)
 	{
+		if (!buttonShown(list[i]))
+			continue;
 		float br = (isQuick(list[i].act) ? kQuickSize : size) * g.r;
 		float x, y;
 		buttonAt(g, list[i], x, y);
@@ -710,8 +802,9 @@ void androidDrawOverlay(int ww, int wh)
 		glesDisc(x, y, br, pressed || on ? kLit : kShade, 0.0f);
 		glesDisc(x, y, br, kEdge, br - 2.0f);
 		// (the label's line as tall as fits: its letters about half that, the word inside the disc)
-		float chars = (float)strlen(list[i].label);
-		glesLabel(list[i].label, x, y, std::min(br * 0.85f, 1.7f * br / (chars * 13.0f / 30.0f)), kInk);
+		const char* label = a == ACT_ZOOM && zoomOn() ? "ALL" : list[i].label;
+		float chars = (float)strlen(label);
+		glesLabel(label, x, y, std::min(br * 0.85f, 1.7f * br / (chars * 13.0f / 30.0f)), kInk);
 	}
 	if (s_view != VIEW_TOP)
 		return;

@@ -29,6 +29,7 @@ static const bool kAidsDefault = false;
 #endif
 bool g_autoReady = kAidsDefault, g_safeStrikes = kAidsDefault, g_aimHelp = kAidsDefault;
 int g_fpsCap = 60;
+bool g_menuZoom = true;
 int g_depthMode = DEPTH_16_IN_3D;
 static int s_gyroSens = 100;      // gyro aim's sensitivity, kept while it is off
 
@@ -93,6 +94,7 @@ void Session::loadSettings()
 		else if (strncmp(line, "safestrikes=", 12) == 0) g_safeStrikes = strncmp(line + 12, "on", 2) == 0;
 		else if (strncmp(line, "aimhelp=", 8) == 0) g_aimHelp = strncmp(line + 8, "on", 2) == 0;
 		else if (strncmp(line, "fpscap=", 7) == 0) g_fpsCap = atoi(line + 7) == 30 ? 30 : 60;
+		else if (strncmp(line, "menuzoom=", 9) == 0) g_menuZoom = strncmp(line + 9, "off", 3) != 0;
 		else if (strncmp(line, "depth=", 6) == 0 && !autotest)
 			g_depthMode = strncmp(line + 6, "24", 2) == 0 ? DEPTH_24 : strncmp(line + 6, "16in3d", 6) == 0 ? DEPTH_16_IN_3D : DEPTH_16;
 		else if (strncmp(line, "view=", 5) == 0)
@@ -133,7 +135,7 @@ void Session::saveSettings()
 	fprintf(f, "subtitles=%s\n", g_subtitles ? "on" : "off");
 	fprintf(f, "autoready=%s\nsafestrikes=%s\naimhelp=%s\n", g_autoReady ? "on" : "off", g_safeStrikes ? "on" : "off",
 		g_aimHelp ? "on" : "off");
-	fprintf(f, "fpscap=%d\n", g_fpsCap);
+	fprintf(f, "fpscap=%d\nmenuzoom=%s\n", g_fpsCap, g_menuZoom ? "on" : "off");
 	fprintf(f, "depth=%s\n", g_depthMode == DEPTH_24 ? "24" : g_depthMode == DEPTH_16_IN_3D ? "16in3d" : "16");
 	fprintf(f, "view=%s\n", viewMode == VIEW_MIN ? "min" : viewMode == VIEW_MAX ? "max" : viewMode == VIEW_MID ? "mid" : "auto");
 	fprintf(f, "dynview=%s\n", viewMode == VIEW_AUTO ? "on" : "off");     // (for an older build reading the file)
