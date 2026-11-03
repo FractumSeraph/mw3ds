@@ -37,6 +37,8 @@
 struct C3D_RenderTarget
 {
 	int w = 0, h = 0;
+	int scale = 1;                  // its pixels to the game's: the bottom screen is drawn at twice the console's, so
+	                                // that the watch's zoomed menus (android_input.cpp) show the font's own detail
 	GLuint fbo = 0, color = 0, depth = 0;
 	int screen = -1, side = -1;
 	C3D_Tex* tex = nullptr;
@@ -594,8 +596,9 @@ static void applyScissor(C3D_RenderTarget* t)
 		glDisable(GL_SCISSOR_TEST);
 		return;
 	}
-	int x0 = std::max(0, t->w - (int)s_scissor[3]), x1 = std::min(t->w, t->w - (int)s_scissor[1]);
-	int y0 = std::max(0, (int)s_scissor[0]), y1 = std::min(t->h, (int)s_scissor[2]);
+	int k = t->scale;
+	int x0 = std::max(0, t->w - (int)s_scissor[3] * k), x1 = std::min(t->w, t->w - (int)s_scissor[1] * k);
+	int y0 = std::max(0, (int)s_scissor[0] * k), y1 = std::min(t->h, (int)s_scissor[2] * k);
 	glEnable(GL_SCISSOR_TEST);
 	glScissor(x0, y0, std::max(0, x1 - x0), std::max(0, y1 - y0));
 }
@@ -606,8 +609,8 @@ static void flush2D()
 		return;
 	bindTarget(s_batchWindow ? nullptr : s_batchTarget);
 	glUseProgram(s_p2d.id);
-	float w = s_batchWindow ? (float)s_windowW : (float)s_batchTarget->w;
-	float h = s_batchWindow ? (float)s_windowH : (float)s_batchTarget->h;
+	float w = s_batchWindow ? (float)s_windowW : (float)(s_batchTarget->w / s_batchTarget->scale);
+	float h = s_batchWindow ? (float)s_windowH : (float)(s_batchTarget->h / s_batchTarget->scale);
 	glUniform2f(s_p2d.size, w, h);
 	float flip = bindTex(0, s_batchTex);
 	glUniform1f(s_p2d.useTex, s_batchTex ? 1.0f : 0.0f);
@@ -705,8 +708,29 @@ static C3D_RenderTarget* screenTarget(int screen)
 
 // The frame onto the watch's display: the screen android_input.cpp shows, where it says, then its controls; at the
 // rate the game asks for (C3D_FrameRate: 30 a second, of the display's 60)
+// The game's work a frame, from the last frame's end (its swap and wait done) to this one's: logged every 10 s as an
+// average, the watch's busy share of its frames (C3D_GetProcessingTime stays 0: the view distance's Auto reads it)
+static Uint64 s_workFrom = 0, s_workNs = 0, s_workSince = 0;
+static int s_workFrames = 0;
+
 void C3D_FrameEnd(u8)
 {
+	if (s_workFrom)
+	{
+		Uint64 now = SDL_GetTicksNS();
+		s_workNs += now - s_workFrom;
+		s_workFrames++;
+		if (!s_workSince)
+			s_workSince = now;
+		else if (now - s_workSince >= 10000000000ULL)
+		{
+			logf("gles: %.1f frames a second, %.2f ms of work a frame (%s screen)", s_workFrames * 1e9f / (now - s_workSince),
+				s_workNs / 1e6f / s_workFrames, g_shownScreen == GFX_BOTTOM ? "the bottom" : "the top");
+			s_workNs = 0;
+			s_workFrames = 0;
+			s_workSince = now;
+		}
+	}
 	flush2D();
 	SDL_Window* win = androidWindow();
 	SDL_GetWindowSizeInPixels(win, &s_windowW, &s_windowH);
@@ -745,10 +769,13 @@ void C3D_FrameEnd(u8)
 	static Uint64 last = 0;
 	Uint64 now = SDL_GetTicksNS();
 	float rate = std::min(s_frameRate, (float)g_fpsCap);     // (Options > Video > Frame rate)
+	if (view.screen == GFX_BOTTOM)
+		rate = std::min(rate, 30.0f);       // (the menus and the HUD's buttons: 30 is plenty, and half the display's work)
 	Uint64 period = (Uint64)(1e9 / std::max(10.0f, rate));
 	if (rate < 59.0f && last && now - last < period - 4000000)
 		SDL_DelayPrecise(period - 4000000 - (now - last));
 	last = SDL_GetTicksNS();
+	s_workFrom = last;
 }
 
 void C3D_FrameDrawOn(C3D_RenderTarget* t) { s_target = t; }
@@ -819,7 +846,9 @@ void C3D_RenderTargetSetOutput(C3D_RenderTarget* t, int screen, int side, u32)
 
 C3D_RenderTarget* C2D_CreateScreenTarget(int screen, int side)
 {
-	C3D_RenderTarget* t = newTarget(screen == GFX_TOP ? 400 : 320, 240, 0, true);
+	int k = screen == GFX_BOTTOM ? 2 : 1;
+	C3D_RenderTarget* t = newTarget((screen == GFX_TOP ? 400 : 320) * k, 240 * k, 0, true);
+	t->scale = k;
 	C3D_RenderTargetSetOutput(t, screen, side, 0);
 	return t;
 }

@@ -90,8 +90,10 @@ void Session::drawDialogue()
 	header(speaker.actor >= 0 ? w.game.actors[speaker.actor].name.str() : speaker.id.str());
 
 	const float tx = 4, ty = 24, tw = 206, th = 212;
-	if (wordsRevision != dlg.revision)
+	bool news = wordsRevision != dlg.revision;
+	if (news)
 		layoutDialogue(tw - 6);
+	uiFocusPane(0, tx, ty, tw, th, news);       // (the reader's eye goes to a new answer: a watch zooms in on it)
 	const UiInput& in = uiIn();
 	if (in.touching && in.touchX < tx + tw && in.touchY > ty)
 		dlgScroll -= in.dragDY;

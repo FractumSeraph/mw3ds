@@ -441,6 +441,7 @@ bool Engine::retryFromTitle(bool& loadedOut)
 // The game while the frame loop's own input scan runs, between two frames: what gameSaveForBackground saves (null at
 // any other time: a load under way, the title, a scripted run, the player dead)
 static Session* s_scanSession = nullptr;
+int g_shownScreen = -1;           // (mwbase/sessiontypes.hpp: the Android build sets it)
 
 bool gameSaveForBackground()
 {
@@ -865,6 +866,10 @@ bool Engine::frame()
 	bool pausedBoost = loaded && session->menuOpen() && session->frameCap < 60 && !session->previewFace && !session->autotest;
 	int topEvery = pausedBoost ? (session->frameCap <= 20 ? 3 : 2) : 1;
 	bool drawTopNow = topEvery == 1 || g_mainFrames % topEvery == 0;
+	// A watch shows one screen: with the menu's (the bottom) on its display, the world behind isn't drawn at all; it
+	// is again the frame the menu closes or the player looks at it
+	if (g_shownScreen == GFX_BOTTOM && loaded && session->menuOpen() && !session->autotest)
+		drawTopNow = false;
 	for (int eye = 0; drawTopNow && eye < (stereoOn ? 2 : 1); eye++)
 	{
 		C3D_RenderTarget* target3d = eye ? topRight : top;
@@ -951,7 +956,9 @@ bool Engine::frame()
 	// frame, and its bars and clock don't need more. Menus and messages draw every frame (taps, scrolling), and so does
 	// the HUD while a finger is on the screen or just lifted: its buttons, quick slots and map read the tap as they draw
 	bool hudOnly = loaded && session->screen == SCR_NONE && session->messages.empty() && !session->wantName;
-	if (!hudOnly || g_mainFrames % 3 == 0 || ui.touching || ui.tapped)
+	// (nor, on a watch showing the world, the HUD's buttons and map: nobody sees them or taps them there)
+	bool bottomHidden = g_shownScreen == GFX_TOP && hudOnly && !session->autotest;
+	if ((!hudOnly || g_mainFrames % 3 == 0 || ui.touching || ui.tapped) && !bottomHidden)
 	{
 		extern int g_uiDraws;
 		g_uiDraws = 0;

@@ -41,6 +41,15 @@ const std::vector<std::string>& uiLastButtons();    // the labels of the buttons
 const UiInput& uiIn();
 void uiConsume(u32 keys);                 // keys handled by gameplay are hidden from widgets this frame
 
+// Where the reader's eye is on the screen: the row, item, button or text pane the D-pad (a watch's bezel) moves or
+// scrolls, or that took new words, as the last whole frame drew it (valid false: nothing of the kind). serial changes
+// when it went to another of them or the keys moved it, not for a tap. The Android build's menus zoom in on it
+struct UiFocus { float x = 0, y = 0, w = 0, h = 0; u32 serial = 0; bool valid = false; };
+const UiFocus& uiFocus();
+// A pane a window draws itself that the reader follows (the dialogue's words): id tells it from the frame's other
+// panes, news when it took new words this frame
+void uiFocusPane(int id, float x, float y, float w, float h, bool news);
+
 // Text (system font). scale 0.5 ~ 15 px lines.
 float uiLineHeight(float scale);
 float uiTextWidth(const std::string& s, float scale);

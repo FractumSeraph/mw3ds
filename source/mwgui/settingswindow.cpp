@@ -282,6 +282,13 @@ void Session::drawOptions()
 			notify(g_fpsCap == 30 ? "30 frames a second: the watch stays cooler and its battery lasts longer."
 				: "60 frames a second: smoother, warmer.");
 		}
+		// Menu zoom: the menus drawn large round what the bezel moves to (a list's row, an item, a new answer), or whole
+		if (choice(170, "Menu zoom", g_menuZoom ? "On" : "Off"))
+		{
+			g_menuZoom = !g_menuZoom;
+			notify(g_menuZoom ? "Menu zoom on: the menus follow the bezel, large. ALL shows the whole screen."
+				: "Menu zoom off: the whole screen, small. ZOOM zooms in for a while.");
+		}
 #else
 		// Depth buffer: 24-bit, 16-bit while 3D is on (half the depth traffic of two eyes), or 16-bit always. A tap cycles
 		static const char* kDepthNames[3] = { "24-bit", "16-bit in 3D", "16-bit" };
@@ -293,9 +300,12 @@ void Session::drawOptions()
 				? "Depth buffer 16-bit while 3D is on: lighter frames in 3D." : "Depth buffer 16-bit: far surfaces may flicker.");
 		}
 #endif
-		// (the two hint lines under the rows: what Auto gamma reads the light with, and what gamma 1.00 is)
+		// (the two hint lines under the rows: what Auto gamma reads the light with, and what gamma 1.00 is; on Android,
+		// where Menu zoom takes the first one's place, the second)
+#ifndef MW3DS_ANDROID
 		uiText(10, 180, 0.4f, col::textDim, sensor == SENSOR_QTM ? "Auto gamma checks the light every few seconds."
 			: sensor == SENSOR_CAMERA ? "Auto gamma uses the inner camera at loads." : "No light sensor: Auto gamma stays off.");
+#endif
 		uiText(10, 192, 0.4f, col::textDim, "Gamma 1.00 is Morrowind's own; higher helps in sun.");
 		b = buttons(208, 28, { "Default", w.game.gmstLabel("sclose", "Close") });
 		closing = b == 1;
@@ -306,6 +316,7 @@ void Session::drawOptions()
 			viewMode = VIEW_AUTO;
 			g_depthMode = DEPTH_16_IN_3D;
 			g_fpsCap = 60;
+			g_menuZoom = true;
 			changed = true;
 		}
 	}
