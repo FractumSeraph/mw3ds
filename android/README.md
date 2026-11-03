@@ -59,6 +59,11 @@ The game's **Combat aids** (Options > Prefs > Combat aids, on by default on Andr
 
 Being hit buzzes long.
 
+### Frame rate
+
+Options > Video > **Frame rate** (in place of the 3DS's depth buffer choice, which only its 3D screen uses): 60, or 30,
+which keeps a watch cooler and its battery going longer.
+
 | On the bottom screen | |
 | --- | --- |
 | A finger | The stylus |
@@ -84,7 +89,9 @@ data and saves.
 
 At its first start, with Wi-Fi on, the game downloads its data as the 3DS build does (`mwmp/datadownload.cpp`):
 Morrowind, Tribunal and Bloodmoon converted for the New 3DS, 1.4 GB in 42 parts from halomaps.fractumseraph.net, a few
-minutes on a watch's Wi-Fi. The app keeps the screen on meanwhile, so the watch keeps its Wi-Fi. The data goes into the
+minutes on a watch's Wi-Fi. The app keeps the screen on meanwhile, so the watch keeps its Wi-Fi. A download that fails
+(the network dropped while the watch's charging screen covered the game) tries again by itself every 15 s, 20 times,
+and carries on where it stopped. The data goes into the
 app's folder, `Android/data/net.fractumseraph.morrowind/files/3ds/mw3ds/data`, as `3ds/mw3ds/data` on a 3DS's SD card;
 saves, settings and `log.txt` are beside it in `.../files/3ds/mw3ds`. The game's log also goes to
 `adb logcat -s mw3ds`. Uninstalling the app deletes that folder, data and saves too.
@@ -113,7 +120,12 @@ Without them it releases no app: an unsigned one can't be installed, and one sig
 python android/build.py              # build/android/FractumMorrowind-debug.apk
 python android/build.py --release    # build/android/FractumMorrowind-android.apk, the release build
 python android/build.py --no-apk     # only the native libraries (build/android/jniLibs)
+MW3DS_ANDROID_ABI=x86_64 python android/build.py   # also for the x86_64 emulator
 ```
+
+The Wear OS emulator is x86_64 with no 32-bit ARM, so the 32-bit build won't run there: `MW3DS_ANDROID_ABI=x86_64` builds
+the game for it too (beside the ARM libraries, in their own `obj-x86_64` and `sdl3-build-x86_64`), and the APK then carries
+both. Releases carry the 32-bit ARM build alone.
 
 The release build is signed with the key `android/keystore.properties` names (storeFile, storePassword, keyAlias,
 keyPassword; gitignored), as the release workflow writes it; without one it stops. `MW3DS_VERSION` is its version

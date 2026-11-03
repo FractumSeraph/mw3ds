@@ -49,8 +49,9 @@ android {
         versionCode appVersionCode
         versionName appVersion
         buildConfigField "boolean", "MW3DS_RELEASE_BUILD", "${releaseBuild}"
+        // (x86_64: a development build for the emulator, when android/build.py made its libraries too)
         ndk {
-            abiFilters "armeabi-v7a"
+            abiFilters "armeabi-v7a", "x86_64"
         }
     }
 

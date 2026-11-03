@@ -14,9 +14,30 @@
 #include "components/debug/debuglog.hpp"
 #include <malloc.h>
 
-// The tutorial's console wording (Xbox returns 1), said with the 3DS's controls
+// The tutorial's console wording (Xbox returns 1), said with the 3DS's controls (the Android build's: a watch's
+// one-finger controls, android/README.md)
 static std::string for3ds(std::string t)
 {
+#ifdef MW3DS_ANDROID
+	const char* swap[][2] = {
+		{ "The LEFT THUMBSTICK moves you, and the RIGHT THUMBSTICK looks around.",
+		  "Slide a finger on the screen to walk, and turn the bezel to look around (LOOK, under MORE, makes a slide look)." },
+		{ "Press B to use your menus. When you are done with them, press B again to close them.",
+		  "Your menus are on the bottom screen: SCREEN, under MORE. BACK closes them." },
+		{ "Press the WHITE button to use your journal", "Tap Journal on the bottom screen (SCREEN, under MORE) to use your journal" },
+		{ "Press the X button to pull out your weapon. Once your weapon is readied, hold and release the RIGHT TRIGGER to swing it.",
+		  "Equip your weapon, then choose READY under MORE (it comes out by itself when someone fights you). Hold a finger "
+		  "still to wind up a blow and let go to swing; a tap swings quickly." },
+		{ "Equip the dagger by dropping it on your picture in your inventory menu.",
+		  "Equip the dagger: SCREEN under MORE, tap Items, then tap the dagger twice." },
+		{ "Like all menus, press B to use your new menu. The triggers cycle between menus. Press B again to exit your menus.",
+		  "Like all menus, it's on the bottom screen (SCREEN, under MORE); BACK closes it." },
+		{ "Press Y to ready your Active Magic, then the RIGHT TRIGGER to cast.",
+		  "Choose your Active Magic in the Magic menu, then choose CAST under MORE." },
+		{ "Press BLACK to rest", "Choose MENU under MORE, then Rest / Wait, to rest" },
+		{ "Then select 'Take' to pick them up.", "Then tap Take to pick them up." },
+	};
+#else
 	// (GoldenEye keeps the Xbox layout's buttons, and the stylus layout GoldenEye's)
 	bool xbox = g_controlLayout == CONTROLS_XBOX || g_controlLayout == CONTROLS_GOLDENEYE || stylusLayout();
 	bool stylus = stylusLayout();
@@ -43,6 +64,7 @@ static std::string for3ds(std::string t)
 		{ "Press BLACK to rest", "Press START and choose Rest / Wait to rest" },
 		{ "Then select 'Take' to pick them up.", "Then tap Take to pick them up." },
 	};
+#endif
 	for (auto& s : swap)
 	{
 		size_t at = t.find(s[0]);

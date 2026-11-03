@@ -273,6 +273,16 @@ void Session::drawOptions()
 				: viewMode == VIEW_MIN ? "View distance Min: the nearest fog, the smoothest frames."
 				: "View distance Auto: the fog moves with the frame rate.");
 		}
+#ifdef MW3DS_ANDROID
+		// Frame rate (the Android build, which has no 3D and so no use for the depth buffer's choice): 60, or 30 for a
+		// watch's battery and warmth
+		if (choice(148, "Frame rate", g_fpsCap == 30 ? "30 (cooler, longer battery)" : "60"))
+		{
+			g_fpsCap = g_fpsCap == 30 ? 60 : 30;
+			notify(g_fpsCap == 30 ? "30 frames a second: the watch stays cooler and its battery lasts longer."
+				: "60 frames a second: smoother, warmer.");
+		}
+#else
 		// Depth buffer: 24-bit, 16-bit while 3D is on (half the depth traffic of two eyes), or 16-bit always. A tap cycles
 		static const char* kDepthNames[3] = { "24-bit", "16-bit in 3D", "16-bit" };
 		if (choice(148, "Depth buffer", kDepthNames[g_depthMode]))
@@ -282,6 +292,7 @@ void Session::drawOptions()
 			notify(g_depthMode == DEPTH_24 ? "Depth buffer 24-bit." : g_depthMode == DEPTH_16_IN_3D
 				? "Depth buffer 16-bit while 3D is on: lighter frames in 3D." : "Depth buffer 16-bit: far surfaces may flicker.");
 		}
+#endif
 		// (the two hint lines under the rows: what Auto gamma reads the light with, and what gamma 1.00 is)
 		uiText(10, 180, 0.4f, col::textDim, sensor == SENSOR_QTM ? "Auto gamma checks the light every few seconds."
 			: sensor == SENSOR_CAMERA ? "Auto gamma uses the inner camera at loads." : "No light sensor: Auto gamma stays off.");
@@ -294,6 +305,7 @@ void Session::drawOptions()
 			g_autoGamma = -1;
 			viewMode = VIEW_AUTO;
 			g_depthMode = DEPTH_16_IN_3D;
+			g_fpsCap = 60;
 			changed = true;
 		}
 	}
