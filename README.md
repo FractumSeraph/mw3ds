@@ -48,6 +48,8 @@ MW3DS rather than over it. It plays Morrowind with Tribunal and Bloodmoon, as MW
 - **Updates itself:** at the title screen, with Wi-Fi on, it asks GitHub for the latest release and offers it
   (**Update** beside **Online**). Only the program downloads, checked by SHA-256; your saves stay, and new game data
   downloads when a release needs it. See [Updating](docs/ONLINE.md#updating).
+- **Wear OS watches and Android:** the same game on a Galaxy Watch (or a phone), `FractumMorrowind-android.apk` in the
+  releases: it downloads the same data, plays online and updates itself. See [android/README.md](android/README.md).
 
 The rest of this page is MW3DS's own: the engine, the converter (to make a CIA from your own Morrowind install, with its
 data inside), building and testing.

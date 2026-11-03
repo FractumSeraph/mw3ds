@@ -21,6 +21,20 @@ enum {
 };
 struct touchPosition { u16 px, py; };
 struct circlePosition { s16 dx, dy; };
+struct angularRate { s16 x, z, y; };
+#ifdef MW3DS_ANDROID
+// The Android build (android/): the watch's touch screen, bezel and buttons, and a gamepad, as the console's
+// (android/src/android_input.cpp)
+void hidScanInput();
+u32 hidKeysDown();
+u32 hidKeysHeld();
+u32 hidKeysUp();
+void hidTouchRead(touchPosition* t);
+void hidCircleRead(circlePosition* c);
+void hidCstickRead(circlePosition* c);
+inline void irrstScanInput() {}
+inline void hidGyroRead(angularRate* r) { r->x = r->y = r->z = 0; }
+#else
 inline u32 hidKeysDown() { return 0; }
 inline u32 hidKeysHeld() { return 0; }
 inline u32 hidKeysUp() { return 0; }
@@ -28,8 +42,8 @@ inline void hidTouchRead(touchPosition* t) { t->px = t->py = 0; }
 inline void hidCircleRead(circlePosition* c) { c->dx = c->dy = 0; }
 inline void irrstScanInput() {}
 inline void hidCstickRead(circlePosition* c) { c->dx = c->dy = 0; }
-struct angularRate { s16 x, z, y; };
 inline void hidGyroRead(angularRate* r) { r->x = r->y = r->z = 0; }
+#endif
 inline Result HIDUSER_EnableGyroscope() { return 0; }
 inline Result HIDUSER_DisableGyroscope() { return 0; }
 inline Result HIDUSER_GetGyroscopeRawToDpsCoefficient(float* c) { *c = 14.375f; return 0; }      // (the console's: counts per dps)
@@ -48,10 +62,18 @@ inline Result svcGetThreadId(u32* id, u32) { *id = 1; return 0; }
 #define GX_TRANSFER_FMT_RGBA8 1
 #define GX_TRANSFER_FMT_RGB565 2
 #define GX_TRANSFER_SCALE_NO 0
+#ifdef MW3DS_ANDROID
+inline void irrstCstickRead(circlePosition* c) { hidCstickRead(c); }
+#else
 inline void irrstCstickRead(circlePosition* c) { c->dx = c->dy = 0; }
+#endif
 inline Result irrstInit() { return 0; }
 inline void irrstExit() {}
+#ifdef MW3DS_ANDROID
+bool aptMainLoop();             // (false once Android closes the app)
+#else
 inline bool aptMainLoop() { return true; }
+#endif
 inline void gspWaitForVBlank() {}
 inline Result GSPGPU_SetLcdForceBlack(u8) { return 0; }
 // NATIVE_OLD3DS=1 (run_test.py --old3ds): the game takes its Old 3DS profile
@@ -128,17 +150,34 @@ inline void ndspChnSetFormat(int ch, int f) { nativeDspFormat(ch, f); }
 inline void ndspChnSetAdpcmCoefs(int ch, u16* coefs) { nativeDspCoefs(ch, coefs); }
 inline void ndspChnSetMix(int ch, float* m) { nativeDspMix(ch, m); }
 inline void ndspChnWaveBufAdd(int ch, ndspWaveBuf* b) { if (!nativeDspAdd(ch, b)) b->status = NDSP_WBUF_DONE; }
+#ifndef MW3DS_ANDROID
 inline void hidScanInput() {}
+#endif
 inline void ndspChnWaveBufClear(int ch) { nativeDspReset(ch); }
 inline u32 ndspChnGetSamplePos(int ch) { return nativeDspPos(ch); }
 
 // The on-screen keyboard: never opened in a test (the name is set by the harness)
+#ifndef MW3DS_ANDROID
 struct SwkbdState { int unused; };
+#endif
 enum { SWKBD_TYPE_NORMAL, SWKBD_TYPE_NUMPAD, SWKBD_NOTEMPTY_NOTBLANK, SWKBD_BUTTON_CONFIRM, SWKBD_BUTTON_NONE, SWKBD_PASSWORD_HIDE_DELAY };
 typedef int SwkbdButton;
+#ifndef MW3DS_ANDROID
 inline void swkbdInit(SwkbdState*, int, int, int) {}
 inline void swkbdSetHintText(SwkbdState*, const char*) {}
 inline void swkbdSetInitialText(SwkbdState*, const char*) {}
 inline void swkbdSetValidation(SwkbdState*, int, int, int) {}
 inline void swkbdSetPasswordMode(SwkbdState*, int) {}
+#endif
+#ifdef MW3DS_ANDROID
+// (the Android build: the system's keyboard, android/src/android_input.cpp)
+struct SwkbdState { int type; int passwordMode; char hint[64]; char initial[256]; };
+void swkbdInit(SwkbdState* s, int type, int buttons, int maxLength);
+void swkbdSetHintText(SwkbdState* s, const char* hint);
+void swkbdSetInitialText(SwkbdState* s, const char* text);
+inline void swkbdSetValidation(SwkbdState*, int, int, int) {}
+inline void swkbdSetPasswordMode(SwkbdState* s, int mode) { s->passwordMode = mode; }
+SwkbdButton swkbdInputText(SwkbdState* s, char* buf, size_t size);
+#else
 inline SwkbdButton swkbdInputText(SwkbdState*, char* buf, size_t) { strcpy(buf, "Tester"); return SWKBD_BUTTON_CONFIRM; }
+#endif

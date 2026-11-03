@@ -12,6 +12,7 @@
 #include "components/debug/debuglog.hpp"
 #include "mwbase/session.hpp"
 #include "mwinput/inputmanagerimp.hpp"
+#include "platform/platform.hpp"
 
 #ifdef __3DS__
 // The Circle Pad Pro on an Old 3DS: its ZL / ZR reach the buttons only through the ir:rst service, which libctru folds
@@ -323,6 +324,11 @@ PlayerInput readInput(u32 held, u32 down, u32 up, float dt)
 	in.lookY = cy * lookScale();
 	in.quick = -1;
 	gyroInput(in);
+	// (the Android build's slide on the watch's screen and its bezel turn the view as the stylus does: platformLook)
+	float platYaw, platPitch;
+	platformLook(platYaw, platPitch);
+	in.stylusYaw += platYaw;
+	in.stylusPitch += g_invertY ? -platPitch : platPitch;
 	if (g_controlLayout == CONTROLS_GOLDENEYE)
 	{
 		static GoldenEyeState state;

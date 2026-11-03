@@ -35,6 +35,10 @@
 #include "native_crash.inc"        // (Windows only: a crash logger, a profiler and a guard-page allocator)
 #endif
 
+#ifdef MW3DS_ANDROID
+#include <android/log.h>
+#endif
+
 #include <3ds.h>
 #include <citro3d.h>
 #include "mwsound/soundmanagerimp.hpp"
@@ -212,6 +216,9 @@ void logf(const char* fmt, ...)
 	vsnprintf(line, sizeof(line), fmt, args);
 	va_end(args);
 	unsigned long long t = osGetTime() % 100000000ULL;
+#ifdef MW3DS_ANDROID
+	__android_log_write(ANDROID_LOG_INFO, "mw3ds", line);     // (adb logcat -s mw3ds)
+#endif
 	if (s_log)
 	{
 		fprintf(s_log, "[%8llu] %s\n", t, line);
@@ -268,6 +275,7 @@ bool linearReclaim() { return false; }
 
 // ---- nothing to update (drawing and screenshots: native_gpu.cpp)
 
+#ifndef MW3DS_ANDROID         // (the Android build plays them: android/src/android_audio.cpp)
 // ---- NATIVE_AUDIO=<wav>: a mixer for the ndsp stand-ins. Every frame (nativeAudioFrame, called by the GPU
 // stand-in's C3D_FrameEnd) mixes 1/30 s of every playing channel into a 16-bit stereo WAV at 32768 Hz, so the
 // sound stays in step with the fixed 1/30 s game frames. Off, a queued buffer is finished at once.
@@ -465,3 +473,4 @@ void nativeAudioClose()
 	fclose(s_wav);
 	s_wav = nullptr;
 }
+#endif

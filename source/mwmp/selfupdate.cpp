@@ -30,6 +30,10 @@
 #include "mwsound/soundmanagerimp.hpp"
 #include "platform/linear.hpp"
 
+#ifdef MW3DS_ANDROID
+#include <sys/statvfs.h>
+#endif
+
 #ifdef __3DS__
 extern int __system_argc;
 extern char** __system_argv;
@@ -242,6 +246,11 @@ void selfUpdateCheck()
 	if (g_check.started)
 		return;
 	g_check.started = true;
+#ifdef MW3DS_ANDROID
+	// (the releases' programs are the console's: the Android app is installed as an app, android/README.md)
+	logf("update: the Android build updates as an app, not here");
+	return;
+#endif
 	struct stat st;
 	if (stat(kOffPath, &st) == 0)
 	{
@@ -358,6 +367,12 @@ unsigned long long sdFree()
 	FS_ArchiveResource r;
 	if (R_SUCCEEDED(FSUSER_GetArchiveResource(&r, SYSTEM_MEDIATYPE_SD)))
 		return (unsigned long long)r.freeClusters * r.clusterSize;
+#elif defined(MW3DS_ANDROID)
+	// (the Android build: the storage the app's folder is on, android/src/android_input.cpp NATIVE_SD)
+	struct statvfs v;
+	const char* sd = getenv("NATIVE_SD");
+	if (sd && statvfs(sd, &v) == 0)
+		return (unsigned long long)v.f_bavail * v.f_frsize;
 #endif
 	return ~0ull;
 }

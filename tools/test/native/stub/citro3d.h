@@ -184,7 +184,11 @@ s8 shaderInstanceGetUniformLocation(shaderInstance_s* si, const char* name);
 bool C3D_Init(size_t);
 void C3D_Fini();
 bool C3D_FrameBegin(u8 flags);
+#ifdef MW3DS_ANDROID
+float C3D_FrameRate(float fps);     // (the Android build paces its frames to it: android/src/gles_gpu.cpp)
+#else
 inline float C3D_FrameRate(float fps) { return fps; }
+#endif
 void C3D_FrameEnd(u8 flags);
 void C3D_FrameDrawOn(C3D_RenderTarget* t);
 inline float C3D_GetCmdBufUsage() { return 0; }
