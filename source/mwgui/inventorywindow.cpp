@@ -5,6 +5,7 @@
 #include "mwmp/online.hpp"
 #include "mwgui/windowmanagerimp.hpp"
 #include "mwbase/session.hpp"
+#include "mwgui/inventoryhelpers.hpp"
 
 // How a quick key is set from Inventory / Magic: the D-pad moves the selection there, so both layouts hold ZL
 const char* kQuickHint = "ZL + D-pad: set quick key";
@@ -60,7 +61,7 @@ void Session::drawInventory()
 		assignQuickKey("inv:" + qi.id, qo ? qo->name.str() : qi.id);
 	}
 	int pick = uiItemGrid(grid, 4, 45, 312, 132, cells);
-	uiText(6, 178, 0.36f, col::textDim, kQuickHint);
+	quickKeyLine(178);
 	int sel = grid.selected >= 0 && grid.selected < (int)index.size() ? index[grid.selected] : -1;
 	const Object* o = sel >= 0 ? w.game.object(w.inventory[sel].id) : nullptr;
 	std::string soulNote;

@@ -7,9 +7,30 @@
 
 // Known spells and powers; the selected one is cast with Y
 static const char* kQuickDir[4] = { "Up", "Right", "Down", "Left" };
+// The Android build's slot buttons (quickKeyLine): the slot tapped, set from the highlighted entry the next frame
+static int s_quickTapped = -1;
+
+void quickKeyLine(float y)
+{
+#ifdef MW3DS_ANDROID
+	// (a watch has no ZL or D-pad: a tap on a slot's button sets it, as ZL + that direction does; one not taken up the
+	// next frame, with nothing highlighted, is let go)
+	s_quickTapped = -1;
+	uiText(6, y, 0.36f, col::textDim, "Quick key:");
+	for (int k = 0; k < 4; k++)
+		if (uiButton(70 + k * 30, y - 3, 26, 16, std::to_string(k + 1)))
+			s_quickTapped = k;
+#else
+	uiText(6, y, 0.36f, col::textDim, kQuickHint);
+#endif
+}
+
 // (GoldenEye's D-pad moves, the right-hand stylus layout's acts: their quick keys are the touch strip's slots)
 static std::string quickKeyName(int k)
 {
+#ifdef MW3DS_ANDROID
+	return std::to_string(k + 1);
+#endif
 	if (g_controlLayout == CONTROLS_GOLDENEYE || stylusLayout())
 		return std::string(kQuickDir[k]) + " (tap its slot)";
 	return std::string(g_controlLayout != CONTROLS_CLASSIC ? "D-Pad " : "ZL + ") + kQuickDir[k];
@@ -18,6 +39,17 @@ static std::string quickKeyName(int k)
 bool Session::assignQuickKey(const std::string& entry, const std::string& name)
 {
 	const UiInput& in = uiIn();
+#ifdef MW3DS_ANDROID
+	if (s_quickTapped >= 0)
+	{
+		int k = s_quickTapped;
+		s_quickTapped = -1;
+		w.stats.quickKeys[k] = entry;
+		notify("Quick key " + quickKeyName(k) + ": " + name);
+		playSound(-1, "Menu Click");
+		return true;
+	}
+#endif
 	if (!(in.held & KEY_ZL))
 		return false;
 	static const u32 keys[4] = { KEY_DUP, KEY_DRIGHT, KEY_DDOWN, KEY_DLEFT };
@@ -38,8 +70,13 @@ void Session::useQuickKey(int k)
 	const std::string& q = w.stats.quickKeys[k];
 	if (q.empty())
 	{
+#ifdef MW3DS_ANDROID
+		notify("Quick key " + quickKeyName(k) + " is empty: highlight an item or spell in Inventory or Magic and tap "
+			+ quickKeyName(k) + " under it.");
+#else
 		notify("Quick key " + quickKeyName(k) + " is empty: highlight an item or spell in "
 			"Inventory or Magic and press ZL + " + kQuickDir[k] + ".");
+#endif
 		return;
 	}
 	if (q.compare(0, 6, "magic:") == 0)

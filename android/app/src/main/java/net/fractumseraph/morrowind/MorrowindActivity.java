@@ -1,6 +1,5 @@
 package net.fractumseraph.morrowind;
 
-import android.app.AlertDialog;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Paint;
@@ -162,23 +161,19 @@ public class MorrowindActivity extends SDLActivity {
             field.setInputType(type);
             field.setSelection(field.getText().length());
             final boolean[] given = { false };
-            AlertDialog dialog = new AlertDialog.Builder(activity)
-                .setTitle(hint == null || hint.isEmpty() ? "Text" : hint)
-                .setView(field)
-                .setPositiveButton("OK", (d, w) -> {
-                    given[0] = true;
-                    answer.offer(new String[] { field.getText().toString() });
-                })
-                .setNegativeButton("Cancel", (d, w) -> {
-                    given[0] = true;
-                    answer.offer(new String[] { null });
-                })
-                .setOnDismissListener(d -> {
+            RoundDialog.show(activity, hint == null || hint.isEmpty() ? "Text" : hint, null, field, true,
+                () -> {
                     if (!given[0])
                         answer.offer(new String[] { null });
-                })
-                .create();
-            dialog.show();
+                },
+                new RoundDialog.Choice("OK", () -> {
+                    given[0] = true;
+                    answer.offer(new String[] { field.getText().toString() });
+                }),
+                new RoundDialog.Choice("Cancel", () -> {
+                    given[0] = true;
+                    answer.offer(new String[] { null });
+                }));
             field.requestFocus();
         });
         try {

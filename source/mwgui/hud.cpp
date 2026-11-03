@@ -289,7 +289,11 @@ void Session::drawTop()
 // spell's first letters; a tap uses the slot as its D-pad press does (GoldenEye's D-pad moves: the taps are its quick keys)
 void Session::drawQuickStrip()
 {
+#ifdef MW3DS_ANDROID
+	static const char* dirs[4] = { "1", "2", "3", "4" };     // (a watch's are taps: no D-pad to name)
+#else
 	static const char* dirs[4] = { "U", "R", "D", "L" };
+#endif
 	const float kSlot = 26.0f;
 	for (int k = 0; k < 4; k++)
 	{
@@ -509,8 +513,15 @@ void Session::drawHud()
 	{
 		// (GoldenEye and the stylus layout: the Xbox buttons)
 		bool xbox = g_controlLayout == CONTROLS_XBOX || g_controlLayout == CONTROLS_GOLDENEYE || stylusLayout();
+#ifdef MW3DS_ANDROID
+		// (a watch's: its weapon out, a tap strikes and a held finger winds up; CAST is in the ring, android/README.md)
+		(void)xbox;
+		std::string hint = w.stats.selectedSpell.empty() ? std::string("Tap strikes, hold winds up")
+			: "Cast (MORE, CAST): " + w.game.spells[w.stats.selectedSpell].name;
+#else
 		std::string hint = w.stats.selectedSpell.empty() ? (xbox ? "R: attack (hold to wind up)" : "X: attack (hold to wind up)")
 			: std::string(xbox ? "R: attack   L: cast " : "X: attack   Y: cast ") + w.game.spells[w.stats.selectedSpell].name;
+#endif
 		// Leave the quick key strip (from x 190) clear, and GoldenEye's 1st / 3rd button (from x 132)
 		float room = g_controlLayout == CONTROLS_GOLDENEYE ? 122.0f : 180.0f;
 		while (hint.size() > 3 && uiTextWidth(hint, 0.38f) > room)
