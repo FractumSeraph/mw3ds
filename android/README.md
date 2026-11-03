@@ -31,7 +31,7 @@ The watch is on one hand, so one finger plays, and every press buzzes:
 | Tap | Weapon away: A (talk, open, take). Weapon out: a quick blow |
 | Hold still | Weapon out: a blow wound up while held (a red ring under the finger, a buzz once it's wound up fully), struck when let go. Weapon away: nothing |
 | The bezel | Turn, 15 degrees a click |
-| **WALK** | Walk on by itself, the bezel steering, until it is pressed again or a menu opens |
+| **WALK** | Walk on by itself, the bezel steering, until it is pressed again, a menu opens or a fight begins |
 | **MORE**, or the back button | The ring of actions |
 
 | The ring | |
@@ -70,6 +70,9 @@ which keeps a watch cooler and its battery going longer.
 | **BACK**, **MENU**, **OK** | The console's B, START and A |
 | The bezel | The menus' highlight up and down (a list's row, an item grid's row; **OK** chooses it) and a text pane's scroll |
 | The back button | B |
+| **1** **2** **3** **4** under Inventory and Magic | Make the highlighted item or spell that quick key (the 3DS's ZL + D-pad); the HUD's slots use them |
+
+The game's hints and its tutorial name these controls on Android, not the 3DS's buttons.
 
 The actions press what the button layout chosen in Options has them on (Xbox by default). A paired gamepad is the
 console's buttons where Nintendo puts them (A on the right), its sticks the Circle Pad and the C-stick.

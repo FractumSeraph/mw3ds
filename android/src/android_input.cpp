@@ -642,7 +642,10 @@ void androidFeedback(int what)
 {
 	switch (what)
 	{
-	case FEEDBACK_READIED: buzz(30); break;
+	case FEEDBACK_READIED:
+		buzz(30);
+		s_walk = false;             // (a fight began: walking on by itself stops, so the player isn't carried into it)
+		break;
 	case FEEDBACK_CHARGED: buzz(20); break;
 	case FEEDBACK_HELD_BACK: buzz(25, 2); break;
 	case FEEDBACK_HIT: buzz(70); break;

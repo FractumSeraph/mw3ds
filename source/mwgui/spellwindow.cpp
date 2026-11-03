@@ -85,7 +85,7 @@ void Session::drawMagic()
 	for (int ic : icons)
 		magicIcons += ic >= 0;
 	uiList(list, 4, 46, 312, 110, rows, 0.45f, true, nullptr, &icons);
-	uiText(6, 190, 0.36f, col::textDim, kQuickHint);
+	quickKeyLine(190);
 	// Active effects
 	std::string active;
 	for (auto& e : w.effects)
