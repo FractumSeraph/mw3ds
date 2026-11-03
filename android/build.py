@@ -7,6 +7,8 @@ Gradle (android/app).
     python android/build.py --release    # build/android/FractumMorrowind-android.apk, the release build (signed with
                                          # android/keystore.properties' key; MW3DS_VERSION: its version)
     python android/build.py --no-apk     # only the native libraries (build/android/jniLibs)
+    MW3DS_ANDROID_ABI=x86_64 python android/build.py   # for the x86_64 emulator (Wear OS's has no 32-bit ARM); the
+                                         # APK then carries both ABIs' libraries
 
 Needs ANDROID_HOME (the SDK, with platform 35) and ANDROID_NDK_HOME (NDK 27), JDK 17, CMake, Ninja and git. SDL3, Mbed TLS
 and zlib are downloaded into build/android once (pinned).
@@ -26,17 +28,20 @@ ROOT = Path(__file__).resolve().parents[1]
 HERE = Path(__file__).parent
 NATIVE = ROOT / "tools" / "test" / "native"
 BUILD = ROOT / os.environ.get("MW3DS_ANDROID_BUILD", "build/android")
-ABI = "armeabi-v7a"
+ABI = os.environ.get("MW3DS_ANDROID_ABI", "armeabi-v7a")
 API = 28
-TARGET = f"--target=armv7a-linux-androideabi{API}"
+TARGET = {"armeabi-v7a": f"--target=armv7a-linux-androideabi{API}", "x86_64": f"--target=x86_64-linux-android{API}"}.get(ABI) \
+    or sys.exit(f"build.py: no build for the ABI {ABI} (armeabi-v7a, x86_64)")
 # ARMv7 with NEON and VFPv4, which every armeabi-v7a device of Android 9 and later has; Thumb-2, the NDK's default
-MARCH = ["-march=armv7-a", "-mfpu=neon-vfpv4", "-mfloat-abi=softfp", "-mthumb"]
+MARCH = ["-march=armv7-a", "-mfpu=neon-vfpv4", "-mfloat-abi=softfp", "-mthumb"] if ABI == "armeabi-v7a" else []
+# (each other ABI's objects and SDL3 beside the 32-bit ARM ones)
+SUFFIX = "" if ABI == "armeabi-v7a" else "-" + ABI
 # SDL3 (as FractumSeraph/OpenCE's Android build pins it: tools/android_build.py)
 SDL_TAG = "release-3.4.16"
 SDL_COMMIT = "fa2c02bb6e21974a89ea9824bc53c9932abe5f9c"
 SDL_URL = "https://github.com/libsdl-org/SDL.git"
 SDL = BUILD / "SDL3"
-SDL_BUILD = BUILD / "sdl3-build"
+SDL_BUILD = BUILD / ("sdl3-build" + SUFFIX)
 # Mbed TLS for online play and the data download (mwmp/netsocket.cpp), the 3.6 long-term support release
 # FractumSeraph/OpenCE vendors; the console's build has devkitPro's
 MBEDTLS_VERSION = "3.6.7"
@@ -143,7 +148,13 @@ def compile_one(src, obj, kind):
 def build_native():
     fetch()
     sdl = build_sdl()
-    objdir = BUILD / "obj"
+    objdir = BUILD / ("obj" + SUFFIX)
+    # (the version is compiled into the updater's file: a different one rebuilds it)
+    stamp, version = BUILD / ("version" + SUFFIX + ".txt"), os.environ.get("MW3DS_VERSION", "")
+    if not stamp.exists() or stamp.read_text() != version:
+        (objdir / "game" / "mwmp" / "selfupdate.o").unlink(missing_ok=True)
+        stamp.parent.mkdir(parents=True, exist_ok=True)
+        stamp.write_text(version)
     jobs = []
     src = ROOT / "source"
     for s in sorted(src.rglob("*.c*")):
@@ -167,7 +178,7 @@ def build_native():
     jni = BUILD / "jniLibs" / ABI
     jni.mkdir(parents=True, exist_ok=True)
     lib = jni / "libmain.so"
-    rsp = BUILD / "link.rsp"
+    rsp = BUILD / ("link" + SUFFIX + ".rsp")
     rsp.write_text("\n".join(str(o) for _, o, _ in jobs))
     r = subprocess.run([ndk_bin("clang++"), TARGET, *MARCH, "-shared", "-o", str(lib), f"@{rsp}", "-L", str(sdl.parent),
                         "-lSDL3", "-lGLESv3", "-lEGL", "-llog", "-landroid", "-static-libstdc++", "-Wl,--no-undefined",

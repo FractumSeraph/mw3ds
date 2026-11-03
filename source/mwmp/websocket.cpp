@@ -493,7 +493,8 @@ HttpRequest::State HttpRequest::update()
 		// a close straight after the answer reads as a failed socket: what came is the answer
 		if (streaming)
 		{
-			err = "the download stopped early (" + std::to_string(streamed) + " of " + std::to_string(length) + " bytes)";
+			err = "the download stopped early (" + std::to_string(streamed) + " of " + std::to_string(length) + " bytes: "
+				+ sock.error() + ")";
 			st = FAILED;
 		}
 		else if (!in.empty())
@@ -528,7 +529,8 @@ HttpRequest::State HttpRequest::update()
 		{
 			if (streaming)
 			{
-				err = "the download stopped early (" + std::to_string(streamed) + " of " + std::to_string(length) + " bytes)";
+				err = "the download stopped early (" + std::to_string(streamed) + " of " + std::to_string(length) + " bytes: "
+					+ sock.error() + ")";
 				st = FAILED;
 			}
 			else

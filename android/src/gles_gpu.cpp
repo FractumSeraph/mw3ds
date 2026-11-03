@@ -28,6 +28,7 @@
 
 #include "android.hpp"
 #include "components/debug/debuglog.hpp"
+#include "mwbase/sessiontypes.hpp"
 #include "mwrender/screenshotmanager.hpp"
 #include "pica_textures.hpp"
 
@@ -76,6 +77,8 @@ static u32 s_scissor[4];
 static C3D_Tex* s_units[3];
 static C3D_TexEnv s_env[6];
 static float s_unif[96][4];
+static unsigned s_unifChanges = 1;      // counts changes to s_unif (a program re-uploads them when it differs)
+static bool s_envChanged = true;        // a combiner stage changed: the program is looked for again
 static C3D_AttrInfo s_attr;
 static C3D_BufInfo s_buf;
 static float s_view2d[2];
@@ -259,6 +262,7 @@ void main()
 struct Program3D
 {
 	GLuint id = 0;
+	unsigned unifSeen = 0;          // the uniforms' change count it was last given (s_unifChanges)
 	GLint u, lightOn, gammaOn, zMap, tex0, tex1, flipV, lodBias, consts, alphaFunc, alphaRef;
 };
 
@@ -280,10 +284,16 @@ static std::string tevKey(bool skinned)
 
 static Program3D& program3D(bool skinned)
 {
+	static Program3D* last[2] = {};
+	if (!s_envChanged && last[skinned])
+		return *last[skinned];
+	if (s_envChanged)
+		last[0] = last[1] = nullptr;
+	s_envChanged = false;
 	std::string key = tevKey(skinned);
 	auto it = s_programs.find(key);
 	if (it != s_programs.end())
-		return it->second;
+		return *(last[skinned] = &it->second);
 	static const char* const kAttribs[] = { "a0", "a1", "a2", "a3", "a4" };
 	Program3D p;
 	p.id = linkProgram(vertexSource(skinned), fragmentSource(), kAttribs, 5);
@@ -302,7 +312,7 @@ static Program3D& program3D(bool skinned)
 	glUniform1i(p.tex0, 0);
 	glUniform1i(p.tex1, 1);
 	logf("gles: program %d for %s combiners (%d made)", (int)p.id, skinned ? "skinned" : "cell", (int)s_programs.size() + 1);
-	return s_programs[key] = p;
+	return *(last[skinned] = &(s_programs[key] = p));
 }
 
 // citro2d's: screen pixels, the colour, the texture's (u, v) and how far the colour replaces the texture's
@@ -718,8 +728,9 @@ void C3D_FrameEnd(u8)
 	// (the swap waits for the display; a rate below its own sleeps the rest of the frame first)
 	static Uint64 last = 0;
 	Uint64 now = SDL_GetTicksNS();
-	Uint64 period = (Uint64)(1e9 / std::max(10.0f, s_frameRate));
-	if (s_frameRate < 59.0f && last && now - last < period - 4000000)
+	float rate = std::min(s_frameRate, (float)g_fpsCap);     // (Options > Video > Frame rate)
+	Uint64 period = (Uint64)(1e9 / std::max(10.0f, rate));
+	if (rate < 59.0f && last && now - last < period - 4000000)
 		SDL_DelayPrecise(period - 4000000 - (now - last));
 	last = SDL_GetTicksNS();
 }
@@ -886,9 +897,10 @@ void C3D_TexBind(int unit, C3D_Tex* t)
 		s_units[unit] = t;
 }
 
-C3D_TexEnv* C3D_GetTexEnv(int id) { return &s_env[std::clamp(id, 0, 5)]; }
+C3D_TexEnv* C3D_GetTexEnv(int id) { s_envChanged = true; return &s_env[std::clamp(id, 0, 5)]; }
 void C3D_TexEnvInit(C3D_TexEnv* env)
 {
+	s_envChanged = true;
 	for (int i = 0; i < 3; i++)
 	{
 		env->srcRgb[i] = env->srcAlpha[i] = i == 0 ? GPU_PREVIOUS : GPU_PRIMARY_COLOR;
@@ -900,6 +912,7 @@ void C3D_TexEnvInit(C3D_TexEnv* env)
 }
 void C3D_TexEnvSrc(C3D_TexEnv* env, int mode, int s1, int s2, int s3)
 {
+	s_envChanged = true;
 	int s[3] = { s1, s2, s3 };
 	for (int i = 0; i < 3; i++)
 	{
@@ -911,12 +924,14 @@ void C3D_TexEnvSrc(C3D_TexEnv* env, int mode, int s1, int s2, int s3)
 }
 void C3D_TexEnvOpRgb(C3D_TexEnv* env, int o1, int o2, int o3)
 {
+	s_envChanged = true;
 	env->opRgb[0] = o1;
 	env->opRgb[1] = o2;
 	env->opRgb[2] = o3;
 }
 void C3D_TexEnvFunc(C3D_TexEnv* env, int mode, int func)
 {
+	s_envChanged = true;
 	if (mode & C3D_RGB)
 		env->funcRgb = func;
 	if (mode & C3D_Alpha)
@@ -950,6 +965,8 @@ static C3D_FVec s_unifStaged[96];
 static int s_stagedFrom = 96, s_stagedTo = 0;
 static void unifStagedTake()
 {
+	if (s_stagedFrom < s_stagedTo)
+		s_unifChanges++;
 	for (int id = s_stagedFrom; id < s_stagedTo; id++)
 	{
 		s_unif[id][0] = s_unifStaged[id].x;
@@ -975,6 +992,7 @@ void C3D_FVUnifSet(int, int id, float x, float y, float z, float w)
 	unifStagedTake();
 	if (id < 0 || id >= 96)
 		return;
+	s_unifChanges++;
 	s_unif[id][0] = x;
 	s_unif[id][1] = y;
 	s_unif[id][2] = z;
@@ -1091,7 +1109,11 @@ void C3D_DrawElements(int, int count, int type, const void* indices)
 	Program3D& p = program3D(skinned);
 	bindTarget(t);
 	glUseProgram(p.id);
-	glUniform4fv(p.u, 96, &s_unif[0][0]);
+	if (p.unifSeen != s_unifChanges)
+	{
+		glUniform4fv(p.u, 96, &s_unif[0][0]);
+		p.unifSeen = s_unifChanges;
+	}
 	glUniform1i(p.lightOn, s_lightOn);
 	glUniform1i(p.gammaOn, s_gammaOn);
 	glUniform2f(p.zMap, s_zScale, s_zOffset);

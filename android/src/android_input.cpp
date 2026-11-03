@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <csignal>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -48,6 +49,9 @@ bool aptMainLoop()
 
 bool androidStart()
 {
+	// A send on a connection the server closed is an error the online code handles, not a signal that ends the game
+	// (the 3DS had none; a Linux process's SIGPIPE does)
+	signal(SIGPIPE, SIG_IGN);
 	SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
 	SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
 	if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD))
@@ -540,15 +544,22 @@ void hidScanInput()
 		switch (f.role)
 		{
 		case ROLE_GESTURE:
-			// (held still with the weapon out: the wind-up; with it away, nothing)
-			if (!f.slid && !f.attack && now - f.t0 >= kHoldMs && g_weaponOut)
+			// (held still with the weapon out: the wind-up; with it away, nothing. Still: within half a tap's slop, so a
+			// finger that is starting to slide walks)
+			if (!f.slid && !f.attack && now - f.t0 >= kHoldMs && g_weaponOut
+				&& fabsf(f.x - f.x0) + fabsf(f.y - f.y0) <= kFingerSlop * 0.5f)
 			{
 				f.attack = true;
 				buzz(15);
 			}
 			if (f.attack)
 				held |= layoutKeys(ACT_ATTACK);
-			if (f.slid && f.looks)
+			if (f.attack)
+			{
+				// (a finger winding up a blow stays the blow's: it neither walks nor looks, so a slide after it began
+				// shows as no walking at all)
+			}
+			else if (f.slid && f.looks)
 			{
 				s_lookYaw += (f.x - f.lastX) * perPixel;
 				s_lookPitch += (f.lastY - f.y) * perPixel;

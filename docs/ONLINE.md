@@ -154,7 +154,9 @@ Halo maps (GitHub's space stays free of it): `https://halomaps.fractumseraph.net
 New 3DS, `data-v<format>-o3ds/` on an Old 3DS (its textures quarter-size, up to 128 texels). It shows the size and the
 SD card's free space; **Download** fetches packs of about 32 MB, each checked against its SHA-256 in `index.json` and
 unpacked into `sdmc:/3ds/mw3ds/data.part` as it streams in. The packs done are noted there, so a download cut off
-(Wi-Fi lost, the console shut, **Stop**) carries on from the pack it was in. With every pack in, `data.part` becomes
+(Wi-Fi lost, the console shut, **Stop**) carries on from the pack it was in. A pack is tried three times; after that
+the screen says the download stopped and tries again by itself every 15 s, 20 times (or at **Try again**), carrying on
+where it stopped without asking again (never starting one the player didn't). With every pack in, `data.part` becomes
 `sdmc:/3ds/mw3ds/data` (older data there is replaced; saves are in `sdmc:/3ds/mw3ds/saves`). Without Wi-Fi the screen
 says so; with older data on the card, **Not now** plays on with it. Over a 3DS's Wi-Fi the whole island takes some time
 (the emulator managed about 0.5 MB/s): keep the console open and charging.

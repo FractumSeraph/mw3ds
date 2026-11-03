@@ -166,6 +166,8 @@ struct Unpacker
 		left = 0;
 		sha = Sha256();
 		files = 0;
+		// (the folders are made again: a fresh start removed data.part, and a Try again after it found none of them)
+		made.clear();
 	}
 	void close()
 	{
@@ -565,6 +567,12 @@ std::string dataDownloadNeed(const char* dataDir, bool isNew3ds)
 
 bool dataDownloadScreen(C3D_RenderTarget* top, C3D_RenderTarget* bottom, const std::string& need, bool isNew3ds)
 {
+	const int kAutoTries = 20;
+	int autoTries = 0, lastStep = -1;
+	u64 failedAt = 0;
+	bool autoResume = false;      // a try by itself: carry on at the question
+	bool started = false;         // the player said Download (a try by itself never starts one they didn't)
+
 	Downloader d;
 	d.need = need;
 	d.isNew3ds = isNew3ds;
@@ -624,6 +632,28 @@ bool dataDownloadScreen(C3D_RenderTarget* top, C3D_RenderTarget* bottom, const s
 		d.update();
 		if (d.step == DONE)
 			result = 1;
+		// A failure is tried again by itself every 15 s, 20 times (the network dropped while something else covered the
+		// game: a watch's charging screen, a 3DS's shut lid), carrying on where it stopped without asking again
+		if (d.step == FAILED && lastStep != FAILED)
+			failedAt = osGetTime();
+		lastStep = d.step;
+		if (d.step == FAILED && autoTries < kAutoTries && osGetTime() - failedAt > 15000)
+		{
+			autoTries++;
+			logf("data: trying again by itself (%d of %d)", autoTries, kAutoTries);
+			autoResume = started;
+			d.begin();
+		}
+		if (autoResume && d.step == ASK)
+		{
+			autoResume = false;
+			d.start();
+		}
+		if (d.step == DOWNLOAD)
+		{
+			autoResume = false;
+			started = true;
+		}
 		if (answer == "yes" && d.step == ASK)
 			d.start();
 
@@ -705,6 +735,12 @@ bool dataDownloadScreen(C3D_RenderTarget* top, C3D_RenderTarget* bottom, const s
 			uiTextBox(scroll, 6, 26, 308, 176, d.message, 0.45f, false);
 			if (uiButton(4, 208, 100, 28, d.hasOld ? "Not now" : "Quit") || (down & KEY_B) || !answer.empty())
 				result = d.hasOld ? 2 : 0;
+			if (d.step == FAILED && autoTries < kAutoTries)
+			{
+				u64 since = osGetTime() - failedAt;
+				int left = since >= 15000 ? 0 : (int)((15000 - since) / 1000) + 1;
+				uiTextCentered(160, 190, 0.42f, col::textDim, "Trying again by itself in " + std::to_string(left) + " s");
+			}
 			if (d.step == FAILED && (uiButton(162, 208, 154, 28, "Try again", true) || (down & KEY_A)))
 				d.begin();
 			break;

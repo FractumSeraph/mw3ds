@@ -61,6 +61,9 @@ extern bool g_invertY;
 // blow at someone not fighting the player is held back until a second asks again (safeStrikes); with the weapon out
 // the view eases round to the nearest foe in front (aimHelp). mwmechanics/combat.cpp
 extern bool g_autoReady, g_safeStrikes, g_aimHelp;
+// The Android build's frame rate at most (Options > Video > Frame rate: 60, or 30 for a watch's battery and warmth);
+// the console holds to its profile's (android/src/gles_gpu.cpp C3D_FrameEnd)
+extern int g_fpsCap;
 static const int kLookMinPct = 100, kLookMaxPct = 300, kLookStepPct = 10;      // (the bar's middle is 2.00x: 1.00x was too slow)
 static const int kGeTurnMinPct = 50, kGeTurnMaxPct = 200;
 // A new player's look speed, and Look's Default: quicker than 1.00x, which felt slow on the console (1.20x still did).

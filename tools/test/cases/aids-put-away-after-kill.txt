@@ -1,0 +1,15 @@
+# start: Seyda Neen
+# Combat aids, Ready by itself: the weapon that came out for a fight goes away after it even when the last foe falls to
+# a blow (the put-away waits for the blow to end instead of being lost), so the next tap on a watch talks, not strikes
+3 0 0 0 0 MSG
+0.3 0 0 0 0 SEED:7+GOD
+0.3 0 0 0 0 GIVE:daedric_longsword
+0.3 0 0 0 0 EQUIP:daedric_longsword
+0.3 0 0 0 0 AIDS:on
+20 0 0 0 0 WALKTO:fargoth
+0.3 0 0 0 0 HOSTILE:fargoth
+2 0 0 0
+0.1 0 0 0 0 EXPECT:weapondrawn:eq:1
+60 0 0 0 0 KILL:fargoth
+9 0 0 0
+0.1 0 0 0 0 EXPECT:weapondrawn:eq:0

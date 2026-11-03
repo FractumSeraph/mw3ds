@@ -673,7 +673,10 @@ void Session::combatUpdate(const PlayerInput& in, float dt, bool menu)
 	playerMoveForward = in.moveY;
 	hurtFlash = fmaxf(0.0f, hurtFlash - dt * 2.0f);
 	if (playerDead)
+	{
+		g_weaponOut = false;
 		return;
+	}
 	// the player's hit attempt foe is forgotten once it is dead, out of the fight or gone (OpenMW's Actors::update)
 	if (w.playerHitAttempt >= 0)
 	{
@@ -761,12 +764,20 @@ void Session::combatUpdate(const PlayerInput& in, float dt, bool menu)
 	if (aidReadied && foe < 0 && aidCalm > 5.0f)
 	{
 		aidReadied = false;
-		if (g_autoReady && weaponDrawn && !in.attack)
-			putAway = true;
+		aidSheathe = g_autoReady && weaponDrawn;
 	}
+	// (kept until no blow is under way: one wound up as the last foe fell would otherwise leave the weapon out)
+	if (aidSheathe && (foe >= 0 || !weaponDrawn))
+		aidSheathe = false;
+	if (aidSheathe && !in.attack)
+		putAway = true;
 	// Aim help: with the weapon out, the view eases round to the foe in front, 90 degrees a second at most (not while a
-	// menu is up, nor once it is within 6 degrees)
-	if (g_aimHelp && weaponDrawn && canFight && foeAhead >= 0)
+	// menu is up, nor once it is within 6 degrees, nor for 1.5 s after the player turned or looked themselves: turning
+	// to another foe, or away, isn't undone)
+	if (fabsf(in.lookX) > 0.05f || fabsf(in.lookY) > 0.05f || in.stylusYaw != 0.0f || in.stylusPitch != 0.0f
+		|| fabsf(in.gyroYaw) > 0.5f || fabsf(in.gyroPitch) > 0.5f)
+		aidTurnedAt = w.time;
+	if (g_aimHelp && weaponDrawn && canFight && foeAhead >= 0 && w.time - aidTurnedAt > 1.5f)
 	{
 		const Ref& r = w.refs[foeAhead];
 		float off = angleDiff(atan2f(r.pos[0] - w.player.feet[0], r.pos[1] - w.player.feet[1]), w.player.yaw);
@@ -778,6 +789,23 @@ void Session::combatUpdate(const PlayerInput& in, float dt, bool menu)
 		sheatheTimer = 0.0f;
 		ready();
 	}
+	// Safe strikes: whether a melee blow now may land, asking first when it would land on someone who isn't fighting the
+	// player (peaceful, or fighting another). Asked as the wind-up starts and again as the blow goes, so one who stepped
+	// into its arc meanwhile is asked about too; a new blow at the same one within 4 s of the question lands
+	auto strikeAllowed = [&]() {
+		if (!g_safeStrikes || isRanged(wpn))
+			return true;
+		int t = swingTarget();
+		if (t < 0 || (w.refs[t].ai == AI_COMBAT && w.refs[t].duelFoe < 0) || (t == aidAskTarget && w.time < aidAskUntil))
+			return true;
+		aidAskTarget = t;
+		aidAskUntil = w.time + 4.0f;
+		const ActorDef& def = w.game.actors[w.refs[t].actor];
+		notify(std::string("Attack ") + (*def.name.c_str() ? def.name.c_str() : "them") + "? Strike again to attack.");
+		platformFeedback(FEEDBACK_HELD_BACK);
+		logf("combat: a blow at %s held back (Safe strikes)", w.refs[t].id.c_str());
+		return false;
+	};
 	// The next blow waits for the last one's follow-through, and for a cast to end (OpenMW: one attack animation at a time)
 	bool busy = attackCharge < 0.0f && (vm.action == VM_FOLLOW || casting);
 	if (aidHeld && !in.attack)
@@ -819,25 +847,11 @@ void Session::combatUpdate(const PlayerInput& in, float dt, bool menu)
 		}
 		else
 		{
-			// Safe strikes: a first blow at someone who isn't fighting the player (peaceful, or fighting another) is held
-			// back and asked about; a new blow at the same one within 4 s lands. Melee only: a shot has no one target yet
-			if (attackCharge < 0.0f && g_safeStrikes && !isRanged(wpn))
-			{
-				int t = swingTarget();
-				if (t >= 0 && (w.refs[t].ai != AI_COMBAT || w.refs[t].duelFoe >= 0)
-					&& !(t == aidAskTarget && w.time < aidAskUntil))
-				{
-					aidAskTarget = t;
-					aidAskUntil = w.time + 4.0f;
-					aidHeld = true;
-					const ActorDef& def = w.game.actors[w.refs[t].actor];
-					notify(std::string("Attack ") + (*def.name.c_str() ? def.name.c_str() : "them") + "? Strike again to attack.");
-					platformFeedback(FEEDBACK_HELD_BACK);
-					logf("combat: a blow at %s held back (Safe strikes)", w.refs[t].id.c_str());
-				}
-				else if (t == aidAskTarget)
-					aidAskTarget = -1;
-			}
+			// (Safe strikes: asked as the wind-up starts; a confirmed one keeps its leave for the wind-up, however long)
+			if (attackCharge < 0.0f && !strikeAllowed())
+				aidHeld = true;
+			else if (attackCharge < 0.0f && aidAskTarget >= 0 && w.time < aidAskUntil && swingTarget() == aidAskTarget)
+				aidAskUntil = w.time + 30.0f;
 			if (attackCharge < 0.0f && !aidHeld)
 			{
 				attackCharge = 0.0f;
@@ -873,8 +887,17 @@ void Session::combatUpdate(const PlayerInput& in, float dt, bool menu)
 				vm.play(VM_FOLLOW, (std::string(vmGroup(wpn, tool)) + "ShootF").c_str());
 				blowStrength = 1.0f;
 			}
+			else if (!strikeAllowed())
+			{
+				// (Safe strikes, as the blow goes: someone peaceful came into its arc during the wind-up)
+				swingCount--;
+				if (vm.action == VM_WINDUP)
+					vm.action = VM_IDLE;
+			}
 			else
 			{
+				// (the question's leave used: the next blow at them is asked about again)
+				aidAskTarget = -1;
 				// the follow-through by how hard the blow was (small / medium / large)
 				float strength = playerSwing(fmaxf(0.1f, attackCharge), in);
 				blowStrength = strength;        // (the body seen from outside follows through the same way)

@@ -58,6 +58,8 @@ struct MechanicsState
 	int aidAskTarget = -1;            // a held-back blow's target: a new blow at it within aidAskUntil lands
 	float aidAskUntil = 0.0f;
 	bool aidHeld = false;             // the blow under way was held back: nothing till the attack is let go
+	bool aidSheathe = false;          // the fight it came out for is over: away as soon as no blow is under way
+	float aidTurnedAt = -100.0f;      // world time the player last turned or looked themselves (Aim help waits)
 
 	int attackKind = 0;               // 0 chop, 1 slash, 2 thrust: picked when the wind-up starts
 
