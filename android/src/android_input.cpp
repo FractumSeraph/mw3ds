@@ -204,7 +204,7 @@ ScreenView androidScreenView(int ww, int wh)
 // What a button or a ring item does: a console button (as the layout Options chose has it: layoutKeys), or one of
 // the watch's own (the screens' swap, walking on, the look mode, the ring)
 enum Action { ACT_START, ACT_READY, ACT_JUMP, ACT_CAST, ACT_ATTACK, ACT_SNEAK, ACT_POV, ACT_SCREEN, ACT_LOOK, ACT_WALK,
-	ACT_RING, ACT_B, ACT_A };
+	ACT_RING, ACT_B, ACT_A, ACT_QUICK1, ACT_QUICK2, ACT_QUICK3, ACT_QUICK4 };
 // Where (degrees round the centre from the right, anticlockwise, and how far out as a share of the radius) and its word
 struct Button { Action act; float deg, out; const char* label; };
 // On the top screen only two, in the bands above and below it, clear of the picture: the ring and walking on
@@ -219,9 +219,15 @@ static const Button kRing[] = {
 	{ ACT_START, 90, 0.60f, "MENU" }, { ACT_JUMP, 45, 0.60f, "JUMP" }, { ACT_READY, 0, 0.60f, "READY" },
 	{ ACT_CAST, 315, 0.60f, "CAST" }, { ACT_SCREEN, 270, 0.60f, "SCREEN" }, { ACT_SNEAK, 225, 0.60f, "SNEAK" },
 	{ ACT_POV, 180, 0.60f, "VIEW" }, { ACT_LOOK, 135, 0.60f, "LOOK" },
+	// (the quick keys, the HUD's four slots, in a square in the middle)
+	{ ACT_QUICK1, 135, 0.20f, "1" }, { ACT_QUICK2, 45, 0.20f, "2" }, { ACT_QUICK3, 225, 0.20f, "3" },
+	{ ACT_QUICK4, 315, 0.20f, "4" },
 };
 static const float kButtonSize = 0.13f;     // an edge button's radius, as a share of the display's
-static const float kRingSize = 0.19f;       // a ring item's
+static const float kRingSize = 0.19f;       // a ring item's (the quick keys' in its middle: kQuickSize)
+static const float kQuickSize = 0.11f;
+
+static bool isQuick(Action a) { return a >= ACT_QUICK1 && a <= ACT_QUICK4; }
 
 static void buttonsFor(const Button*& list, int& n, float& size)
 {
@@ -283,6 +289,9 @@ static void act(Action a)
 		break;
 	case ACT_RING:
 		s_ring = true;
+		break;
+	case ACT_QUICK1: case ACT_QUICK2: case ACT_QUICK3: case ACT_QUICK4:
+		gameUseQuickKey(a - ACT_QUICK1);
 		break;
 	case ACT_SNEAK:
 		if (g_controlLayout == CONTROLS_GOLDENEYE)
@@ -353,7 +362,7 @@ static int buttonUnder(const Geometry& g, float x, float y)
 	{
 		float bx, by;
 		buttonAt(g, list[i], bx, by);
-		float d = size * g.r * 1.15f;
+		float d = (isQuick(list[i].act) ? kQuickSize : size) * g.r * 1.15f;
 		if ((x - bx) * (x - bx) + (y - by) * (y - by) <= d * d)
 			return i;
 	}
@@ -688,9 +697,9 @@ void androidDrawOverlay(int ww, int wh)
 	int n;
 	float size;
 	buttonsFor(list, n, size);
-	float br = size * g.r;
 	for (int i = 0; i < n; i++)
 	{
+		float br = (isQuick(list[i].act) ? kQuickSize : size) * g.r;
 		float x, y;
 		buttonAt(g, list[i], x, y);
 		bool pressed = false;
