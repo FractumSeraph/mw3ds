@@ -26,6 +26,12 @@ void platformLook(float& yaw, float& pitch);
 enum { FEEDBACK_READIED, FEEDBACK_CHARGED, FEEDBACK_HELD_BACK, FEEDBACK_HIT };
 void platformFeedback(int what);
 
+// What the game offers the platforms: an autosave right now, when the frame loop is in its own input scan between two
+// frames (false otherwise: mid-load, on the title, in a scripted run). The Android build calls it as the app goes to the
+// background (a watch's screen sleeping, a notification), where the system may end it unasked: SDL's pump, inside that
+// scan, then waits until the app comes back. engine.cpp
+bool gameSaveForBackground();
+
 // Before gfxInit: the console's VRAM cleared to black (gfxInit puts the screens' buffers there and lights the screens on
 // them at once, before the game's first frame). Nothing on the PC test build
 void platformClearVram();

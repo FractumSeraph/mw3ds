@@ -59,6 +59,12 @@ The game's **Combat aids** (Options > Prefs > Combat aids, on by default on Andr
 
 Being hit buzzes long.
 
+### Saving
+
+Besides the game's own autosaves (a door, travel), the game autosaves as the app goes to the background (the watch's
+screen sleeping, a notification, the Home button), where Android may end it unasked: SDL tells the game from inside its
+input scan, between two frames of play (`gameSaveForBackground` in `source/engine.cpp`).
+
 ### Frame rate
 
 Options > Video > **Frame rate** (in place of the 3DS's depth buffer choice, which only its 3D screen uses): 60, or 30,

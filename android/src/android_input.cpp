@@ -36,6 +36,8 @@ static SDL_Window* s_window = nullptr;
 static SDL_GLContext s_gl = nullptr;
 static bool s_round = false;
 static bool s_quit = false;
+static bool SDLCALL leavingWatch(void*, SDL_Event* e);      // (the app going to the background: below)
+static bool s_walk = false;             // walking on by itself (the WALK button): the bezel steers
 
 SDL_Window* androidWindow()
 {
@@ -91,6 +93,7 @@ bool androidStart()
 	}
 	SDL_GL_MakeCurrent(s_window, s_gl);
 	SDL_GL_SetSwapInterval(1);
+	SDL_AddEventWatch(leavingWatch, nullptr);
 	androidAudioStart();
 	int w = 0, h = 0;
 	SDL_GetWindowSizeInPixels(s_window, &w, &h);
@@ -108,7 +111,6 @@ static unsigned s_lastFrames = 0;
 static u32 s_held = 0, s_down = 0, s_up = 0;
 static u32 s_pulse = 0;                 // pressed for one scan, let go the next (a tap's A, a ring item)
 static bool s_sneak = false;            // sneaking (the ring's SNEAK), held as the layout's sneak button
-static bool s_walk = false;             // walking on by itself (the WALK button): the bezel steers
 static bool s_lookMode = false;         // a slide looks instead of walking (the ring's LOOK)
 static bool s_ring = false;             // the ring of actions is open
 static touchPosition s_touch = {};
@@ -120,6 +122,18 @@ static u32 s_padKeys = 0;               // a gamepad's buttons, as the console's
 static float s_lookYaw = 0, s_lookPitch = 0;
 static std::atomic<int> s_rotary{ 0 };  // bezel clicks, hundredths (MorrowindActivity, on the UI thread)
 static SDL_Gamepad* s_gamepad = nullptr;
+// The app going to the background: SDL sends it from inside its pump on the game's thread (in a scan of ours) and then
+// waits there until the app comes back, so the watch saves the game right then (platform/platform.hpp
+// gameSaveForBackground: only between two frames of play) and stops walking on
+static bool SDLCALL leavingWatch(void*, SDL_Event* e)
+{
+	if (e->type == SDL_EVENT_WILL_ENTER_BACKGROUND)
+	{
+		s_walk = false;
+		gameSaveForBackground();
+	}
+	return true;
+}
 
 extern "C" JNIEXPORT void JNICALL Java_net_fractumseraph_morrowind_MorrowindActivity_nativeRotary(JNIEnv*, jclass, jfloat clicks)
 {
@@ -444,6 +458,7 @@ void hidScanInput()
 		case SDL_EVENT_TERMINATING:
 			s_quit = true;
 			break;
+
 		case SDL_EVENT_FINGER_DOWN:
 			if (Finger* f = finger(e.tfinger.fingerID, true))
 				fingerDown(g, *f, e.tfinger.x * ww, e.tfinger.y * wh, ww, wh);
