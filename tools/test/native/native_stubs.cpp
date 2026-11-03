@@ -77,7 +77,9 @@ static std::string dataRoot()
 	return e ? e : "out/data";
 }
 
-static std::string s_mapped;
+// (each thread's own: the Android build's streaming thread opens a cell's files while the game's thread opens others,
+// and one shared string corrupted the heap)
+static thread_local std::string s_mapped;
 
 const char* nativePath(const char* path)
 {
@@ -156,9 +158,10 @@ ssize_t decode_utf8(uint32_t* out, const unsigned char* p)
 	return 1;
 }
 
-// ---- linear heap: plain memory
+// ---- linear heap: plain memory (its count locked: the Android build's streaming thread allocates too)
 static size_t s_linearUsed = 0;
 static std::map<void*, size_t> s_linearSizes;
+static std::mutex s_linearLock;
 #ifdef NATIVE_MEMCAP
 extern "C" void* nativeOutsideAlloc(size_t n);     // (the memory checker: not out of the capped C++ heap)
 #endif
@@ -171,6 +174,7 @@ void* linearAlloc(size_t size)
 #endif
 	if (p)
 	{
+		std::lock_guard<std::mutex> hold(s_linearLock);
 		s_linearUsed += size;
 		s_linearSizes[p] = size;
 	}
@@ -178,11 +182,14 @@ void* linearAlloc(size_t size)
 }
 void linearFree(void* p)
 {
-	auto it = s_linearSizes.find(p);
-	if (it != s_linearSizes.end())
 	{
-		s_linearUsed -= it->second;
-		s_linearSizes.erase(it);
+		std::lock_guard<std::mutex> hold(s_linearLock);
+		auto it = s_linearSizes.find(p);
+		if (it != s_linearSizes.end())
+		{
+			s_linearUsed -= it->second;
+			s_linearSizes.erase(it);
+		}
 	}
 	free(p);
 }
@@ -237,8 +244,12 @@ void logf(const char* fmt, ...)
 void monitorOnce(const char* key, const char* fmt, ...)
 {
 	static std::set<std::string> told;
-	if (told.size() >= 4000 || !told.insert(key).second)
-		return;
+	static std::mutex lock;
+	{
+		std::lock_guard<std::mutex> hold(lock);
+		if (told.size() >= 4000 || !told.insert(key).second)
+			return;
+	}
 	char line[400];
 	va_list args;
 	va_start(args, fmt);

@@ -100,22 +100,47 @@ inline void gfxSet3D(bool on) { nativeStereo() = on; }
 inline bool gfxIs3D() { return nativeStereo(); }
 inline float osGet3DSliderState() { const char* e = getenv("NATIVE_3D"); return e ? (float)atof(e) : 0.0f; }
 
+#ifdef MW3DS_ANDROID
+// The Android build: threads of its own, as the console's (the streaming thread reads the next cells while the game
+// plays: mwworld/scene.cpp). A LightLock is the console's int, 1 unlocked, taken by whoever turns it to 0; the threads
+// are android/src/android_threads.cpp's, the main thread's threadGetCurrent null as libctru's
+typedef int LightLock;
+inline void LightLock_Init(LightLock* l) { __atomic_store_n(l, 1, __ATOMIC_RELEASE); }
+inline int LightLock_TryLock(LightLock* l)
+{
+	int unlocked = 1;
+	return __atomic_compare_exchange_n(l, &unlocked, 0, false, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED) ? 0 : 1;
+}
+inline void LightLock_Lock(LightLock* l)
+{
+	while (LightLock_TryLock(l) != 0)
+		std::this_thread::yield();
+}
+inline void LightLock_Unlock(LightLock* l) { __atomic_store_n(l, 1, __ATOMIC_RELEASE); }
+typedef void* Thread;
+typedef void (*ThreadFunc)(void*);
+Thread threadCreate(ThreadFunc entry, void* arg, size_t stackSize, int prio, int core, bool detached);
+Thread threadGetCurrent();
+Result threadJoin(Thread t, u64 timeoutNs);
+void threadFree(Thread t);
+#else
 // One thread only: threadCreate fails, and the game then does that work on the spot (mwworld/worldimp.cpp streaming)
 typedef int LightLock;
 inline void LightLock_Init(LightLock* l) { *l = 1; }
 inline void LightLock_Lock(LightLock*) {}
 inline void LightLock_Unlock(LightLock*) {}
 inline int LightLock_TryLock(LightLock*) { return 0; }
-typedef int RecursiveLock;
-inline void RecursiveLock_Init(RecursiveLock*) {}
-inline void RecursiveLock_Lock(RecursiveLock*) {}
-inline void RecursiveLock_Unlock(RecursiveLock*) {}
 typedef void* Thread;
 typedef void (*ThreadFunc)(void*);
 inline Thread threadCreate(ThreadFunc, void*, size_t, int, int, bool) { return nullptr; }
 inline Thread threadGetCurrent() { return nullptr; }
 inline Result threadJoin(Thread, u64) { return 0; }
 inline void threadFree(Thread) {}
+#endif
+typedef int RecursiveLock;
+inline void RecursiveLock_Init(RecursiveLock*) {}
+inline void RecursiveLock_Lock(RecursiveLock*) {}
+inline void RecursiveLock_Unlock(RecursiveLock*) {}
 inline Result svcGetThreadPriority(s32* p, u32) { *p = 0x30; return 0; }
 #define CUR_THREAD_HANDLE 0xFFFF8000u
 #define U64_MAX UINT64_MAX

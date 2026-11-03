@@ -534,13 +534,23 @@ bool C3D_TexInit(C3D_Tex* t, u16 w, u16 h, int fmt)
 
 bool C3D_TexInitVRAM(C3D_Tex* t, u16 w, u16 h, int fmt) { return C3D_TexInit(t, w, h, fmt); }
 
+// GL textures let go of on the streaming thread (a cell read that failed, its cache's last use): deleted on the game's
+// thread, which has the context, at the frame's end
+static std::mutex s_lateDeletesLock;
+static std::vector<GLuint> s_lateDeletes;
+
 void C3D_TexDelete(C3D_Tex* t)
 {
 	free(t->data);
 	t->data = nullptr;
 	if (GlTex* g = (GlTex*)t->native)
 	{
-		if (g->id && !g->target)
+		if (g->id && !g->target && threadGetCurrent())
+		{
+			std::lock_guard<std::mutex> hold(s_lateDeletesLock);
+			s_lateDeletes.push_back(g->id);
+		}
+		else if (g->id && !g->target)
 			glDeleteTextures(1, &g->id);
 		if (g->target)
 			g->target->tex = nullptr;
@@ -725,6 +735,12 @@ void C3D_FrameEnd(u8)
 	androidDrawOverlay(s_windowW, s_windowH);
 	flush2D();
 	SDL_GL_SwapWindow(win);
+	{
+		std::lock_guard<std::mutex> hold(s_lateDeletesLock);
+		if (!s_lateDeletes.empty())
+			glDeleteTextures((GLsizei)s_lateDeletes.size(), s_lateDeletes.data());
+		s_lateDeletes.clear();
+	}
 	// (the swap waits for the display; a rate below its own sleeps the rest of the frame first)
 	static Uint64 last = 0;
 	Uint64 now = SDL_GetTicksNS();

@@ -14,6 +14,7 @@ stand-in 3DS headers (`tools/test/native/stub`, with the hooks this build needs 
 | `gles_gpu.cpp` | citro3d and citro2d on OpenGL ES 3.0: render targets as framebuffers, the `.t3x` textures uploaded (ETC1 as it is, the rest decoded by `tools/test/native/pica_textures.hpp`), `shaders/cell.v.pica` and `skin.v.pica` in GLSL, the texture combiners as a fragment shader made for each set of stages, citro2d's drawing batched; at a frame's end the screen the controls choose, put on the display |
 | `android_input.cpp` | The window and its context, the paths, and the console's buttons, pads and touch screen from the watch's touch screen, bezel and back button (and a gamepad): one finger's gestures, the ring of actions; the software keyboard as the system's |
 | `android_audio.cpp` | The ndsp channels mixed and played through SDL (the native test build's WAV mixer, in real time) |
+| `android_threads.cpp` | The console's threads on the system's (the PC test build has one thread): the streaming thread, as below |
 | `build.py` | The build: SDL3, Mbed TLS (online play and the data download: `mwmp/netsocket.cpp`'s TLS, as the console's) and zlib, the game, the APK |
 | `app/` | The app: SDL3's activity with a round display, the bezel, the back button, a text dialog, the buzz and the system font drawn with the watch's typeface (`MorrowindActivity.java`); the updater |
 
@@ -146,7 +147,16 @@ A development build is an app of its own, `net.fractumseraph.morrowind.dev` ("Mo
 release's without touching it (with its own game data). It needs `ANDROID_HOME` (the SDK, platform 35), `ANDROID_NDK_HOME` (NDK 27), JDK 17, CMake, Ninja and git, on Linux;
 it downloads SDL3, Mbed TLS and zlib (pinned) into `build/android` once. The APK is signed with the machine's debug key.
 
+### Streaming
+
+The exterior cells around the player load on a thread of their own while the game plays, as on the console
+(`mwworld/scene.cpp`'s streaming thread, on another of the watch's cores, a little below the game's priority), so
+walking over a cell's edge doesn't pause the game: 16 cells crossed at a steady 60 frames a second on the Galaxy Watch 8
+Classic, each next cell read in 70 to 400 ms beside it. The PC test build keeps one thread (its runs stay the same each
+time), so the stand-ins it shares with this build are safe for two: `tools/test/native/stub/3ds.h`'s locks and threads
+are real inside `#ifdef MW3DS_ANDROID`, and `native_stubs.cpp`'s paths, linear memory count and monitor are each
+thread's or locked.
+
 ## What it does not do yet
 
-- The streaming thread: cells load on the game's thread, as the native test build has it (a pause at a cell's edge).
 - Movies, gyro aim, the 3D slider, screenshots.
