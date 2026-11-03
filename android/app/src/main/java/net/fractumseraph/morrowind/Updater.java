@@ -169,23 +169,16 @@ final class Updater {
     private static void ask(Activity activity, Release release) {
         if (activity.isFinishing())
             return;
-        new AlertDialog.Builder(activity)
-            .setTitle(TITLE + " " + release.version)
-            .setMessage("A new version is out (this is " + BuildConfig.VERSION_NAME + "). Update now? The game closes, "
-                + "and your saves and game data stay.")
-            .setCancelable(false)
-            .setPositiveButton("Update", (dialog, which) -> update(activity, release))
-            .setNegativeButton("Not now", null)
-            .setNeutralButton("Never", (dialog, which) -> confirmNever(activity))
-            .show();
+        RoundDialog.show(activity, TITLE + " " + release.version, "A new version is out (this is "
+            + BuildConfig.VERSION_NAME + "). Update now? The game closes, and your saves and game data stay.", null, false,
+            null, new RoundDialog.Choice("Update", () -> update(activity, release)), new RoundDialog.Choice("Not now", null),
+            new RoundDialog.Choice("Never", () -> confirmNever(activity)));
     }
 
     private static void confirmNever(Activity activity) {
-        new AlertDialog.Builder(activity)
-            .setTitle(TITLE)
-            .setMessage("Stop asking about new versions? To ask again, delete 3ds/mw3ds/update_off in the app's folder.")
-            .setCancelable(false)
-            .setPositiveButton("Stop asking", (dialog, which) -> {
+        RoundDialog.show(activity, TITLE,
+            "Stop asking about new versions? To ask again, delete 3ds/mw3ds/update_off in the app's folder.", null, false,
+            null, new RoundDialog.Choice("Stop asking", () -> {
                 File off = offFile(activity);
                 try {
                     if (off != null && off.getParentFile() != null) {
@@ -195,9 +188,7 @@ final class Updater {
                 } catch (IOException e) {
                     Log.i(LOG_TAG, "update: could not write " + off + ": " + e);
                 }
-            })
-            .setNegativeButton("Keep asking", null)
-            .show();
+            }), new RoundDialog.Choice("Keep asking", null));
     }
 
     private static void update(Activity activity, Release release) {
@@ -212,11 +203,7 @@ final class Updater {
         bar.setMax(1000);
         layout.addView(status);
         layout.addView(bar);
-        AlertDialog progress = new AlertDialog.Builder(activity)
-            .setTitle(TITLE + " " + release.version)
-            .setView(layout)
-            .setCancelable(false)
-            .show();
+        AlertDialog progress = RoundDialog.show(activity, TITLE + " " + release.version, null, layout, false, null);
 
         new Thread(() -> {
             try {
@@ -234,11 +221,8 @@ final class Updater {
                 Log.i(LOG_TAG, "update: failed: " + e);
                 activity.runOnUiThread(() -> {
                     progress.dismiss();
-                    new AlertDialog.Builder(activity)
-                        .setTitle(TITLE)
-                        .setMessage("The update failed: " + e.getMessage())
-                        .setPositiveButton("OK", null)
-                        .show();
+                    RoundDialog.show(activity, TITLE, "The update failed: " + e.getMessage(), null, true, null,
+                        new RoundDialog.Choice("OK", null));
                 });
             }
         }, "update download").start();
