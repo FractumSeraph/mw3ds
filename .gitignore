@@ -33,3 +33,7 @@ native_prof.txt
 # Scratch repros and probes (run by name: scratch\<case>)
 tools/test/cases/scratch/
 .claude
+
+# the Android build's Gradle files (android/; its outputs go to build/android)
+.gradle/
+local.properties

@@ -1,0 +1,17 @@
+// The Android app's Gradle project; its native libraries are built by android/build.py first (README.md here)
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+rootProject.name = "fractum-morrowind"
+include ":app"

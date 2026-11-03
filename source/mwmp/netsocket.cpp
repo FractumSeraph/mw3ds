@@ -9,6 +9,11 @@
 
 #include "components/debug/debuglog.hpp"
 
+// TLS: Mbed TLS, the console's (devkitPro's) and the Android build's (android/build.py builds it)
+#if defined(__3DS__) || defined(MW3DS_ANDROID)
+#define NET_TLS 1
+#endif
+
 #ifdef __3DS__
 #include <3ds.h>
 #include <arpa/inet.h>
@@ -19,14 +24,6 @@
 #include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
-
-#include "mbedtls/ctr_drbg.h"
-#include "mbedtls/error.h"
-#include "mbedtls/net_sockets.h"
-#include "mbedtls/ssl.h"
-#include "mbedtls/x509_crt.h"
-
-#include "mwmp/tlsroots.hpp"
 #else
 #ifdef _WIN32
 #include <winsock2.h>
@@ -40,6 +37,16 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #endif
+#endif
+
+#ifdef NET_TLS
+#include "mbedtls/ctr_drbg.h"
+#include "mbedtls/error.h"
+#include "mbedtls/net_sockets.h"
+#include "mbedtls/ssl.h"
+#include "mbedtls/x509_crt.h"
+
+#include "mwmp/tlsroots.hpp"
 #endif
 
 namespace
@@ -123,7 +130,7 @@ struct NetSocket::Impl
 	State st = CLOSED;
 	bool tls = false;
 	std::string host, error;
-#ifdef __3DS__
+#ifdef NET_TLS
 	bool tlsReady = false;
 	mbedtls_ssl_context ssl;
 	mbedtls_ssl_config conf;
@@ -139,15 +146,20 @@ struct NetSocket::Impl
 	void shut();
 };
 
-#ifdef __3DS__
+#ifdef NET_TLS
 namespace
 {
 // The random numbers TLS needs: the PS service's (the console's own generator), else the system tick mixed (only
-// when PS is missing, which a real console never is)
+// when PS is missing, which a real console never is); on Android, the system's
 int entropy(void*, unsigned char* out, size_t len)
 {
+#ifdef MW3DS_ANDROID
+	arc4random_buf(out, len);
+	return 0;
+#else
 	if (g_ps && R_SUCCEEDED(PS_GenerateRandomBytes(out, len)))
 		return 0;
+#endif
 	for (size_t i = 0; i < len; i++)
 		out[i] = (unsigned char)((svcGetSystemTick() >> ((i % 4) * 3)) ^ (rand() & 0xFF));
 	return 0;
@@ -186,7 +198,7 @@ std::string tlsError(int ret)
 
 void NetSocket::Impl::shut()
 {
-#ifdef __3DS__
+#ifdef NET_TLS
 	if (tlsReady)
 	{
 		if (st == OPEN)
@@ -241,7 +253,7 @@ bool NetSocket::connect(const std::string& host, int port, bool tls)
 		d->fail("no network");
 		return false;
 	}
-#ifndef __3DS__
+#ifndef NET_TLS
 	if (tls)
 	{
 		d->fail("TLS needs the console build (the PC test build talks ws:// / http:// only)");
@@ -326,7 +338,7 @@ NetSocket::State NetSocket::poll()
 			logf("net: connected to %s", d->host.c_str());
 			return d->st;
 		}
-#ifdef __3DS__
+#ifdef NET_TLS
 		mbedtls_ssl_init(&d->ssl);
 		mbedtls_ssl_config_init(&d->conf);
 		mbedtls_x509_crt_init(&d->roots);
@@ -358,7 +370,7 @@ NetSocket::State NetSocket::poll()
 		d->st = HANDSHAKE;
 #endif
 	}
-#ifdef __3DS__
+#ifdef NET_TLS
 	if (d->st == HANDSHAKE)
 	{
 		int ret = mbedtls_ssl_handshake(&d->ssl);
@@ -384,7 +396,7 @@ int NetSocket::send(const void* data, int len)
 		return -1;
 	if (len <= 0)
 		return 0;
-#ifdef __3DS__
+#ifdef NET_TLS
 	if (d->tls)
 	{
 		int n = mbedtls_ssl_write(&d->ssl, (const unsigned char*)data, len);
@@ -413,7 +425,7 @@ int NetSocket::recv(void* data, int len)
 {
 	if (d->st != OPEN)
 		return -1;
-#ifdef __3DS__
+#ifdef NET_TLS
 	if (d->tls)
 	{
 		int n = mbedtls_ssl_read(&d->ssl, (unsigned char*)data, len);

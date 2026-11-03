@@ -29,12 +29,13 @@ ZLIB_SRC = ["adler32", "compress", "crc32", "deflate", "inffast", "inflate", "in
 # replaced by native_stubs.cpp (log, linear heap, the dev updater), native_gpu.cpp (screenshots) or main_native.cpp
 SKIP = {"main.cpp", "components/debug/debuglog.cpp", "mwrender/screenshotmanager.cpp", "platform/linear.cpp",
         "platform/heaps.cpp"}
-# The two builds' entry files: they only define what source/platform/platform.hpp asks of them and call appMain; the
-# game itself is source/engine.cpp, compiled into both, so the console and this build can't drift apart
+# The builds' entry files (the console's, this one's, the Android build's): they only define what
+# source/platform/platform.hpp asks of them and call appMain; the game itself is source/engine.cpp, compiled into all,
+# so the console and these builds can't drift apart
 # (check_entry_files)
-ENTRY_FILES = ["source/main.cpp", "tools/test/native/main_native.cpp"]
-ENTRY_MAX_LINES = 40
-ENTRY_FUNCTIONS = {"main", "platformRunOver", "platformFailFast", "platformClearVram"}
+ENTRY_FILES = ["source/main.cpp", "tools/test/native/main_native.cpp", "android/src/main_android.cpp"]
+ENTRY_MAX_LINES = 50
+ENTRY_FUNCTIONS = {"main", "platformRunOver", "platformFailFast", "platformClearVram", "platformLook"}
 # The renderer's drawing entry points get a suffix in the file that defines them: native_gpu.cpp wraps them so they draw
 # only with NATIVE_DRAW=1
 RENDERER_RENAMES = ["rendererDrawWorld", "rendererDrawMesh", "rendererDrawMeshGlow", "rendererDrawActor", "rendererDrawGlow",

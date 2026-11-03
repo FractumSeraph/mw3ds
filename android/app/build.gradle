@@ -1,0 +1,53 @@
+plugins {
+    id "com.android.application"
+}
+
+// build/android in the repository root, where android/build.py puts the native libraries and SDL3 (whose Java side
+// the app is built on); the Gradle build's own files go there too, outside the source tree
+def staged = new File(rootDir, "../build/android")
+layout.buildDirectory = new File(staged, "gradle/app")
+
+android {
+    // FractumMorrowind, as the 3DS build is called: installs beside nothing else
+    namespace "net.fractumseraph.morrowind"
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "net.fractumseraph.morrowind"
+        minSdk 28
+        targetSdk 35
+        versionCode 1
+        versionName "0.1-wear"
+        ndk {
+            abiFilters "armeabi-v7a"
+        }
+    }
+
+    sourceSets {
+        main {
+            java.srcDirs += new File(staged, "SDL3/android-project/app/src/main/java")
+            jniLibs.srcDirs = [new File(staged, "jniLibs")]
+        }
+    }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging false
+        }
+    }
+
+    buildTypes {
+        debug {
+            debuggable true
+            minifyEnabled false
+        }
+        release {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

@@ -23,6 +23,11 @@ void platformClearVram()
 {
 }
 
+void platformLook(float& yaw, float& pitch)
+{
+	yaw = pitch = 0.0f;
+}
+
 int main()
 {
 	return appMain();
