@@ -161,7 +161,8 @@ static const Button kTopButtons[] = {
 	{ ACT_SNEAK, 200, 0.86f, "S" }, { ACT_POV, 340, 0.86f, "P" },
 };
 static const Button kBottomButtons[] = {
-	{ ACT_B, 124, 0.80f, "B" }, { ACT_START, 90, 0.80f, "=" }, { ACT_A, 56, 0.80f, "A" }, { ACT_SWAP, 270, 0.80f, "^" },
+	// (high in the cap above the screen: lower, they would cover its top row)
+	{ ACT_B, 112, 0.88f, "B" }, { ACT_START, 90, 0.80f, "=" }, { ACT_A, 68, 0.88f, "A" }, { ACT_SWAP, 270, 0.80f, "^" },
 };
 static const float kButtonSize = 0.12f;         // radius, as a share of the display's
 
