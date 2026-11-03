@@ -69,6 +69,7 @@ android {
 
     buildFeatures {
         buildConfig true
+        resValues true
     }
 
     signingConfigs {
@@ -83,13 +84,17 @@ android {
     }
 
     buildTypes {
+        // (a development build is an app of its own, beside the release: its own data folder, never an update of it)
         debug {
             debuggable true
             minifyEnabled false
+            applicationIdSuffix ".dev"
+            resValue "string", "app_name", "Morrowind dev"
             if (signed) signingConfig signingConfigs.fractum
         }
         release {
             minifyEnabled false
+            resValue "string", "app_name", "FractumMorrowind"
             signingConfig signed ? signingConfigs.fractum : null
         }
     }

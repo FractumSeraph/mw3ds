@@ -5,15 +5,14 @@
 //
 // - The display shows one of the console's screens at a time, as large as fits in its circle: the top screen (the
 //   world) while the game plays, the bottom one (the touch screen: the title, the HUD's buttons, the menus) otherwise.
-//   The v / ^ button swaps them; a menu opening or closing picks again.
-// - On the top screen, a finger on the left half is the Circle Pad (it moves where it lands: a stick under it), one on
-//   the right half turns the view as far as it slides (platformLook, as the stylus layout's slide) and a tap there is A
-//   (talk, open, take). Round buttons around the edge are the console's: = START (the menu), X (ready the weapon),
-//   Y (jump), L (cast), R (attack: held winds up), S (sneak, on and off) and P (first / third person). They press what
-//   the button layout chosen in Options has those on (layoutKeys).
-// - On the bottom screen, a finger is the stylus; B, = START and A are round buttons above it.
-// - The bezel turns the view (15 degrees a click) on the top screen, and is the D-pad's up / down on the bottom one;
-//   the back button is START on the top screen and B on the bottom one.
+//   The ring's SCREEN and the bottom screen's WORLD swap them; a menu opening or closing picks again.
+// - On the top screen one finger plays (the watch is on the other hand): a slide walks, a tap is A (talk, open,
+//   take), held still it attacks; the bezel turns. WALK walks on by itself (the bezel steers). MORE, or the back
+//   button, opens a ring of actions in words: MENU, JUMP, READY, CAST, SCREEN, SNEAK, VIEW (first / third person) and
+//   LOOK (a slide looks instead of walking). They press what the button layout chosen in Options has them on
+//   (layoutKeys). A press buzzes.
+// - On the bottom screen a finger is the stylus; BACK (B), MENU (START) and OK (A) are above it. The bezel moves the
+//   menus' highlight and scrolls their text; the back button is B.
 #include <3ds.h>
 #include <SDL3/SDL.h>
 #include <jni.h>
@@ -101,11 +100,16 @@ static int s_autoView = -1;
 static unsigned s_lastFrames = 0;
 
 static u32 s_held = 0, s_down = 0, s_up = 0;
-static u32 s_pulse = 0;                 // pressed for one scan, let go the next (a tap's A, GoldenEye's sneak)
-static bool s_sneak = false;
+static u32 s_pulse = 0;                 // pressed for one scan, let go the next (a tap's A, a ring item)
+static bool s_sneak = false;            // sneaking (the ring's SNEAK), held as the layout's sneak button
+static bool s_walk = false;             // walking on by itself (the WALK button): the bezel steers
+static bool s_lookMode = false;         // a slide looks instead of walking (the ring's LOOK)
+static bool s_ring = false;             // the ring of actions is open
 static touchPosition s_touch = {};
 static float s_padX = 0, s_padY = 0;    // the Circle Pad, -1 to 1 (a finger, or a gamepad's left stick)
 static float s_stickX = 0, s_stickY = 0, s_stick2X = 0, s_stick2Y = 0;   // a gamepad's sticks
+static int s_scrollFrames = 0;          // the bezel scrolling a text pane: frames of the C-stick held, and which way
+static float s_scrollY = 0;
 static u32 s_padKeys = 0;               // a gamepad's buttons, as the console's
 static float s_lookYaw = 0, s_lookPitch = 0;
 static std::atomic<int> s_rotary{ 0 };  // bezel clicks, hundredths (MorrowindActivity, on the UI thread)
@@ -114,6 +118,31 @@ static SDL_Gamepad* s_gamepad = nullptr;
 extern "C" JNIEXPORT void JNICALL Java_net_fractumseraph_morrowind_MorrowindActivity_nativeRotary(JNIEnv*, jclass, jfloat clicks)
 {
 	s_rotary += (int)lroundf(clicks * 100.0f);
+}
+
+// A short buzz under the finger, so a press is felt without looking (MorrowindActivity.buzz)
+static void buzz(int ms)
+{
+	static jclass cls = nullptr;
+	static jmethodID method = nullptr;
+	JNIEnv* env = (JNIEnv*)SDL_GetAndroidJNIEnv();
+	if (!env)
+		return;
+	if (!cls)
+	{
+		jobject activity = (jobject)SDL_GetAndroidActivity();
+		if (!activity)
+			return;
+		jclass local = env->GetObjectClass(activity);
+		cls = (jclass)env->NewGlobalRef(local);
+		method = env->GetStaticMethodID(cls, "buzz", "(I)V");
+		env->DeleteLocalRef(local);
+		env->DeleteLocalRef(activity);
+	}
+	if (method)
+		env->CallStaticVoidMethod(cls, method, (jint)ms);
+	if (env->ExceptionCheck())
+		env->ExceptionClear();
 }
 
 // The display's circle (or rectangle, on a phone), and the screens and buttons in it
@@ -151,25 +180,41 @@ ScreenView androidScreenView(int ww, int wh)
 	return v;
 }
 
-// The round buttons: what each is (a console button, or the view's swap), where (degrees round the centre from the
-// right, anticlockwise, and how far out as a share of the radius) and its letter
-enum Action { ACT_START, ACT_READY, ACT_JUMP, ACT_CAST, ACT_ATTACK, ACT_SNEAK, ACT_POV, ACT_SWAP, ACT_B, ACT_A };
+// What a button or a ring item does: a console button (as the layout Options chose has it: layoutKeys), or one of
+// the watch's own (the screens' swap, walking on, the look mode, the ring)
+enum Action { ACT_START, ACT_READY, ACT_JUMP, ACT_CAST, ACT_ATTACK, ACT_SNEAK, ACT_POV, ACT_SCREEN, ACT_LOOK, ACT_WALK,
+	ACT_RING, ACT_B, ACT_A };
+// Where (degrees round the centre from the right, anticlockwise, and how far out as a share of the radius) and its word
 struct Button { Action act; float deg, out; const char* label; };
-static const Button kTopButtons[] = {
-	{ ACT_START, 90, 0.80f, "=" }, { ACT_READY, 124, 0.80f, "X" }, { ACT_JUMP, 56, 0.80f, "Y" },
-	{ ACT_CAST, 236, 0.80f, "L" }, { ACT_SWAP, 270, 0.80f, "v" }, { ACT_ATTACK, 304, 0.80f, "R" },
-	{ ACT_SNEAK, 200, 0.86f, "S" }, { ACT_POV, 340, 0.86f, "P" },
-};
+// On the top screen only two, in the bands above and below it, clear of the picture: the ring and walking on
+static const Button kTopButtons[] = { { ACT_RING, 90, 0.76f, "MORE" }, { ACT_WALK, 270, 0.76f, "WALK" } };
+// Above the bottom screen (high: lower, they would cover its top row) and below it
 static const Button kBottomButtons[] = {
-	// (high in the cap above the screen: lower, they would cover its top row)
-	{ ACT_B, 112, 0.88f, "B" }, { ACT_START, 90, 0.80f, "=" }, { ACT_A, 68, 0.88f, "A" }, { ACT_SWAP, 270, 0.80f, "^" },
+	{ ACT_B, 112, 0.88f, "BACK" }, { ACT_START, 90, 0.80f, "MENU" }, { ACT_A, 68, 0.88f, "OK" },
+	{ ACT_SCREEN, 270, 0.80f, "WORLD" },
 };
-static const float kButtonSize = 0.12f;         // radius, as a share of the display's
+// The ring: eight actions round the display, the world dimmed behind them
+static const Button kRing[] = {
+	{ ACT_START, 90, 0.60f, "MENU" }, { ACT_JUMP, 45, 0.60f, "JUMP" }, { ACT_READY, 0, 0.60f, "READY" },
+	{ ACT_CAST, 315, 0.60f, "CAST" }, { ACT_SCREEN, 270, 0.60f, "SCREEN" }, { ACT_SNEAK, 225, 0.60f, "SNEAK" },
+	{ ACT_POV, 180, 0.60f, "VIEW" }, { ACT_LOOK, 135, 0.60f, "LOOK" },
+};
+static const float kButtonSize = 0.13f;     // an edge button's radius, as a share of the display's
+static const float kRingSize = 0.19f;       // a ring item's
 
-static void buttonsFor(int view, const Button*& list, int& n)
+static void buttonsFor(const Button*& list, int& n, float& size)
 {
-	list = view == VIEW_TOP ? kTopButtons : kBottomButtons;
-	n = view == VIEW_TOP ? (int)(sizeof(kTopButtons) / sizeof(kTopButtons[0])) : (int)(sizeof(kBottomButtons) / sizeof(kBottomButtons[0]));
+	if (s_ring && s_view == VIEW_TOP)
+	{
+		list = kRing;
+		n = (int)(sizeof(kRing) / sizeof(kRing[0]));
+		size = kRingSize;
+		return;
+	}
+	list = s_view == VIEW_TOP ? kTopButtons : kBottomButtons;
+	n = s_view == VIEW_TOP ? (int)(sizeof(kTopButtons) / sizeof(kTopButtons[0])) :
+		(int)(sizeof(kBottomButtons) / sizeof(kBottomButtons[0]));
+	size = kButtonSize;
 }
 
 static void buttonAt(const Geometry& g, const Button& b, float& x, float& y)
@@ -198,9 +243,48 @@ static u32 layoutKeys(Action a)
 	}
 }
 
-// ---- fingers
+// A button or ring item let go over itself: what it does. The console's buttons are pressed for one scan; the rest
+// change the watch's own state
+static void act(Action a)
+{
+	logf("watch: action %d", (int)a);
+	switch (a)
+	{
+	case ACT_SCREEN:
+		s_view = s_view == VIEW_TOP ? VIEW_BOTTOM : VIEW_TOP;
+		s_walk = false;
+		break;
+	case ACT_LOOK:
+		s_lookMode = !s_lookMode;
+		break;
+	case ACT_WALK:
+		s_walk = !s_walk;
+		break;
+	case ACT_RING:
+		s_ring = true;
+		break;
+	case ACT_SNEAK:
+		if (g_controlLayout == CONTROLS_GOLDENEYE)
+			s_pulse |= KEY_B;           // (GoldenEye's B is a toggle of its own: goldenEyeInput)
+		else
+			s_sneak = !s_sneak;
+		break;
+	default:
+		s_pulse |= layoutKeys(a);
+		break;
+	}
+	if (a != ACT_RING)
+		s_ring = false;
+}
 
-enum Role { ROLE_NONE, ROLE_STICK, ROLE_LOOK, ROLE_BUTTON, ROLE_SCREEN };
+// ---- fingers
+//
+// On the top screen one finger does it all (a watch is worn on the other hand): a slide walks (a stick where it
+// landed: pushed far, it runs), a tap is A (talk, open, take), held still it is the attack (wound up while held,
+// struck when let go). The bezel turns. With the ring's LOOK on, a slide looks instead; a second finger's slide
+// looks while the first walks (two thumbs, on a phone)
+
+enum Role { ROLE_NONE, ROLE_GESTURE, ROLE_BUTTON, ROLE_SCREEN, ROLE_OUTSIDE };
 struct Finger
 {
 	SDL_FingerID id = 0;
@@ -208,12 +292,15 @@ struct Finger
 	int button = -1;
 	float x0 = 0, y0 = 0, x = 0, y = 0, lastX = 0, lastY = 0;
 	Uint64 t0 = 0;
-	bool slid = false;
+	bool slid = false;          // gone farther than a tap may
+	bool attack = false;        // held still long enough: the attack
+	bool looks = false;         // its slide looks (the look mode, or a second finger)
 	bool unseen = true;         // down since the last scan: a press that ends before one still counts (fingerUp)
 };
 static Finger s_fingers[10];
-static const float kFingerSlop = 14.0f;    // display pixels a tap may wander
-static const Uint64 kTapMs = 300;
+static const float kFingerSlop = 14.0f;     // display pixels a tap may wander
+static const Uint64 kTapMs = 300;           // a tap is quicker
+static const Uint64 kHoldMs = 350;          // held still this long: the attack
 
 static Finger* finger(SDL_FingerID id, bool make)
 {
@@ -232,32 +319,40 @@ static Finger* finger(SDL_FingerID id, bool make)
 	return nullptr;
 }
 
+static int buttonUnder(const Geometry& g, float x, float y)
+{
+	const Button* list;
+	int n;
+	float size;
+	buttonsFor(list, n, size);
+	for (int i = 0; i < n; i++)
+	{
+		float bx, by;
+		buttonAt(g, list[i], bx, by);
+		float d = size * g.r * 1.15f;
+		if ((x - bx) * (x - bx) + (y - by) * (y - by) <= d * d)
+			return i;
+	}
+	return -1;
+}
+
 static void fingerDown(const Geometry& g, Finger& f, float x, float y, int ww, int wh)
 {
 	f.x0 = f.x = f.lastX = x;
 	f.y0 = f.y = f.lastY = y;
 	f.t0 = SDL_GetTicks();
-	const Button* list;
-	int n;
-	buttonsFor(s_view, list, n);
-	for (int i = 0; i < n; i++)
+	int b = buttonUnder(g, x, y);
+	if (b >= 0)
 	{
-		float bx, by;
-		buttonAt(g, list[i], bx, by);
-		float d = kButtonSize * g.r * 1.15f;
-		if ((x - bx) * (x - bx) + (y - by) * (y - by) <= d * d)
-		{
-			f.role = ROLE_BUTTON;
-			f.button = i;
-			Action a = list[i].act;
-			if (a == ACT_SWAP)
-				s_view = s_view == VIEW_TOP ? VIEW_BOTTOM : VIEW_TOP;
-			else if (a == ACT_SNEAK && g_controlLayout == CONTROLS_GOLDENEYE)
-				s_pulse |= KEY_B;       // (GoldenEye's B is a toggle of its own: goldenEyeInput)
-			else if (a == ACT_SNEAK)
-				s_sneak = !s_sneak;
-			return;
-		}
+		f.role = ROLE_BUTTON;
+		f.button = b;
+		buzz(12);
+		return;
+	}
+	if (s_ring && s_view == VIEW_TOP)
+	{
+		f.role = ROLE_OUTSIDE;          // (let go there, it closes the ring)
+		return;
 	}
 	if (s_view == VIEW_BOTTOM)
 	{
@@ -265,24 +360,35 @@ static void fingerDown(const Geometry& g, Finger& f, float x, float y, int ww, i
 		f.role = x >= v.x && x < v.x + v.w && y >= v.y && y < v.y + v.h ? ROLE_SCREEN : ROLE_NONE;
 		return;
 	}
-	f.role = x < g.cx ? ROLE_STICK : ROLE_LOOK;
+	f.role = ROLE_GESTURE;
+	bool walking = false;
+	for (auto& o : s_fingers)
+		walking |= &o != &f && o.role == ROLE_GESTURE && o.slid && !o.looks;
+	f.looks = s_lookMode || walking;
 }
 
 static bool s_touchPulse = false;       // a touch that came and went between two scans: held for one
 
 static void fingerUp(const Geometry& g, Finger& f, int ww, int wh)
 {
-	if (f.role == ROLE_LOOK && !f.slid && SDL_GetTicks() - f.t0 < kTapMs)
-		s_pulse |= KEY_A;
-	// (a press quicker than a frame, as adb's input tap is: the game sees it down for one scan)
-	if (f.unseen && f.role == ROLE_BUTTON)
+	if (f.role == ROLE_GESTURE && !f.slid && !f.attack && SDL_GetTicks() - f.t0 < kTapMs)
 	{
+		s_pulse |= KEY_A;
+		buzz(10);
+	}
+	if (f.role == ROLE_BUTTON)
+	{
+		// (let go over its button: it acts; slid off it first, nothing)
 		const Button* list;
 		int n;
-		buttonsFor(s_view, list, n);
-		if (f.button >= 0 && f.button < n && list[f.button].act != ACT_SWAP && list[f.button].act != ACT_SNEAK)
-			s_pulse |= layoutKeys(list[f.button].act);
+		float size;
+		buttonsFor(list, n, size);
+		if (f.button < n && buttonUnder(g, f.x, f.y) == f.button)
+			act(list[f.button].act);
 	}
+	if (f.role == ROLE_OUTSIDE && !f.slid)
+		s_ring = false;
+	// (a touch quicker than a frame, as adb's input tap is: the game sees it down for one scan)
 	if (f.unseen && f.role == ROLE_SCREEN && !s_touchPulse)
 	{
 		ScreenView v = androidScreenView(ww, wh);
@@ -290,7 +396,6 @@ static void fingerUp(const Geometry& g, Finger& f, int ww, int wh)
 		s_touch.py = (u16)std::clamp((f.y - v.y) / v.h * 240.0f, 0.0f, 239.0f);
 		s_touchPulse = true;
 	}
-	(void)g;
 	f.role = ROLE_NONE;
 }
 
@@ -302,7 +407,8 @@ void hidScanInput()
 	SDL_GetWindowSizeInPixels(s_window, &ww, &wh);
 	Geometry g = geometry(ww, wh);
 	// The view the game's state wants: the top screen while it plays with no menu up (its frame loop counts frames),
-	// the bottom one otherwise; a change of state picks it, the swap button overrides it until the next
+	// the bottom one otherwise; a change of state picks it, the swap overrides it until the next. A menu opening stops
+	// walking on and closes the ring
 	int want = g_mainFrames != s_lastFrames && !g_menuForInput ? VIEW_TOP : VIEW_BOTTOM;
 	s_lastFrames = g_mainFrames;
 	bool anyFinger = false;
@@ -310,8 +416,11 @@ void hidScanInput()
 		anyFinger |= f.role != ROLE_NONE;
 	if (want != s_autoView && !anyFinger)
 	{
+		logf("watch: the %s screen (menu %d)", want == VIEW_TOP ? "top" : "bottom", (int)g_menuForInput);
 		s_autoView = want;
 		s_view = want;
+		if (want == VIEW_BOTTOM)
+			s_walk = s_ring = false;
 	}
 
 	u32 pulse = 0;
@@ -343,8 +452,15 @@ void hidScanInput()
 				fingerUp(g, *f, ww, wh);
 			break;
 		case SDL_EVENT_KEY_DOWN:
+			// The back button: the ring on the top screen (shut again by another press), B on the bottom one
 			if (e.key.scancode == SDL_SCANCODE_AC_BACK && !e.key.repeat)
-				pulse |= s_view == VIEW_TOP ? KEY_START : KEY_B;
+			{
+				if (s_view == VIEW_TOP)
+					s_ring = !s_ring;
+				else
+					pulse |= KEY_B;
+				buzz(12);
+			}
 			break;
 		case SDL_EVENT_GAMEPAD_ADDED:
 			if (!s_gamepad)
@@ -388,51 +504,58 @@ void hidScanInput()
 		s_stick2Y = -SDL_GetGamepadAxis(s_gamepad, SDL_GAMEPAD_AXIS_RIGHTY) / 32767.0f;
 	}
 
-	// The bezel: the view's turn on the top screen, the D-pad's up / down on the bottom one
+	// The bezel: on the top screen the view's turn (15 degrees a click, clockwise to the right); on the bottom one the
+	// menus' highlight (the D-pad's up / down: a list's row, an item grid's row) and a text pane's scroll (the C-stick,
+	// a few frames a click)
 	int rot = s_rotary.exchange(0);
 	if (rot)
 	{
 		if (s_view == VIEW_TOP)
 			s_lookYaw += rot / 100.0f * 15.0f * 3.14159265f / 180.0f;
 		else
+		{
 			pulse |= rot > 0 ? KEY_DDOWN : KEY_DUP;
+			s_scrollY = rot > 0 ? -1.0f : 1.0f;
+			s_scrollFrames = 4;
+		}
 	}
 
-	// The fingers: the stick, the slide, the buttons, the stylus
+	// The fingers: walking, looking, the attack, the buttons, the stylus
 	u32 held = s_padKeys;
 	s_padX = s_stickX;
 	s_padY = s_stickY;
-	bool touching = false;
-	const Button* list;
-	int n;
-	buttonsFor(s_view, list, n);
+	bool touching = false, fingerWalks = false;
 	// (a slide across the display: the stylus layout's 0.01 radians a bottom-screen pixel, at Options' stylus speed)
 	float perPixel = 0.01f * 320.0f / (1.6f * g.r) * g_stylusSpeed / 100.0f;
+	Uint64 now = SDL_GetTicks();
 	for (auto& f : s_fingers)
 	{
 		switch (f.role)
 		{
-		case ROLE_STICK:
-		{
-			float reach = 0.22f * g.r;
-			float dx = (f.x - f.x0) / reach, dy = (f.y0 - f.y) / reach;
-			float len = sqrtf(dx * dx + dy * dy);
-			if (len > 1.0f)
-				dx /= len, dy /= len;
-			s_padX = dx;
-			s_padY = dy;
-			break;
-		}
-		case ROLE_LOOK:
-			if (f.slid)
+		case ROLE_GESTURE:
+			if (!f.slid && !f.attack && now - f.t0 >= kHoldMs)
+			{
+				f.attack = true;
+				buzz(25);
+			}
+			if (f.attack)
+				held |= layoutKeys(ACT_ATTACK);
+			if (f.slid && f.looks)
 			{
 				s_lookYaw += (f.x - f.lastX) * perPixel;
 				s_lookPitch += (f.lastY - f.y) * perPixel;
 			}
-			break;
-		case ROLE_BUTTON:
-			if (f.button >= 0 && f.button < n && list[f.button].act != ACT_SWAP && list[f.button].act != ACT_SNEAK)
-				held |= layoutKeys(list[f.button].act);
+			else if (f.slid)
+			{
+				float reach = 0.22f * g.r;
+				float dx = (f.x - f.x0) / reach, dy = (f.y0 - f.y) / reach;
+				float len = sqrtf(dx * dx + dy * dy);
+				if (len > 1.0f)
+					dx /= len, dy /= len;
+				s_padX = dx;
+				s_padY = dy;
+				fingerWalks = true;
+			}
 			break;
 		case ROLE_SCREEN:
 			if (!touching)
@@ -450,6 +573,14 @@ void hidScanInput()
 		f.lastX = f.x;
 		f.lastY = f.y;
 		f.unseen = false;
+	}
+	// walking on: straight ahead at a run until a finger walks itself, or WALK is pressed again
+	if (s_walk && s_view == VIEW_TOP && !fingerWalks)
+		s_padY = 1.0f;
+	if (s_scrollFrames > 0)
+	{
+		s_stick2Y = s_scrollY;
+		s_scrollFrames--;
 	}
 	if (!touching && s_touchPulse)
 		touching = true;            // (s_touch holds where it was)
@@ -497,13 +628,18 @@ void androidLookTake(float& yaw, float& pitch)
 
 // ---- the controls drawn over the screen
 
+static const u32 kInk = 0xF0E8F0F8, kEdge = 0xC0B0D8E8, kLit = 0x90B0D8E8, kShade = 0x70000000;
+
 void androidDrawOverlay(int ww, int wh)
 {
 	Geometry g = geometry(ww, wh);
+	if (s_ring && s_view == VIEW_TOP)
+		glesDisc(g.cx, g.cy, g.r, 0xA0000000, 0.0f);         // (the world dimmed behind the ring)
 	const Button* list;
 	int n;
-	buttonsFor(s_view, list, n);
-	float br = kButtonSize * g.r;
+	float size;
+	buttonsFor(list, n, size);
+	float br = size * g.r;
 	for (int i = 0; i < n; i++)
 	{
 		float x, y;
@@ -511,19 +647,39 @@ void androidDrawOverlay(int ww, int wh)
 		bool pressed = false;
 		for (auto& f : s_fingers)
 			pressed |= f.role == ROLE_BUTTON && f.button == i;
-		bool on = list[i].act == ACT_SNEAK && s_sneak;
-		glesDisc(x, y, br, pressed || on ? 0x90B0D8E8 : 0x60000000, 0.0f);
-		glesDisc(x, y, br, 0xC0B0D8E8, br - 2.0f);
-		glesText(list[i].label, x, y, br / 6.0f, 0xF0E8F0F8);
+		Action a = list[i].act;
+		bool on = (a == ACT_SNEAK && s_sneak) || (a == ACT_WALK && s_walk) || (a == ACT_LOOK && s_lookMode);
+		glesDisc(x, y, br, pressed || on ? kLit : kShade, 0.0f);
+		glesDisc(x, y, br, kEdge, br - 2.0f);
+		// (the label's line as tall as fits: its letters about half that, the word inside the disc)
+		float chars = (float)strlen(list[i].label);
+		glesLabel(list[i].label, x, y, std::min(br * 0.85f, 1.7f * br / (chars * 13.0f / 30.0f)), kInk);
 	}
-	// the stick under its finger
+	if (s_view != VIEW_TOP)
+		return;
+	// what is on, in words beside the ring's button: sneaking, looking
+	if (!s_ring)
+	{
+		float y = g.cy - g.r * 0.76f;
+		if (s_sneak)
+			glesLabel("SNEAK", g.cx - g.r * 0.42f, y, g.r * 0.13f, kInk);
+		if (s_lookMode)
+			glesLabel("LOOK", g.cx + g.r * 0.42f, y, g.r * 0.13f, kInk);
+	}
+	// the stick under a walking finger, a ring round one held for the attack
 	for (auto& f : s_fingers)
-		if (f.role == ROLE_STICK)
+	{
+		if (f.role != ROLE_GESTURE)
+			continue;
+		if (f.slid && !f.looks)
 		{
 			float reach = 0.22f * g.r;
 			glesDisc(f.x0, f.y0, reach, 0x80B0D8E8, reach - 2.0f);
 			glesDisc(f.x0 + s_padX * reach, f.y0 - s_padY * reach, reach * 0.4f, 0x70B0D8E8, 0.0f);
 		}
+		if (f.attack)
+			glesDisc(f.x, f.y, g.r * 0.16f, 0xC04060E0, g.r * 0.16f - 4.0f);
+	}
 }
 
 // ---- the on-screen keyboard: the system's, in a dialog (MorrowindActivity.askText), while the game waits

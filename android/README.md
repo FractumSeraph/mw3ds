@@ -12,37 +12,49 @@ stand-in 3DS headers (`tools/test/native/stub`, with the hooks this build needs 
 | --- | --- |
 | `main_android.cpp` | The entry: the hooks of `source/platform/platform.hpp`, then `appMain` (SDL3 calls it from its activity) |
 | `gles_gpu.cpp` | citro3d and citro2d on OpenGL ES 3.0: render targets as framebuffers, the `.t3x` textures uploaded (ETC1 as it is, the rest decoded by `tools/test/native/pica_textures.hpp`), `shaders/cell.v.pica` and `skin.v.pica` in GLSL, the texture combiners as a fragment shader made for each set of stages, citro2d's drawing batched; at a frame's end the screen the controls choose, put on the display |
-| `android_input.cpp` | The window and its context, the paths, and the console's buttons, pads and touch screen from the watch's touch screen, bezel and back button (and a gamepad); the software keyboard as the system's |
+| `android_input.cpp` | The window and its context, the paths, and the console's buttons, pads and touch screen from the watch's touch screen, bezel and back button (and a gamepad): one finger's gestures, the ring of actions; the software keyboard as the system's |
 | `android_audio.cpp` | The ndsp channels mixed and played through SDL (the native test build's WAV mixer, in real time) |
 | `build.py` | The build: SDL3, Mbed TLS (online play and the data download: `mwmp/netsocket.cpp`'s TLS, as the console's) and zlib, the game, the APK |
-| `app/` | The app: SDL3's activity with a round display, the bezel, the back button, a text dialog and the system font drawn with the watch's typeface (`MorrowindActivity.java`) |
+| `app/` | The app: SDL3's activity with a round display, the bezel, the back button, a text dialog, the buzz and the system font drawn with the watch's typeface (`MorrowindActivity.java`); the updater |
 
 ## Playing on a watch
 
 The display shows one of the console's screens at a time, as large as fits in its circle: the top screen (the world)
-while the game plays, the bottom one (the touch screen: the title, the HUD's buttons, the menus) otherwise. A menu
-opening or closing picks again; the **v** / **^** button swaps them.
+while the game plays, the bottom one (the touch screen: the title, the HUD's buttons, the menus, messages) otherwise. A
+menu opening or closing picks again; the ring's **SCREEN** and the bottom screen's **WORLD** swap them.
+
+The watch is on one hand, so one finger plays, and every press buzzes:
 
 | On the top screen | |
 | --- | --- |
-| A finger on the left half | The Circle Pad: a stick where it lands (pushed far: run) |
-| A finger on the right half | Slide: turn and look, as far as it slides (Options' stylus speed). Tap: A (talk, open, take) |
-| **=** | START: the menu (save, rest, options) |
-| **X** / **Y** | Ready or put away the weapon / jump |
-| **L** / **R** | Cast / attack (held: wind up) |
-| **S** / **P** | Sneak on and off / first or third person |
+| Slide | Walk, a stick where the finger landed (pushed far: run) |
+| Tap | A: talk, open, take |
+| Hold still | Attack: wound up while held (a red ring under the finger), struck when let go |
 | The bezel | Turn, 15 degrees a click |
-| The back button | START |
+| **WALK** | Walk on by itself, the bezel steering, until it is pressed again or a menu opens |
+| **MORE**, or the back button | The ring of actions |
+
+| The ring | |
+| --- | --- |
+| **MENU** | START: the menu (save, rest, options) |
+| **JUMP**, **READY**, **CAST** | Jump; ready or put away the weapon; cast the selected spell |
+| **SNEAK** | Sneak on and off ("SNEAK" shows while on) |
+| **VIEW** | First or third person |
+| **LOOK** | A slide looks instead of walking ("LOOK" shows while on) |
+| **SCREEN** | The bottom screen: the HUD's inventory, magic, map and stats buttons |
+
+A tap outside the ring's actions, or the back button, closes it. On a phone a second finger's slide looks while the
+first walks.
 
 | On the bottom screen | |
 | --- | --- |
 | A finger | The stylus |
-| **B**, **=**, **A** | The console's B, START and A |
-| The bezel | The D-pad's up and down |
+| **BACK**, **MENU**, **OK** | The console's B, START and A |
+| The bezel | The menus' highlight up and down (a list's row, an item grid's row; **OK** chooses it) and a text pane's scroll |
 | The back button | B |
 
-The buttons press what the button layout chosen in Options has those actions on (Xbox by default). A paired gamepad is
-the console's buttons where Nintendo puts them (A on the right), its sticks the Circle Pad and the C-stick.
+The actions press what the button layout chosen in Options has them on (Xbox by default). A paired gamepad is the
+console's buttons where Nintendo puts them (A on the right), its sticks the Circle Pad and the C-stick.
 
 ## Installing
 
@@ -94,7 +106,8 @@ The release build is signed with the key `android/keystore.properties` names (st
 keyPassword; gitignored), as the release workflow writes it; without one it stops. `MW3DS_VERSION` is its version
 (0.0.0-dev otherwise) and `MW3DS_RELEASE_BUILD=1` turns its updater on.
 
-It needs `ANDROID_HOME` (the SDK, platform 35), `ANDROID_NDK_HOME` (NDK 27), JDK 17, CMake, Ninja and git, on Linux;
+A development build is an app of its own, `net.fractumseraph.morrowind.dev` ("Morrowind dev"), so it installs beside a
+release's without touching it (with its own game data). It needs `ANDROID_HOME` (the SDK, platform 35), `ANDROID_NDK_HOME` (NDK 27), JDK 17, CMake, Ninja and git, on Linux;
 it downloads SDL3, Mbed TLS and zlib (pinned) into `build/android` once. The APK is signed with the machine's debug key.
 
 ## What it does not do yet

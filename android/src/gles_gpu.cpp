@@ -1395,6 +1395,40 @@ void glesText(const char* s, float cx, float cy, float px, u32 color)
 						}
 }
 
+void glesLabel(const char* s, float cx, float cy, float h, u32 color)
+{
+	C3D_Tex* font = systemFont();
+	if (!font)
+	{
+		glesText(s, cx, cy, h / 7.0f, color);
+		return;
+	}
+	batchFor(nullptr, font, true);
+	int n = (int)strlen(s);
+	// (each character in its cell of the system font's, kGlyphW x kGlyphH, the line's height h)
+	float cw = h * kGlyphW / kGlyphH, x = cx - n * cw / 2.0f, y0 = cy - h / 2.0f, y1 = cy + h / 2.0f;
+	for (const u8* p = (const u8*)s; *p; p++, x += cw)
+	{
+		int c = *p;
+		if (c <= ' ' || c > 126)
+			continue;
+		int at = c - 32;
+		float u0 = (float)(at % kGlyphColumns) / kGlyphColumns, u1 = u0 + 1.0f / kGlyphColumns;
+		float v0 = 1.0f - (float)(at / kGlyphColumns) / kGlyphRows, v1 = v0 - 1.0f / kGlyphRows;
+		Vertex2D q[6] = { { x, y0, 0, 0, 0, 0, u0, v0, 1 }, { x + cw, y0, 0, 0, 0, 0, u1, v0, 1 },
+			{ x, y1, 0, 0, 0, 0, u0, v1, 1 }, { x + cw, y0, 0, 0, 0, 0, u1, v0, 1 }, { x + cw, y1, 0, 0, 0, 0, u1, v1, 1 },
+			{ x, y1, 0, 0, 0, 0, u0, v1, 1 } };
+		for (auto& v : q)
+		{
+			v.r = (color & 255) / 255.0f;
+			v.g = ((color >> 8) & 255) / 255.0f;
+			v.b = ((color >> 16) & 255) / 255.0f;
+			v.a = (color >> 24) / 255.0f;
+		}
+		s_batch.insert(s_batch.end(), q, q + 6);
+	}
+}
+
 // ---- screenshots: not on the watch (the console's SHOT; the PC build's world map bake)
 
 bool screenshotSave(const char*) { return false; }

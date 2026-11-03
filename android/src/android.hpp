@@ -28,3 +28,6 @@ void androidAudioStart();
 // line of 5 x 7 letters (capitals, '=', '^', 'v') px pixels to a dot, centred on (cx, cy). Colours 0xAABBGGRR
 void glesDisc(float cx, float cy, float r, u32 color, float inner);
 void glesText(const char* s, float cx, float cy, float px, u32 color);
+// A line of words in the watch's own typeface (the system font's, MorrowindActivity.renderGlyphs), h pixels tall,
+// centred on (cx, cy); glesText's letters when there is none
+void glesLabel(const char* s, float cx, float cy, float h, u32 color);
