@@ -6,6 +6,8 @@ import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Typeface;
 import android.os.Bundle;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
 import android.text.InputType;
 import android.view.InputDevice;
 import android.view.KeyEvent;
@@ -81,6 +83,14 @@ public class MorrowindActivity extends SDLActivity {
             return true;
         }
         return super.dispatchKeyEvent(event);
+    }
+
+    /** A short buzz for a press of the watch's controls (android_input.cpp), from the game's thread */
+    public static void buzz(int milliseconds) {
+        MorrowindActivity activity = instance;
+        Vibrator vibrator = activity != null ? activity.getSystemService(Vibrator.class) : null;
+        if (vibrator != null && vibrator.hasVibrator())
+            vibrator.vibrate(VibrationEffect.createOneShot(milliseconds, VibrationEffect.DEFAULT_AMPLITUDE));
     }
 
     /**
