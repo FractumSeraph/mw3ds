@@ -45,6 +45,8 @@ public class MorrowindActivity extends SDLActivity {
         } catch (UnsatisfiedLinkError e) {
             // (SDL's libraries did not load: SDLActivity shows why)
         }
+        // a new version looked for while the game starts (a release's build only)
+        Updater.start(this);
     }
 
     /** a watch's turning bezel or crown (clockwise is negative, as Wear OS scrolls a list down for it) */

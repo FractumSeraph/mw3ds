@@ -37,3 +37,4 @@ tools/test/cases/scratch/
 # the Android build's Gradle files (android/; its outputs go to build/android)
 .gradle/
 local.properties
+keystore.properties

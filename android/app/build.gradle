@@ -7,6 +7,36 @@ plugins {
 def staged = new File(rootDir, "../build/android")
 layout.buildDirectory = new File(staged, "gradle/app")
 
+// The version: a release's (MW3DS_VERSION, its tag without "mp-": 0.4.0, from .github/workflows/release.yml), else a
+// development build's. Only a release's build (MW3DS_RELEASE_BUILD) looks for updates (Updater.java). versionCode is
+// major * 10000 + minor * 100 + patch, so each release's is higher than the one before and installs over it
+def appVersion = System.getenv("MW3DS_VERSION") ?: "0.0.0-dev"
+def releaseBuild = System.getenv("MW3DS_RELEASE_BUILD") == "1"
+def appVersionCode = {
+    def found = (appVersion =~ /^(\d+)\.(\d+)\.(\d+)/)
+    if (!found)
+        throw new GradleException("the version ${appVersion} does not start with major.minor.patch")
+    def parts = (1..3).collect { found[0][it].toInteger() }
+    if (parts[1] > 99 || parts[2] > 99)
+        throw new GradleException("the version ${appVersion}: minor and patch must be below 100 for versionCode")
+    return Math.max(1, parts[0] * 10000 + parts[1] * 100 + parts[2])
+}()
+
+// FractumSeraph's signing key, as FractumSeraph/OpenCE's apps are signed: keystore.properties beside settings.gradle
+// (android/; gitignored, never committed) with storeFile, storePassword, keyAlias and keyPassword, written by the
+// release workflow from the repository's secrets. Without it the release build is unsigned and the debug build has
+// the machine's debug key; Android installs an update only with the same key as the app it replaces
+def keystore = new Properties()
+def keystoreFile = rootProject.file("keystore.properties")
+if (keystoreFile.exists()) {
+    keystoreFile.withInputStream { keystore.load(it) }
+    for (name in ["storeFile", "storePassword", "keyAlias", "keyPassword"]) {
+        if (!keystore[name])
+            throw new GradleException("keystore.properties has no ${name}")
+    }
+}
+def signed = keystore["storeFile"] != null
+
 android {
     // FractumMorrowind, as the 3DS build is called: installs beside nothing else
     namespace "net.fractumseraph.morrowind"
@@ -16,8 +46,9 @@ android {
         applicationId "net.fractumseraph.morrowind"
         minSdk 28
         targetSdk 35
-        versionCode 1
-        versionName "0.1-wear"
+        versionCode appVersionCode
+        versionName appVersion
+        buildConfigField "boolean", "MW3DS_RELEASE_BUILD", "${releaseBuild}"
         ndk {
             abiFilters "armeabi-v7a"
         }
@@ -36,13 +67,30 @@ android {
         }
     }
 
+    buildFeatures {
+        buildConfig true
+    }
+
+    signingConfigs {
+        if (signed) {
+            fractum {
+                storeFile rootProject.file(keystore["storeFile"])
+                storePassword keystore["storePassword"]
+                keyAlias keystore["keyAlias"]
+                keyPassword keystore["keyPassword"]
+            }
+        }
+    }
+
     buildTypes {
         debug {
             debuggable true
             minifyEnabled false
+            if (signed) signingConfig signingConfigs.fractum
         }
         release {
             minifyEnabled false
+            signingConfig signed ? signingConfigs.fractum : null
         }
     }
 

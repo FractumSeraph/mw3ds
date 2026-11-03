@@ -9,7 +9,8 @@ name: Release
 # The fork (FractumSeraph/mw3ds) tags its releases mp-X.Y.Z. Its releases also carry what the 3DS's self-updater
 # (source/mwmp/selfupdate.cpp) downloads, the program alone, never anything of Morrowind's: FractumMorrowind.cia (the
 # CIA without data, which downloads its game data at its first start), FractumMorrowind.3dsx and update.json (the
-# version and the data format it needs). GitHub lists each file's SHA-256, which the console checks.
+# version and the data format it needs), and FractumMorrowind-android.apk, the Android app (the android job), which updates
+# itself the same way. GitHub lists each file's SHA-256, which the console and the app check.
 
 on:
   push:
@@ -132,6 +133,65 @@ jobs:
           gh release view "$TAG" > /dev/null 2>&1 || gh release create "$TAG" --draft --title "$title" --notes-file build/release-notes.md
           gh release upload "$TAG" --clobber build/release/MW3DS-Converter-*.zip "engine/mw3ds-${TAG}-debug.elf" \
             build/FractumMorrowind.cia build/FractumMorrowind.3dsx build/update.json
+
+  # The Android app (android/: Wear OS watches, phones), release-built and signed with FractumSeraph's key from the
+  # repository's secrets (ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD:
+  # the same key as FractumSeraph/OpenCE's apps), onto the draft release as FractumMorrowind-android.apk. Once the
+  # release is published, the app's updater (android/app/.../Updater.java) installs it over the one before; Android
+  # installs it only with the same key, so a release is never made without it
+  android:
+    needs: converter
+    if: github.repository_owner == 'FractumSeraph'
+    runs-on: ubuntu-latest
+    env:
+      NDK_VERSION: "27.2.12479018"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: The NDK, the SDK's platform, Ninja
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" "platforms;android-35" > /dev/null
+          sudo apt-get install -y -q ninja-build > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+      - name: Signing key
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE" ]; then
+            echo "::error::no ANDROID_KEYSTORE_BASE64 secret: the app can't be signed, so it is not released"
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/android.keystore"
+          umask 077
+          {
+            echo "storeFile=$RUNNER_TEMP/android.keystore"
+            echo "storePassword=$STORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > android/keystore.properties
+      - name: Build the release app
+        env:
+          MW3DS_RELEASE_BUILD: "1"
+        run: MW3DS_VERSION="${TAG#mp-}" python android/build.py --release
+      # (the key gone from the runner before anything else runs)
+      - name: Forget the signing key
+        if: always()
+        run: rm -f android/keystore.properties "$RUNNER_TEMP/android.keystore"
+      - name: Onto the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" --clobber build/android/FractumMorrowind-android.apk
 
   # The same converter as an image for Linux and the Steam Deck (podman), with the engine built above
   # (tools/release/build_image.py, Dockerfile). It is pushed with the version's tag only; image-latest.yml moves

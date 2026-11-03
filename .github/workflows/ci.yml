@@ -107,6 +107,27 @@ jobs:
       - name: Build the engine
         run: make -j"$(nproc)"
 
+  android-build:
+    # The Android app (android/build.py), debug-signed with the runner's own key: it compiles and packages
+    runs-on: ubuntu-latest
+    env:
+      NDK_VERSION: "27.2.12479018"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: The NDK, the SDK's platform, Ninja
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" "platforms;android-35" > /dev/null
+          sudo apt-get install -y -q ninja-build > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+      - run: python android/build.py
+
   native-build:
     # The engine for the PC (what the native test runs use): compiles only, there is no game data here.
     runs-on: ubuntu-latest

@@ -46,11 +46,16 @@ the console's buttons where Nintendo puts them (A on the right), its sticks the 
 
 ## Installing
 
-Install the APK (with wireless debugging on: Settings > Developer options):
+Each release from FractumMorrowind 0.4 on carries the app, `FractumMorrowind-android.apk`, signed with FractumSeraph's
+key. Install it with wireless debugging on (Settings > Developer options):
 
 ```sh
-adb install FractumMorrowind-debug.apk
+adb install FractumMorrowind-android.apk
 ```
+
+A development build (`FractumMorrowind-debug.apk`, signed with the machine's own key) does not install over a release's,
+nor a release's over it: uninstall the other first (`adb uninstall net.fractumseraph.morrowind`), which deletes its game
+data and saves.
 
 At its first start, with Wi-Fi on, the game downloads its data as the 3DS build does (`mwmp/datadownload.cpp`):
 Morrowind, Tribunal and Bloodmoon converted for the New 3DS, 1.4 GB in 42 parts from halomaps.fractumseraph.net, a few
@@ -62,12 +67,32 @@ saves, settings and `log.txt` are beside it in `.../files/3ds/mw3ds`. The game's
 Copying the data with adb instead works too, but a watch drops wireless debugging during a long copy. Let the app make
 its folder first (start it once): one adb makes belongs to the shell, and the game can't write in it.
 
+## Updates
+
+A release's app looks for a newer release when the game starts, as the 3DS build does (`mwmp/selfupdate.cpp`: the
+same releases, GitHub's latest). When there is one, it asks: **Update** downloads the new app, checks it against the
+size and SHA-256 GitHub lists for it and hands it to Android's package installer, which asks to confirm (the first time,
+also to allow FractumMorrowind to install apps), replaces the game and starts it again; the game data and saves stay.
+**Not now** asks again at the next start, **Never** makes `3ds/mw3ds/update_off`, the 3DS build's switch too (delete it
+to be asked again). `Updater.java` and `UpdateReceiver.java` are the updater; the game's own updater, which would fetch
+the 3DS's program, is off on Android.
+
+The release workflow (`.github/workflows/release.yml`, the android job) builds the app from the release's tag
+(`mp-0.4.0`: version 0.4.0, versionCode 400) and signs it with the repository's secrets `ANDROID_KEYSTORE_BASE64`,
+`ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`, the same key as FractumSeraph/OpenCE's apps.
+Without them it releases no app: an unsigned one can't be installed, and one signed with any other key can't update.
+
 ## Building
 
 ```sh
 python android/build.py              # build/android/FractumMorrowind-debug.apk
+python android/build.py --release    # build/android/FractumMorrowind-android.apk, the release build
 python android/build.py --no-apk     # only the native libraries (build/android/jniLibs)
 ```
+
+The release build is signed with the key `android/keystore.properties` names (storeFile, storePassword, keyAlias,
+keyPassword; gitignored), as the release workflow writes it; without one it stops. `MW3DS_VERSION` is its version
+(0.0.0-dev otherwise) and `MW3DS_RELEASE_BUILD=1` turns its updater on.
 
 It needs `ANDROID_HOME` (the SDK, platform 35), `ANDROID_NDK_HOME` (NDK 27), JDK 17, CMake, Ninja and git, on Linux;
 it downloads SDL3, Mbed TLS and zlib (pinned) into `build/android` once. The APK is signed with the machine's debug key.
@@ -75,6 +100,4 @@ it downloads SDL3, Mbed TLS and zlib (pinned) into `build/android` once. The APK
 ## What it does not do yet
 
 - The streaming thread: cells load on the game's thread, as the native test build has it (a pause at a cell's edge).
-- The console's updater (it would fetch the 3DS's program): the app is updated by installing a new APK.
 - Movies, gyro aim, the 3D slider, screenshots.
-- Updates: the app is not in the releases yet.

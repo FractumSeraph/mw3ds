@@ -4,6 +4,8 @@ stand-ins (tools/test/native/stub, native_stubs.cpp) and this build's display, i
 Gradle (android/app).
 
     python android/build.py              # build/android/FractumMorrowind-debug.apk (rebuilds what changed)
+    python android/build.py --release    # build/android/FractumMorrowind-android.apk, the release build (signed with
+                                         # android/keystore.properties' key; MW3DS_VERSION: its version)
     python android/build.py --no-apk     # only the native libraries (build/android/jniLibs)
 
 Needs ANDROID_HOME (the SDK, with platform 35) and ANDROID_NDK_HOME (NDK 27), JDK 17, CMake, Ninja and git. SDL3, Mbed TLS
@@ -131,6 +133,9 @@ def compile_one(src, obj, kind):
         # the POSIX bits, libctru's fonts; this build's own files are plain)
         if kind == "game":
             cmd += ["-include", str(NATIVE / "stub" / "native_compat.h")]
+        # (the version, as the console's Makefile gives it: MW3DS_VERSION, a release's tag)
+        if src.name == "selfupdate.cpp" and os.environ.get("MW3DS_VERSION"):
+            cmd += [f'-DMW3DS_VERSION_TEXT="{os.environ["MW3DS_VERSION"]}"']
     r = subprocess.run([*cmd, "-c", str(src), "-o", str(obj)], capture_output=True, text=True)
     return None if r.returncode == 0 else f"{src}:\n{r.stderr[:4000]}"
 
@@ -174,11 +179,17 @@ def build_native():
     print("built", lib)
 
 
-def build_apk():
+def build_apk(release):
     gradle = [str(HERE / "gradlew.bat")] if os.name == "nt" else ["sh", str(HERE / "gradlew")]
-    subprocess.run([*gradle, "--console=plain", "-q", "assembleDebug"], cwd=HERE, check=True)
-    apk = BUILD / "gradle" / "app" / "outputs" / "apk" / "debug" / "app-debug.apk"
-    out = BUILD / "FractumMorrowind-debug.apk"
+    kind = "release" if release else "debug"
+    subprocess.run([*gradle, "--console=plain", "-q", "assembleRelease" if release else "assembleDebug"], cwd=HERE,
+                   check=True)
+    outputs = BUILD / "gradle" / "app" / "outputs" / "apk" / kind
+    apk = outputs / f"app-{kind}.apk"
+    if release and not apk.exists():
+        sys.exit("build.py: the release app is unsigned (app-release-unsigned.apk): android/keystore.properties names "
+                 "no key")
+    out = BUILD / ("FractumMorrowind-android.apk" if release else "FractumMorrowind-debug.apk")
     shutil.copy2(apk, out)
     print("built", out)
 
@@ -186,4 +197,4 @@ def build_apk():
 if __name__ == "__main__":
     build_native()
     if "--no-apk" not in sys.argv:
-        build_apk()
+        build_apk("--release" in sys.argv)
