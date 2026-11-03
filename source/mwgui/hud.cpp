@@ -516,7 +516,8 @@ void Session::drawHud()
 #ifdef MW3DS_ANDROID
 		// (a watch's: its weapon out, a tap strikes and a held finger winds up; CAST is in the ring, android/README.md)
 		(void)xbox;
-		std::string hint = w.stats.selectedSpell.empty() ? std::string("Tap strikes, hold winds up")
+		std::string hint = w.stats.selectedSpell.empty() ? std::string(weaponDrawn ? "Tap strikes, hold winds up"
+			: "Tap talks, opens, takes")
 			: "Cast (MORE, CAST): " + w.game.spells[w.stats.selectedSpell].name;
 #else
 		std::string hint = w.stats.selectedSpell.empty() ? (xbox ? "R: attack (hold to wind up)" : "X: attack (hold to wind up)")
