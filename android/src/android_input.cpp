@@ -706,6 +706,24 @@ void androidDrawOverlay(int ww, int wh)
 	}
 	if (s_view != VIEW_TOP)
 		return;
+	// Health, magicka and fatigue round the circle's edge beside the world, as a watch face's rings: health up the left
+	// side, magicka up the right, fatigue along the bottom right; each filled from its foot by its share, a dim track
+	// for the rest, and health red-bright while low (the 3DS shows them on the bottom screen)
+	if (!s_ring && g_mainFrames != 0)
+	{
+		float outer = g.r * 0.985f, inner = g.r * 0.935f;
+		struct Bar { float from, to; u32 color; };
+		static const Bar kBars[3] = { { 205, 155, 0xE03030D0 }, { 335, 385, 0xE0D06030 }, { 292, 330, 0xE040B040 } };
+		for (int i = 0; i < 3; i++)
+		{
+			const Bar& b = kBars[i];
+			float share = std::clamp(g_playerBars[i], 0.0f, 1.0f);
+			u32 color = i == 0 && share < 0.25f ? 0xF04040FF : b.color;
+			glesArc(g.cx, g.cy, outer, inner, b.from, b.to, 0x50808080);
+			if (share > 0.0f)
+				glesArc(g.cx, g.cy, outer, inner, b.from, b.from + (b.to - b.from) * share, color);
+		}
+	}
 	// what is on, in words beside the ring's button: sneaking, looking
 	if (!s_ring)
 	{

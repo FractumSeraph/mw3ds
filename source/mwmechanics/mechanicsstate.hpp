@@ -7,6 +7,9 @@
 
 // The player's weapon (or fists) is out, as this frame left it (the Android build's controls: a tap strikes then)
 extern bool g_weaponOut;
+// The player's health, magicka and fatigue as shares of their most (0..1), as this frame left them: the Android build
+// draws them round a watch's circle beside the world (android/src/android_input.cpp)
+extern float g_playerBars[3];
 
 struct MechanicsState
 {

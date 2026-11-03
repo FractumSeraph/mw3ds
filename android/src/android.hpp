@@ -29,6 +29,8 @@ void androidAudioStart();
 // Drawing on the display itself, in its pixels (gles_gpu.cpp): a disc (with inner > 0, a ring from inner to r) and a
 // line of 5 x 7 letters (capitals, '=', '^', 'v') px pixels to a dot, centred on (cx, cy). Colours 0xAABBGGRR
 void glesDisc(float cx, float cy, float r, u32 color, float inner);
+// An arc of a ring from inner to r, from degree a0 to a1 (anticlockwise from the right, as the buttons are placed)
+void glesArc(float cx, float cy, float r, float inner, float a0, float a1, u32 color);
 void glesText(const char* s, float cx, float cy, float px, u32 color);
 // A line of words in the watch's own typeface (the system font's, MorrowindActivity.renderGlyphs), h pixels tall,
 // centred on (cx, cy); glesText's letters when there is none
